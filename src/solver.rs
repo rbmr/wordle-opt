@@ -238,11 +238,13 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
     fn min_guess_val(&mut self, set: &[usize], guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
         self.metrics.guesses_evaluated.fetch_add(1, Ordering::Relaxed);
         let mut counts = [0u16; 243];
+        let mut non_empty_indices = [0u8; 243];
         let mut num_non_empty = 0;
         
         for &c in set {
             let r = self.matrix.get(guess, c).0 as usize;
             if counts[r] == 0 {
+                non_empty_indices[num_non_empty] = r as u8;
                 num_non_empty += 1;
             }
             counts[r] += 1;
@@ -255,11 +257,12 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         let mut cost = set.len() as u32;
         let mut p_lbs = [0u32; 243];
         
-        for r_idx in 0..243 {
-            let p_len = counts[r_idx] as u32;
-            if p_len == 0 || r_idx == Response::WIN.0 as usize {
+        for i in 0..num_non_empty {
+            let r_idx = non_empty_indices[i] as usize;
+            if r_idx == Response::WIN.0 as usize {
                 continue;
             }
+            let p_len = counts[r_idx] as u32;
             let lb = heuristic::capacity_bound(p_len as usize, self.max_k);
             cost += lb;
             p_lbs[r_idx] = lb;
@@ -285,9 +288,10 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             current_offsets[r_idx] += 1;
         }
 
-        for r_idx in 0..243 {
+        for i in 0..num_non_empty {
+            let r_idx = non_empty_indices[i] as usize;
             let p_len = counts[r_idx] as usize;
-            if p_len == 0 || r_idx == Response::WIN.0 as usize {
+            if r_idx == Response::WIN.0 as usize {
                 continue;
             }
             if p_len <= 2 {
