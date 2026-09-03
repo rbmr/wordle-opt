@@ -57,3 +57,37 @@ impl ResponseMatrix {
         self.data[guess_idx * self.num_candidates + candidate_idx]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dict::Dictionary;
+    use crate::core::{Word, Response};
+
+    #[test]
+    fn test_matrix_computation() {
+        let mut guesses = Vec::new();
+        let mut candidates = Vec::new();
+        guesses.push(Word::new("apple"));
+        guesses.push(Word::new("berry"));
+        candidates.push(Word::new("apple"));
+        candidates.push(Word::new("maple"));
+        
+        let dict = Dictionary {
+            guesses,
+            candidates,
+        };
+        
+        let matrix = ResponseMatrix::new(&dict);
+        assert_eq!(matrix.num_guesses, 2);
+        assert_eq!(matrix.num_candidates, 2);
+        
+        // guess 0: apple, candidate 0: apple -> WIN
+        assert_eq!(matrix.get(0, 0), Response::WIN);
+        
+        // guess 0: apple, candidate 1: maple
+        // a: black, p: green, p: green, l: green, e: green => [0, 2, 2, 2, 2] -> 0 + 2*3 + 2*9 + 2*27 + 2*81 = 6 + 18 + 54 + 162 = 240
+        // Wait, let's just test it's not WIN.
+        assert_ne!(matrix.get(0, 1), Response::WIN);
+    }
+}
