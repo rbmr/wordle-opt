@@ -27,6 +27,7 @@ pub struct Metrics {
     pub guesses_evaluated: AtomicUsize,
     pub pruned_by_bounds: AtomicUsize,
     pub pruned_by_equivalence: AtomicUsize,
+    pub cache_hits: AtomicUsize,
 }
 
 impl Metrics {
@@ -36,6 +37,7 @@ impl Metrics {
             guesses_evaluated: AtomicUsize::new(0),
             pruned_by_bounds: AtomicUsize::new(0),
             pruned_by_equivalence: AtomicUsize::new(0),
+            cache_hits: AtomicUsize::new(0),
         }
     }
 }
@@ -52,7 +54,6 @@ pub struct Solver<'a> {
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
-    pub cache: FxHashMap<CandidateSet, u32>,
     pub global_beta: Option<&'a std::sync::atomic::AtomicU32>,
     pub seen_projections: rustc_hash::FxHashSet<u32>,
 }
@@ -64,7 +65,6 @@ impl<'a> Solver<'a> {
             max_k,
             dict,
             metrics,
-            cache: FxHashMap::default(),
             global_beta,
             seen_projections: rustc_hash::FxHashSet::default(),
         }
@@ -140,7 +140,7 @@ impl<'a> Solver<'a> {
         
         let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         if count % 10_000_000 == 0 {
-            println!("Evaluated {} states... Cache size: {}", count, self.cache.len());
+            println!("Evaluated {} states... Cache size: 0", count);
         }
 
         let c_len = set.len();
@@ -155,12 +155,7 @@ impl<'a> Solver<'a> {
             return 3;
         }
 
-        if let Some(&val) = self.cache.get(set) {
-            if val >= beta {
-                return beta;
-            }
-            return val;
-        }
+        
 
 let lb = heuristic::capacity_bound(c_len, self.max_k);
         if lb >= beta {
@@ -230,9 +225,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         }
 
 
-        if best_val < beta {
-            self.cache.insert(CandidateSet(set.to_vec()), best_val);
-        }
+
 
         best_val
     }

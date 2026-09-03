@@ -13,10 +13,10 @@ use std::fs::OpenOptions;
 use std::io::Write;
 
 fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
-    println!("{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<10}", 
-        "Size", "Cost", "Time(s)", "States Eval", "Guesses Eval", "Bounds Pruned", "Equiv Pruned");
-    println!("{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<10}", 
-        "", "", "", "", "", "", "");
+    println!("{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<10} | {:<10}", 
+        "Size", "Cost", "Time(s)", "States Eval", "Guesses Eval", "Bounds Pruned", "Equiv Pruned", "Cache Hits");
+    println!("{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<10}-+-{:-<10}", 
+        "", "", "", "", "", "", "", "");
         
     let mut file = OpenOptions::new()
         .create(true)
@@ -25,8 +25,8 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         .expect("Cannot open benchmark_history.md");
         
     writeln!(file, "## Benchmark Run: {:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap();
-    writeln!(file, "| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned |").unwrap();
-    writeln!(file, "|------|------|---------|--------|---------|----------|----------|").unwrap();
+    writeln!(file, "| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |").unwrap();
+    writeln!(file, "|------|------|---------|--------|---------|----------|----------|------------|").unwrap();
 
     for &s in sizes {
         let size = s.min(dict.candidates.len());
@@ -42,11 +42,12 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         let guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
         let bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
         let equiv = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+        let chits = metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
         
-        println!("{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<10}", 
-            size, cost, secs, states, guesses, bounds, equiv);
+        println!("{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<10} | {:<10}", 
+            size, cost, secs, states, guesses, bounds, equiv, chits);
             
-        writeln!(file, "| {} | {} | {:.3} | {} | {} | {} | {} |", size, cost, secs, states, guesses, bounds, equiv).unwrap();
+        writeln!(file, "| {} | {} | {:.3} | {} | {} | {} | {} | {} |", size, cost, secs, states, guesses, bounds, equiv, chits).unwrap();
     }
     writeln!(file, "").unwrap();
 }
@@ -95,11 +96,13 @@ fn main() {
         let guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
         let bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
         let equiv = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+        let chits = metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
         
         println!("States evaluated: {}", states);
         println!("Guesses evaluated: {}", guesses);
         println!("Pruned by bounds: {}", bounds);
         println!("Pruned by equivalence: {}", equiv);
+        println!("Cache Hits: {}", chits);
         println!("Nodes / sec: {:.0}", (states + guesses) as f64 / duration.as_secs_f64());
     }
 }
