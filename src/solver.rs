@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 use crate::matrix::ResponseMatrix;
 use crate::core::Response;
 use crate::heuristic;
@@ -21,16 +23,53 @@ impl<'a> Solver<'a> {
         }
     }
 
-    pub fn solve(&mut self, initial_candidates: &[usize]) -> u32 {
-        let mut guesses: Vec<usize> = (0..self.matrix.num_guesses).collect();
-        heuristic::sort_guesses_by_expected_remaining(self.matrix, initial_candidates, &mut guesses);
+    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize]) -> u32 {
+        let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
+        
+        let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
+        heuristic::sort_guesses_by_expected_remaining(matrix, initial_candidates, &mut guesses);
         
         let set = CandidateSet(initial_candidates.to_vec());
         
-        // Initial upper bound (heuristic cost)
-        let beta = u32::MAX; // We can improve this by simulating the heuristic first
+        let beta = AtomicU32::new(u32::MAX);
         
-        self.min_state_val(&set, &guesses, beta)
+        // Filter active guesses
+        let mut active_guesses = Vec::with_capacity(guesses.len());
+        for &g in &guesses {
+            let mut first_r = None;
+            let mut useless = true;
+            for &c in &set.0 {
+                let r = matrix.get(g, c);
+                if first_r.is_none() {
+                    first_r = Some(r);
+                } else if first_r != Some(r) {
+                    useless = false;
+                    break;
+                }
+            }
+            if !useless || set.0.contains(&g) {
+                active_guesses.push(g);
+            }
+        }
+        
+        heuristic::sort_guesses_by_expected_remaining(matrix, &set.0, &mut active_guesses);
+
+        active_guesses.par_iter().for_each(|&g| {
+            let current_beta = beta.load(Ordering::Relaxed);
+            let mut solver = Solver::new(matrix, max_k);
+            let val = solver.min_guess_val(&set, g, &active_guesses, current_beta);
+            
+            // atomic min
+            let mut current = beta.load(Ordering::Relaxed);
+            while val < current {
+                match beta.compare_exchange_weak(current, val, Ordering::Relaxed, Ordering::Relaxed) {
+                    Ok(_) => break,
+                    Err(new_current) => current = new_current,
+                }
+            }
+        });
+        
+        beta.load(Ordering::Relaxed)
     }
 
     fn min_state_val(&mut self, set: &CandidateSet, allowed_guesses: &[usize], beta: u32) -> u32 {

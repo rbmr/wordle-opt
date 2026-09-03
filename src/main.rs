@@ -23,15 +23,10 @@ fn main() {
     let subset_size = dict.candidates.len();
     let initial_candidates: Vec<usize> = (0..subset_size).collect();
     println!("Solving for {} candidates...", subset_size);
-    let max_k = heuristic::compute_max_branching_factor(&matrix, &initial_candidates);
-    println!("Max branching factor: {}", max_k);
-    let mut solver = Solver::new(&matrix, max_k);
-    
     let start = Instant::now();
-    let cost = solver.solve(&initial_candidates);
+    let cost = Solver::solve(&matrix, &initial_candidates);
     let duration = start.elapsed();
     
     println!("Total cost: {}, Expected guesses: {:.4}", cost, cost as f64 / subset_size as f64);
     println!("Solved in {:?}", duration);
-    println!("Cache size: {}", solver.cache.len());
 }
