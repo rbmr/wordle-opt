@@ -161,52 +161,63 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         // In deeper layers we want to only iterate allowed_guesses, but we also want to sort them.
         // For performance, we sort top N guesses, or just filter useless guesses.
         // Let's filter out useless guesses and sort the remaining.
-        let mut active_guesses = Vec::with_capacity(allowed_guesses.len());
-        
+        let mut active_tuples = Vec::with_capacity(allowed_guesses.len());
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
         }
         
         let mut seen_projections = rustc_hash::FxHashSet::default();
-                let mut equiv_pruned = 0;
+        let mut equiv_pruned = 0;
 
         for &g in allowed_guesses {
-            // A guess is useless if it doesn't partition `set`
-            let mut first_r = None;
-            let mut useless = true;
+            let mut proj = 0u32;
+            for i in 0..5 {
+                let letter = self.dict.guesses[g].0[i] - b'a';
+                if (c_mask & (1 << letter)) != 0 {
+                    proj |= ((letter as u32) + 1) << (i * 5);
+                }
+            }
+            
+            if !seen_projections.insert(proj) {
+                equiv_pruned += 1;
+                continue;
+            }
+
+            let mut counts = [0u16; 243];
+            let mut num_non_empty = 0;
             for &c in set {
-                let r = self.matrix.get(g, c);
-                if first_r.is_none() {
-                    first_r = Some(r);
-                } else if first_r != Some(r) {
-                    useless = false;
-                    break;
+                let r = self.matrix.get(g, c).0 as usize;
+                if counts[r] == 0 {
+                    num_non_empty += 1;
+                }
+                counts[r] += 1;
+            }
+
+            let useless = num_non_empty == 1 && !set.contains(&g);
+            if useless {
+                continue;
+            }
+
+            let mut expected_rem = 0u32;
+            for &count in &counts {
+                if count > 0 {
+                    expected_rem += (count as u32) * (count as u32);
                 }
             }
-            if !useless || set.contains(&g) {
-                let mut proj = 0u32;
-                for i in 0..5 {
-                    let letter = self.dict.guesses[g].0[i] - b'a';
-                    if (c_mask & (1 << letter)) != 0 {
-                        proj |= ((letter as u32) + 1) << (i * 5);
-                    }
-                }
-                if seen_projections.insert(proj) {
-                    active_guesses.push(g);
-                } else {
-                    equiv_pruned += 1;
-                }
-            }
+
+            active_tuples.push((g, expected_rem));
         }
         
-        // Sort active guesses
         self.metrics.pruned_by_equivalence.fetch_add(equiv_pruned, Ordering::Relaxed);
-        heuristic::sort_guesses_by_expected_remaining(self.matrix, set, &mut active_guesses);
+        active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
 
+        
+        let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
         for &g in &active_guesses {
             best_val = self.min_guess_val(set, g, &active_guesses, best_val);
         }
+
 
         if best_val < beta {
             self.cache.insert(CandidateSet(set.to_vec()), best_val);
