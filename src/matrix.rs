@@ -1,6 +1,10 @@
 use crate::core::Response;
 use crate::dict::Dictionary;
 
+/// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
+/// 
+/// The matrix is flattened into a 1D vector and stored in row-major order: `guess * num_candidates + candidate`.
+/// This layout guarantees $O(1)$ lookup time and maximizes L1 CPU cache locality during inner solver loops.
 pub struct ResponseMatrix {
     pub num_guesses: usize,
     pub num_candidates: usize,

@@ -9,12 +9,24 @@ use crate::matrix::ResponseMatrix;
 use crate::solver::{Solver, Metrics};
 use std::time::Instant;
 use std::env;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     println!("{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<10}", 
         "Size", "Cost", "Time(s)", "States Eval", "Guesses Eval", "Bounds Pruned", "Equiv Pruned");
     println!("{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<10}", 
         "", "", "", "", "", "", "");
+        
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("benchmark_history.md")
+        .expect("Cannot open benchmark_history.md");
+        
+    writeln!(file, "## Benchmark Run: {:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap();
+    writeln!(file, "| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned |").unwrap();
+    writeln!(file, "|------|------|---------|--------|---------|----------|----------|").unwrap();
 
     for &s in sizes {
         let size = s.min(dict.candidates.len());
@@ -33,7 +45,10 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         
         println!("{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<10}", 
             size, cost, secs, states, guesses, bounds, equiv);
+            
+        writeln!(file, "| {} | {} | {:.3} | {} | {} | {} | {} |", size, cost, secs, states, guesses, bounds, equiv).unwrap();
     }
+    writeln!(file, "").unwrap();
 }
 
 fn main() {

@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use crate::core::Word;
 
+/// Represents a loaded Wordle dictionary containing valid guesses and possible secret candidates.
+/// Both vectors are deduplicated and sorted to enable deterministic subset caching.
 pub struct Dictionary {
     pub guesses: Vec<Word>,
     pub candidates: Vec<Word>,
