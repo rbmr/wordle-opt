@@ -4,7 +4,6 @@ static EVAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 use crate::matrix::ResponseMatrix;
 use crate::core::Response;
 use crate::heuristic;
-use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -59,6 +58,81 @@ pub struct Solver<'a> {
 }
 
 impl<'a> Solver<'a> {
+
+    pub fn greedy_solve(matrix: &ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, set: &[usize], metrics: &'a Metrics) -> u32 {
+        if set.len() <= 2 {
+            return (set.len() * (set.len() + 1) / 2) as u32;
+        }
+
+        let mut active_tuples = Vec::with_capacity(dict.guesses.len());
+        let mut c_mask = 0u32;
+        for &c in set {
+            c_mask |= matrix.candidate_masks[c];
+        }
+
+        let mut seen_projections = rustc_hash::FxHashSet::default();
+        for g in 0..dict.guesses.len() {
+            let mut proj = 0u32;
+            for i in 0..5 {
+                let letter = dict.guesses[g].0[i] - b'a';
+                if (c_mask & (1 << letter)) != 0 {
+                    proj |= ((letter as u32) + 1) << (i * 5);
+                }
+            }
+            if !seen_projections.insert(proj) {
+                continue;
+            }
+
+            let mut counts = [0u16; 243];
+            let mut num_non_empty = 0;
+            for &c in set {
+                let r = matrix.get(g, c).0 as usize;
+                if counts[r] == 0 {
+                    num_non_empty += 1;
+                }
+                counts[r] += 1;
+            }
+
+            let useless = num_non_empty == 1 && !set.contains(&g);
+            if useless { continue; }
+
+            let mut expected_rem = 0u32;
+            for &count in &counts {
+                if count > 0 {
+                    expected_rem += (count as u32) * (count as u32);
+                }
+            }
+            active_tuples.push((g, expected_rem));
+        }
+
+        active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
+        if active_tuples.is_empty() {
+            return u32::MAX; // Should not happen
+        }
+
+        let best_guess = active_tuples[0].0;
+        
+        let mut counts = [0u16; 243];
+        for &c in set {
+            counts[matrix.get(best_guess, c).0 as usize] += 1;
+        }
+
+        let mut cost = set.len() as u32;
+        for r_idx in 0..243 {
+            let p_len = counts[r_idx] as usize;
+            if p_len == 0 || r_idx == crate::core::Response::WIN.0 as usize {
+                continue;
+            }
+            let mut subset = Vec::with_capacity(p_len);
+            for &c in set {
+                if matrix.get(best_guess, c).0 as usize == r_idx {
+                    subset.push(c);
+                }
+            }
+            cost += Self::greedy_solve(matrix, max_k, dict, &subset, metrics);
+        }
+        cost
+    }
     pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, metrics: &'a Metrics, global_beta: Option<&'a AtomicU32>) -> Self {
         Self {
             matrix,
