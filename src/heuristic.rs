@@ -41,6 +41,11 @@ pub fn compute_max_branching_factor(matrix: &crate::matrix::ResponseMatrix, cand
     max_k
 }
 
+/// Computes the absolute minimum total cost to solve a subset of size `n`
+/// assuming a maximum branching factor `k`.
+///
+/// This mathematically models the exact capacity of a uniform tree with degree `k-1`
+/// (since 1 branch is reserved for the 'WIN' response).
 pub fn capacity_bound(n: usize, k: usize) -> u32 {
     if n == 0 { return 0; }
     if n == 1 { return 1; }
@@ -59,4 +64,17 @@ pub fn capacity_bound(n: usize, k: usize) -> u32 {
         capacity_at_depth = capacity_at_depth.saturating_mul(k as u32 - 1);
     }
     cost
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_capacity_bound() {
+        assert_eq!(capacity_bound(1, 3), 1);
+        assert_eq!(capacity_bound(2, 3), 3); // 1 win at depth 1, 1 at depth 2 (cost 1 + 2)
+        assert_eq!(capacity_bound(3, 3), 5); // 1 at depth 1, 2 at depth 2 (cost 1 + 2 + 2)
+        assert_eq!(capacity_bound(4, 3), 8); // 1 at depth 1, 2 at depth 2, 1 at depth 3 (cost 1+4+3)
+    }
 }

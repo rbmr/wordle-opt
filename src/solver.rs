@@ -15,6 +15,13 @@ impl std::borrow::Borrow<[usize]> for CandidateSet {
     }
 }
 
+/// The optimal Wordle solver using Branch and Bound.
+///
+/// Implements aggressive search space pruning through:
+/// - Exact Capacity Lower Bounds
+/// - Expected Remaining Candidate Heuristics
+/// - Equivalence Class Guess Projections
+/// - `FxHashMap` based subtree memoization
 pub struct Solver<'a> {
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
@@ -32,6 +39,10 @@ impl<'a> Solver<'a> {
         }
     }
 
+    /// Solves the given candidate subset to minimize the total expected guesses.
+    ///
+    /// Evaluates all initial guesses in parallel using Rayon, sharing the global
+    /// best upper bound (`beta`) atomically for heavy cross-thread pruning.
     pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary) -> u32 {
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
         
