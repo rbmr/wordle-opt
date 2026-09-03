@@ -323,6 +323,9 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             return beta;
         }
 
+        // Evaluate largest buckets first to trigger Alpha-Beta cutoffs earlier
+        non_empty_indices[0..num_non_empty].sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
+
         let mut cost = set.len() as u32;
         let mut p_lbs = [0u32; 243];
         
