@@ -1,5 +1,5 @@
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use crate::matrix::ResponseMatrix;
 use crate::core::Response;
 use crate::heuristic;
@@ -31,7 +31,10 @@ impl<'a> Solver<'a> {
         
         let set = CandidateSet(initial_candidates.to_vec());
         
+        
         let beta = AtomicU32::new(u32::MAX);
+        let progress = AtomicUsize::new(0);
+        
         
         // Filter active guesses
         let mut active_guesses = Vec::with_capacity(guesses.len());
@@ -53,12 +56,14 @@ impl<'a> Solver<'a> {
         }
         
         heuristic::sort_guesses_by_expected_remaining(matrix, &set.0, &mut active_guesses);
+        let total_active = active_guesses.len();
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
             let mut solver = Solver::new(matrix, max_k);
             let val = solver.min_guess_val(&set, g, &active_guesses, current_beta);
             
+
             // atomic min
             let mut current = beta.load(Ordering::Relaxed);
             while val < current {
@@ -67,6 +72,9 @@ impl<'a> Solver<'a> {
                     Err(new_current) => current = new_current,
                 }
             }
+            let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
+            println!("Progress: {}/{} root guesses evaluated. Current best bound: {}", done, total_active, beta.load(Ordering::Relaxed));
+
         });
         
         beta.load(Ordering::Relaxed)
