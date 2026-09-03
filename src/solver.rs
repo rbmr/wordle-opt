@@ -54,6 +54,7 @@ pub struct Solver<'a> {
     pub dict: &'a crate::dict::Dictionary,
     pub cache: FxHashMap<CandidateSet, u32>,
     pub global_beta: Option<&'a std::sync::atomic::AtomicU32>,
+    pub seen_projections: rustc_hash::FxHashSet<u32>,
 }
 
 impl<'a> Solver<'a> {
@@ -65,6 +66,7 @@ impl<'a> Solver<'a> {
             metrics,
             cache: FxHashMap::default(),
             global_beta,
+            seen_projections: rustc_hash::FxHashSet::default(),
         }
     }
 
@@ -176,7 +178,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             c_mask |= self.matrix.candidate_masks[c];
         }
         
-        let mut seen_projections = rustc_hash::FxHashSet::default();
+        self.seen_projections.clear();
         let mut equiv_pruned = 0;
 
         for &g in allowed_guesses {
@@ -188,7 +190,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
                 }
             }
             
-            if !seen_projections.insert(proj) {
+            if !self.seen_projections.insert(proj) {
                 equiv_pruned += 1;
                 continue;
             }
