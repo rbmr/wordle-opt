@@ -20,10 +20,12 @@ fn main() {
     let duration = start.elapsed();
     println!("Computed matrix of size {}x{} in {:?}", matrix.num_guesses, matrix.num_candidates, duration);
 
-    let subset_size = 100; // Let's try 100 now
+    let subset_size = dict.candidates.len();
     let initial_candidates: Vec<usize> = (0..subset_size).collect();
     println!("Solving for {} candidates...", subset_size);
-    let mut solver = Solver::new(&matrix);
+    let max_k = heuristic::compute_max_branching_factor(&matrix, &initial_candidates);
+    println!("Max branching factor: {}", max_k);
+    let mut solver = Solver::new(&matrix, max_k);
     
     let start = Instant::now();
     let cost = solver.solve(&initial_candidates);

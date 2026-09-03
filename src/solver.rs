@@ -1,21 +1,23 @@
 use crate::matrix::ResponseMatrix;
 use crate::core::Response;
 use crate::heuristic;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
 
 pub struct Solver<'a> {
+    pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
-    pub cache: HashMap<CandidateSet, u32>,
+    pub cache: FxHashMap<CandidateSet, u32>,
 }
 
 impl<'a> Solver<'a> {
-    pub fn new(matrix: &'a ResponseMatrix) -> Self {
+    pub fn new(matrix: &'a ResponseMatrix, max_k: usize) -> Self {
         Self {
             matrix,
-            cache: HashMap::new(),
+            max_k,
+            cache: FxHashMap::default(),
         }
     }
 
@@ -50,8 +52,14 @@ impl<'a> Solver<'a> {
             return val;
         }
 
-        let lb2 = (2 * c_len as u32).saturating_sub(1);
-        if lb2 >= beta {
+let lb2 = (2 * c_len as u32).saturating_sub(1);
+        let lb3 = if c_len > self.max_k {
+            (3 * c_len as u32).saturating_sub(self.max_k as u32 + 1)
+        } else {
+            0
+        };
+        let lb = lb2.max(lb3);
+        if lb >= beta {
             return beta;
         }
 
@@ -94,25 +102,29 @@ impl<'a> Solver<'a> {
     }
 
     fn min_guess_val(&mut self, set: &CandidateSet, guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
-        let mut partitions = vec![Vec::new(); 243];
+        let mut counts = [0u16; 243];
+        let mut num_non_empty = 0;
+        
         for &c in &set.0 {
-            let r = self.matrix.get(guess, c);
-            partitions[r.0 as usize].push(c);
+            let r = self.matrix.get(guess, c).0 as usize;
+            if counts[r] == 0 {
+                num_non_empty += 1;
+            }
+            counts[r] += 1;
+        }
+
+        if num_non_empty == 1 {
+            return beta;
         }
 
         let mut cost = set.0.len() as u32;
-        let mut p_lbs = Vec::with_capacity(243);
+        let mut p_lbs = [0u32; 243];
         
-        for (r_idx, p) in partitions.iter().enumerate() {
-            if p.is_empty() {
-                p_lbs.push(0);
+        for r_idx in 0..243 {
+            let p_len = counts[r_idx] as u32;
+            if p_len == 0 || r_idx == Response::WIN.0 as usize {
                 continue;
             }
-            if r_idx == Response::WIN.0 as usize {
-                p_lbs.push(0);
-                continue;
-            }
-            let p_len = p.len() as u32;
             let lb = if p_len == 1 {
                 1
             } else if p_len == 2 {
@@ -121,14 +133,28 @@ impl<'a> Solver<'a> {
                 (2 * p_len).saturating_sub(1)
             };
             cost += lb;
-            p_lbs.push(lb);
+            p_lbs[r_idx] = lb;
         }
 
         if cost >= beta {
             return beta;
         }
 
-        for (r_idx, p) in partitions.iter().enumerate() {
+        // Now we actually need the partitions, so we construct them.
+        let mut partitions: [Vec<usize>; 243] = std::array::from_fn(|_| Vec::new());
+        // Preallocate capacity
+        for r_idx in 0..243 {
+            if counts[r_idx] > 0 {
+                partitions[r_idx].reserve_exact(counts[r_idx] as usize);
+            }
+        }
+        for &c in &set.0 {
+            let r = self.matrix.get(guess, c).0 as usize;
+            partitions[r].push(c);
+        }
+
+        for r_idx in 0..243 {
+            let p = &partitions[r_idx];
             if p.is_empty() || r_idx == Response::WIN.0 as usize {
                 continue;
             }
