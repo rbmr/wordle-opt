@@ -32,7 +32,7 @@ fn main() {
     let initial_candidates: Vec<usize> = (0..subset_size).collect();
     println!("Solving for {} candidates...", subset_size);
     let start = Instant::now();
-    let cost = Solver::solve(&matrix, &initial_candidates);
+    let cost = Solver::solve(&matrix, &initial_candidates, &dict);
     let duration = start.elapsed();
     
     println!("Total cost: {}, Expected guesses: {:.4}", cost, cost as f64 / subset_size as f64);

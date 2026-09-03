@@ -12,19 +12,21 @@ pub struct CandidateSet(pub Vec<usize>);
 pub struct Solver<'a> {
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
+    pub dict: &'a crate::dict::Dictionary,
     pub cache: FxHashMap<CandidateSet, u32>,
 }
 
 impl<'a> Solver<'a> {
-    pub fn new(matrix: &'a ResponseMatrix, max_k: usize) -> Self {
+    pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary) -> Self {
         Self {
             matrix,
             max_k,
+            dict,
             cache: FxHashMap::default(),
         }
     }
 
-    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize]) -> u32 {
+    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary) -> u32 {
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
         
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
@@ -61,7 +63,7 @@ impl<'a> Solver<'a> {
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k);
+            let mut solver = Solver::new(matrix, max_k, dict);
             let val = solver.min_guess_val(&set, g, &active_guesses, current_beta);
             
 
@@ -118,6 +120,14 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         // For performance, we sort top N guesses, or just filter useless guesses.
         // Let's filter out useless guesses and sort the remaining.
         let mut active_guesses = Vec::with_capacity(allowed_guesses.len());
+        
+        let mut c_mask = 0u32;
+        for &c in &set.0 {
+            c_mask |= self.matrix.candidate_masks[c];
+        }
+        
+        let mut seen_projections = rustc_hash::FxHashSet::default();
+
         for &g in allowed_guesses {
             // A guess is useless if it doesn't partition `set`
             let mut first_r = None;
@@ -132,7 +142,16 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
                 }
             }
             if !useless || set.0.contains(&g) {
-                active_guesses.push(g);
+                let mut proj = 0u32;
+                for i in 0..5 {
+                    let letter = self.dict.guesses[g].0[i] - b'a';
+                    if (c_mask & (1 << letter)) != 0 {
+                        proj |= ((letter as u32) + 1) << (i * 5);
+                    }
+                }
+                if seen_projections.insert(proj) {
+                    active_guesses.push(g);
+                }
             }
         }
         
