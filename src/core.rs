@@ -54,3 +54,7 @@ impl Response {
         Response::new(r[0], r[1], r[2], r[3], r[4])
     }
 }
+
+#[cfg(test)]
+#[path = "core_test.rs"]
+mod tests;
