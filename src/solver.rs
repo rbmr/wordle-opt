@@ -148,7 +148,7 @@ impl<'a> Solver<'a> {
     ///
     /// Evaluates all initial guesses in parallel using Rayon, sharing the global
     /// best upper bound (`beta`) atomically for heavy cross-thread pruning.
-    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary, metrics: &Metrics) -> u32 {
+    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary, metrics: &'a Metrics) -> u32 {
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
         
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
@@ -157,7 +157,8 @@ impl<'a> Solver<'a> {
         let set = initial_candidates;
         
         
-        let beta = AtomicU32::new(u32::MAX);
+        let initial_greedy_cost = Self::greedy_solve(matrix, max_k, dict, initial_candidates, metrics);
+        let beta = AtomicU32::new(initial_greedy_cost);
         
         
         // Filter active guesses
