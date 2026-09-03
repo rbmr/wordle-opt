@@ -1,5 +1,6 @@
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+static EVAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 use crate::matrix::ResponseMatrix;
 use crate::core::Response;
 use crate::heuristic;
@@ -81,7 +82,14 @@ impl<'a> Solver<'a> {
     }
 
     fn min_state_val(&mut self, set: &CandidateSet, allowed_guesses: &[usize], beta: u32) -> u32 {
+        
+        let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if count % 10_000_000 == 0 {
+            println!("Evaluated {} states... Cache size: {}", count, self.cache.len());
+        }
+
         let c_len = set.0.len();
+
         if c_len == 0 {
             return 0;
         }
@@ -99,13 +107,7 @@ impl<'a> Solver<'a> {
             return val;
         }
 
-let lb2 = (2 * c_len as u32).saturating_sub(1);
-        let lb3 = if c_len > self.max_k {
-            (3 * c_len as u32).saturating_sub(self.max_k as u32 + 1)
-        } else {
-            0
-        };
-        let lb = lb2.max(lb3);
+let lb = heuristic::capacity_bound(c_len, self.max_k);
         if lb >= beta {
             return beta;
         }
@@ -172,13 +174,7 @@ let lb2 = (2 * c_len as u32).saturating_sub(1);
             if p_len == 0 || r_idx == Response::WIN.0 as usize {
                 continue;
             }
-            let lb = if p_len == 1 {
-                1
-            } else if p_len == 2 {
-                3
-            } else {
-                (2 * p_len).saturating_sub(1)
-            };
+            let lb = heuristic::capacity_bound(p_len as usize, self.max_k);
             cost += lb;
             p_lbs[r_idx] = lb;
         }

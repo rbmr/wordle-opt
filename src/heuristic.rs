@@ -40,3 +40,23 @@ pub fn compute_max_branching_factor(matrix: &crate::matrix::ResponseMatrix, cand
     }
     max_k
 }
+
+pub fn capacity_bound(n: usize, k: usize) -> u32 {
+    if n == 0 { return 0; }
+    if n == 1 { return 1; }
+    if n == 2 { return 3; }
+    
+    let mut remaining = n as u32;
+    let mut cost = 0;
+    let mut depth = 1;
+    let mut capacity_at_depth = 1u32;
+    
+    while remaining > 0 {
+        let take = remaining.min(capacity_at_depth);
+        cost += take * depth;
+        remaining -= take;
+        depth += 1;
+        capacity_at_depth = capacity_at_depth.saturating_mul(k as u32 - 1);
+    }
+    cost
+}
