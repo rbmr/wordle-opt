@@ -6,35 +6,85 @@ pub mod solver;
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
-use crate::solver::Solver;
+use crate::solver::{Solver, Metrics};
 use std::time::Instant;
 use std::env;
 
+fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
+    println!("{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<10}", 
+        "Size", "Cost", "Time(s)", "States Eval", "Guesses Eval", "Bounds Pruned", "Equiv Pruned");
+    println!("{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<10}", 
+        "", "", "", "", "", "", "");
+
+    for &s in sizes {
+        let size = s.min(dict.candidates.len());
+        let initial_candidates: Vec<usize> = (0..size).collect();
+        let metrics = Metrics::new();
+        
+        let start = Instant::now();
+        let cost = Solver::solve(matrix, &initial_candidates, dict, &metrics);
+        let duration = start.elapsed();
+        let secs = duration.as_secs_f64();
+        
+        let states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+        let guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+        let bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
+        let equiv = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+        
+        println!("{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<10}", 
+            size, cost, secs, states, guesses, bounds, equiv);
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let subset_size = if args.len() > 1 {
-        args[1].parse::<usize>().unwrap_or(50)
+    let is_benchmark = args.len() > 1 && args[1] == "benchmark";
+    
+    let subset_size = if !is_benchmark {
+        if args.len() > 1 {
+            args[1].parse::<usize>().unwrap_or(50)
+        } else {
+            50
+        }
     } else {
-        50
+        0
     };
 
     println!("Loading dictionary...");
     let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
     println!("Loaded {} guesses and {} candidates.", dict.guesses.len(), dict.candidates.len());
     
-    let subset_size = subset_size.min(dict.candidates.len());
     println!("Computing response matrix...");
     let start = Instant::now();
     let matrix = ResponseMatrix::new(&dict);
     let duration = start.elapsed();
     println!("Computed matrix of size {}x{} in {:?}", matrix.num_guesses, matrix.num_candidates, duration);
 
-    let initial_candidates: Vec<usize> = (0..subset_size).collect();
-    println!("Solving for {} candidates...", subset_size);
-    let start = Instant::now();
-    let cost = Solver::solve(&matrix, &initial_candidates, &dict);
-    let duration = start.elapsed();
-    
-    println!("Total cost: {}, Expected guesses: {:.4}", cost, cost as f64 / subset_size as f64);
-    println!("Solved in {:?}", duration);
+    if is_benchmark {
+        let sizes = vec![10, 20, 50, 100, 150, 200];
+        run_benchmark(&matrix, &dict, &sizes);
+    } else {
+        let size = subset_size.min(dict.candidates.len());
+        let initial_candidates: Vec<usize> = (0..size).collect();
+        let metrics = Metrics::new();
+        
+        println!("Solving for {} candidates...", size);
+        let start = Instant::now();
+        let cost = Solver::solve(&matrix, &initial_candidates, &dict, &metrics);
+        let duration = start.elapsed();
+        
+        println!("Total cost: {}, Expected guesses: {:.4}", cost, cost as f64 / size as f64);
+        println!("Solved in {:?}", duration);
+        
+        let states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+        let guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+        let bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
+        let equiv = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+        
+        println!("States evaluated: {}", states);
+        println!("Guesses evaluated: {}", guesses);
+        println!("Pruned by bounds: {}", bounds);
+        println!("Pruned by equivalence: {}", equiv);
+        println!("Nodes / sec: {:.0}", (states + guesses) as f64 / duration.as_secs_f64());
+    }
 }

@@ -22,7 +22,33 @@ impl std::borrow::Borrow<[usize]> for CandidateSet {
 /// - Expected Remaining Candidate Heuristics
 /// - Equivalence Class Guess Projections
 /// - `FxHashMap` based subtree memoization
+pub struct Metrics {
+    pub states_evaluated: AtomicUsize,
+    pub guesses_evaluated: AtomicUsize,
+    pub pruned_by_bounds: AtomicUsize,
+    pub pruned_by_equivalence: AtomicUsize,
+}
+
+impl Metrics {
+    pub fn new() -> Self {
+        Self {
+            states_evaluated: AtomicUsize::new(0),
+            guesses_evaluated: AtomicUsize::new(0),
+            pruned_by_bounds: AtomicUsize::new(0),
+            pruned_by_equivalence: AtomicUsize::new(0),
+        }
+    }
+}
+
+/// The optimal Wordle solver using Branch and Bound.
+///
+/// Implements aggressive search space pruning through:
+/// - Exact Capacity Lower Bounds
+/// - Expected Remaining Candidate Heuristics
+/// - Equivalence Class Guess Projections
+/// - `FxHashMap` based subtree memoization
 pub struct Solver<'a> {
+    pub metrics: &'a Metrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
@@ -30,11 +56,12 @@ pub struct Solver<'a> {
 }
 
 impl<'a> Solver<'a> {
-    pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary) -> Self {
+    pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, metrics: &'a Metrics) -> Self {
         Self {
             matrix,
             max_k,
             dict,
+            metrics,
             cache: FxHashMap::default(),
         }
     }
@@ -43,7 +70,7 @@ impl<'a> Solver<'a> {
     ///
     /// Evaluates all initial guesses in parallel using Rayon, sharing the global
     /// best upper bound (`beta`) atomically for heavy cross-thread pruning.
-    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary) -> u32 {
+    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary, metrics: &Metrics) -> u32 {
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
         
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
@@ -53,7 +80,6 @@ impl<'a> Solver<'a> {
         
         
         let beta = AtomicU32::new(u32::MAX);
-        let progress = AtomicUsize::new(0);
         
         
         // Filter active guesses
@@ -76,11 +102,10 @@ impl<'a> Solver<'a> {
         }
         
         heuristic::sort_guesses_by_expected_remaining(matrix, set, &mut active_guesses);
-        let total_active = active_guesses.len();
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k, dict);
+            let mut solver = Solver::new(matrix, max_k, dict, metrics);
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta);
             
 
@@ -92,8 +117,7 @@ impl<'a> Solver<'a> {
                     Err(new_current) => current = new_current,
                 }
             }
-            let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            println!("Progress: {}/{} root guesses evaluated. Current best bound: {}", done, total_active, beta.load(Ordering::Relaxed));
+            
 
         });
         
@@ -101,6 +125,7 @@ impl<'a> Solver<'a> {
     }
 
     fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
+        self.metrics.states_evaluated.fetch_add(1, Ordering::Relaxed);
         
         let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         if count % 10_000_000 == 0 {
@@ -144,6 +169,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         }
         
         let mut seen_projections = rustc_hash::FxHashSet::default();
+                let mut equiv_pruned = 0;
 
         for &g in allowed_guesses {
             // A guess is useless if it doesn't partition `set`
@@ -168,11 +194,14 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
                 }
                 if seen_projections.insert(proj) {
                     active_guesses.push(g);
+                } else {
+                    equiv_pruned += 1;
                 }
             }
         }
         
         // Sort active guesses
+        self.metrics.pruned_by_equivalence.fetch_add(equiv_pruned, Ordering::Relaxed);
         heuristic::sort_guesses_by_expected_remaining(self.matrix, set, &mut active_guesses);
 
         for &g in &active_guesses {
@@ -187,6 +216,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
     }
 
     fn min_guess_val(&mut self, set: &[usize], guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
+        self.metrics.guesses_evaluated.fetch_add(1, Ordering::Relaxed);
         let mut counts = [0u16; 243];
         let mut num_non_empty = 0;
         
@@ -216,6 +246,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         }
 
         if cost >= beta {
+            self.metrics.pruned_by_bounds.fetch_add(1, Ordering::Relaxed);
             return beta;
         }
 
