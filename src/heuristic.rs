@@ -15,11 +15,11 @@ pub fn compute_expected_remaining(matrix: &ResponseMatrix, candidates: &[usize],
 }
 
 pub fn sort_guesses_by_expected_remaining(
-    matrix: &ResponseMatrix,
+    matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
     guesses: &mut [usize],
 ) {
-    guesses.sort_unstable_by_key(|&g| compute_expected_remaining(matrix, candidates, g));
+    guesses.sort_by_cached_key(|&g| compute_expected_remaining(matrix, candidates, g));
 }
 
 pub fn compute_max_branching_factor(matrix: &crate::matrix::ResponseMatrix, candidates: &[usize]) -> usize {
