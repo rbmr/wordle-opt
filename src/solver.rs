@@ -9,6 +9,12 @@ use rustc_hash::FxHashMap;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
 
+impl std::borrow::Borrow<[usize]> for CandidateSet {
+    fn borrow(&self) -> &[usize] {
+        &self.0
+    }
+}
+
 pub struct Solver<'a> {
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
@@ -32,7 +38,7 @@ impl<'a> Solver<'a> {
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
         heuristic::sort_guesses_by_expected_remaining(matrix, initial_candidates, &mut guesses);
         
-        let set = CandidateSet(initial_candidates.to_vec());
+        let set = initial_candidates;
         
         
         let beta = AtomicU32::new(u32::MAX);
@@ -44,7 +50,7 @@ impl<'a> Solver<'a> {
         for &g in &guesses {
             let mut first_r = None;
             let mut useless = true;
-            for &c in &set.0 {
+            for &c in set {
                 let r = matrix.get(g, c);
                 if first_r.is_none() {
                     first_r = Some(r);
@@ -53,18 +59,18 @@ impl<'a> Solver<'a> {
                     break;
                 }
             }
-            if !useless || set.0.contains(&g) {
+            if !useless || set.contains(&g) {
                 active_guesses.push(g);
             }
         }
         
-        heuristic::sort_guesses_by_expected_remaining(matrix, &set.0, &mut active_guesses);
+        heuristic::sort_guesses_by_expected_remaining(matrix, set, &mut active_guesses);
         let total_active = active_guesses.len();
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
             let mut solver = Solver::new(matrix, max_k, dict);
-            let val = solver.min_guess_val(&set, g, &active_guesses, current_beta);
+            let val = solver.min_guess_val(set, g, &active_guesses, current_beta);
             
 
             // atomic min
@@ -83,14 +89,14 @@ impl<'a> Solver<'a> {
         beta.load(Ordering::Relaxed)
     }
 
-    fn min_state_val(&mut self, set: &CandidateSet, allowed_guesses: &[usize], beta: u32) -> u32 {
+    fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
         
         let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         if count % 10_000_000 == 0 {
             println!("Evaluated {} states... Cache size: {}", count, self.cache.len());
         }
 
-        let c_len = set.0.len();
+        let c_len = set.len();
 
         if c_len == 0 {
             return 0;
@@ -122,7 +128,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         let mut active_guesses = Vec::with_capacity(allowed_guesses.len());
         
         let mut c_mask = 0u32;
-        for &c in &set.0 {
+        for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
         }
         
@@ -132,7 +138,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             // A guess is useless if it doesn't partition `set`
             let mut first_r = None;
             let mut useless = true;
-            for &c in &set.0 {
+            for &c in set {
                 let r = self.matrix.get(g, c);
                 if first_r.is_none() {
                     first_r = Some(r);
@@ -141,7 +147,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
                     break;
                 }
             }
-            if !useless || set.0.contains(&g) {
+            if !useless || set.contains(&g) {
                 let mut proj = 0u32;
                 for i in 0..5 {
                     let letter = self.dict.guesses[g].0[i] - b'a';
@@ -156,24 +162,24 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         }
         
         // Sort active guesses
-        heuristic::sort_guesses_by_expected_remaining(self.matrix, &set.0, &mut active_guesses);
+        heuristic::sort_guesses_by_expected_remaining(self.matrix, set, &mut active_guesses);
 
         for &g in &active_guesses {
             best_val = self.min_guess_val(set, g, &active_guesses, best_val);
         }
 
         if best_val < beta {
-            self.cache.insert(set.clone(), best_val);
+            self.cache.insert(CandidateSet(set.to_vec()), best_val);
         }
 
         best_val
     }
 
-    fn min_guess_val(&mut self, set: &CandidateSet, guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
+    fn min_guess_val(&mut self, set: &[usize], guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
         let mut counts = [0u16; 243];
         let mut num_non_empty = 0;
         
-        for &c in &set.0 {
+        for &c in set {
             let r = self.matrix.get(guess, c).0 as usize;
             if counts[r] == 0 {
                 num_non_empty += 1;
@@ -185,7 +191,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             return beta;
         }
 
-        let mut cost = set.0.len() as u32;
+        let mut cost = set.len() as u32;
         let mut p_lbs = [0u32; 243];
         
         for r_idx in 0..243 {
@@ -202,32 +208,38 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             return beta;
         }
 
-        // Now we actually need the partitions, so we construct them.
-        let mut partitions: [Vec<usize>; 243] = std::array::from_fn(|_| Vec::new());
-        // Preallocate capacity
+        // Fast slice partition using counting sort
+        let mut sorted_set = vec![0; set.len()];
+        let mut offsets = [0usize; 244];
         for r_idx in 0..243 {
-            if counts[r_idx] > 0 {
-                partitions[r_idx].reserve_exact(counts[r_idx] as usize);
-            }
+            offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
         }
-        for &c in &set.0 {
-            let r = self.matrix.get(guess, c).0 as usize;
-            partitions[r].push(c);
+        
+        let mut current_offsets = offsets;
+        for &c in set {
+            let r_idx = self.matrix.get(guess, c).0 as usize;
+            let pos = current_offsets[r_idx];
+            sorted_set[pos] = c;
+            current_offsets[r_idx] += 1;
         }
 
         for r_idx in 0..243 {
-            let p = &partitions[r_idx];
-            if p.is_empty() || r_idx == Response::WIN.0 as usize {
+            let p_len = counts[r_idx] as usize;
+            if p_len == 0 || r_idx == Response::WIN.0 as usize {
                 continue;
             }
-            if p.len() <= 2 {
+            if p_len <= 2 {
                 continue;
             }
+
+            let start = offsets[r_idx];
+            let end = start + p_len;
+            let p = &sorted_set[start..end];
 
             let b = cost - p_lbs[r_idx];
             let new_beta = beta - b;
             
-            let val = self.min_state_val(&CandidateSet(p.clone()), allowed_guesses, new_beta);
+            let val = self.min_state_val(p, allowed_guesses, new_beta);
             if b + val >= beta {
                 return beta;
             }
