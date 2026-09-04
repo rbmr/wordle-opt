@@ -106,7 +106,7 @@ impl<'a> Solver<'a> {
                 counts[r] += 1;
             }
 
-            let useless = num_non_empty == 1 && !set.contains(&g);
+            let useless = num_non_empty == 1;
             if useless {
                 continue;
             }
@@ -195,7 +195,7 @@ impl<'a> Solver<'a> {
                     break;
                 }
             }
-            if !useless || set.contains(&g) {
+            if !useless {
                 active_guesses.push(g);
             }
         }
@@ -297,7 +297,7 @@ impl<'a> Solver<'a> {
                 counts[r] += 1;
             }
 
-            let useless = num_non_empty == 1 && !set.contains(&g);
+            let useless = num_non_empty == 1;
             if useless {
                 continue;
             }
@@ -353,6 +353,7 @@ impl<'a> Solver<'a> {
             counts[r] += 1;
         }
 
+        assert!(num_non_empty <= self.max_k, "Subtree branching factor {} exceeded root max_k {}!", num_non_empty, self.max_k);
         if num_non_empty == 1 {
             return beta;
         }

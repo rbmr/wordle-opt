@@ -8,6 +8,7 @@ repository = "https://github.com/rbmr/wordle-opt"
 license = "MIT"
 
 [dependencies]
+fastrand = "2.0.0"
 rayon = "1.12.0"
 rustc-hash = "2.1.3"
 

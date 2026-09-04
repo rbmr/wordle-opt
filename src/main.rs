@@ -1,3 +1,5 @@
+pub mod verify;
+pub mod naive;
 pub mod core;
 pub mod dict;
 pub mod heuristic;
@@ -98,18 +100,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let is_benchmark = args.len() > 1 && args[1] == "benchmark";
-
-    let subset_size = if !is_benchmark {
-        if args.len() > 1 {
-            args[1].parse::<usize>().unwrap_or(50)
-        } else {
-            50
-        }
-    } else {
-        0
-    };
-
+    
     println!("Loading dictionary...");
     let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
     println!(
@@ -127,50 +118,13 @@ fn main() {
         matrix.num_guesses, matrix.num_candidates, duration
     );
 
-    if is_benchmark {
+    if args.len() > 1 && args[1] == "benchmark" {
         let sizes = vec![10, 20, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
         run_benchmark(&matrix, &dict, &sizes);
+    } else if args.len() > 1 && args[1] == "verify" {
+        verify::run_verification(&dict, &matrix, 10, 6);
+        verify::run_stress_test(&dict, &matrix);
     } else {
-        let size = subset_size.min(dict.candidates.len());
-        let initial_candidates: Vec<usize> = (0..size).collect();
-        let metrics = Metrics::new();
-
-        println!("Solving for {} candidates...", size);
-        let start = Instant::now();
-        let cost = Solver::solve(&matrix, &initial_candidates, &dict, &metrics);
-        let duration = start.elapsed();
-
-        println!(
-            "Total cost: {}, Expected guesses: {:.4}",
-            cost,
-            cost as f64 / size as f64
-        );
-        println!("Solved in {:?}", duration);
-
-        let states = metrics
-            .states_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let guesses = metrics
-            .guesses_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let bounds = metrics
-            .pruned_by_bounds
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let equiv = metrics
-            .pruned_by_equivalence
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let chits = metrics
-            .cache_hits
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        println!("States evaluated: {}", states);
-        println!("Guesses evaluated: {}", guesses);
-        println!("Pruned by bounds: {}", bounds);
-        println!("Pruned by equivalence: {}", equiv);
-        println!("Cache Hits: {}", chits);
-        println!(
-            "Nodes / sec: {:.0}",
-            (states + guesses) as f64 / duration.as_secs_f64()
-        );
+        println!("Please specify 'benchmark' or 'verify' as an argument.");
     }
 }
