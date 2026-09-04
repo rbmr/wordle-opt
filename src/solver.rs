@@ -354,7 +354,7 @@ impl<'a> Solver<'a> {
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
         
-        active_tuples.sort_unstable_by_key(|&(_, exp, lb)| (lb, exp));
+        active_tuples.sort_unstable_by_key(|&(_, exp, _)| exp);
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
         if local_lb >= beta {
