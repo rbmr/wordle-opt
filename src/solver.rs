@@ -246,6 +246,14 @@ impl<'a> Solver<'a> {
     /// To maximize alpha-beta pruning, guesses are first evaluated heuristically and sorted
     /// by their expected capacity. We also aggressively prune symmetrically equivalent guesses
     /// using a bitwise projection filter `seen_projections`.
+    /// Evaluates the minimum expected cost of the entire state given a set of candidates.
+    ///
+    /// This function acts as the `Max` node in the Min-Max tree (maximizing our efficiency/
+    /// minimizing the expected cost). It uses several heavy optimization techniques:
+    /// 1. **Transposition Table (Cache)**: Caches deep identical subtrees using a lock-free thread-local Zobrist hash.
+    /// 2. **Alpha-Beta Bounds Pruning**: Uses `global_lb` and dynamically computes `local_lb` to instantly prune search if the mathematical optimum is reached.
+    /// 3. **Young Brothers Wait Concept (YBWC)**: For `depth == 1`, evaluates the most promising root guess sequentially to establish a strict bound, then evaluates the rest in parallel using Rayon.
+    /// 4. **Equivalence Class Projection**: Skips identical guesses using a bitwise character projection and an O(1) generation array.
     fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32, depth: usize) -> u32 {
         self.metrics.max_depth.fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
 
