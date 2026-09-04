@@ -1,4 +1,4 @@
-use rand::seq::SliceRandom;
+
 pub mod core;
 pub mod dict;
 pub mod heuristic;
@@ -16,7 +16,7 @@ use std::io::Write;
 use std::time::Instant;
 
 fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
-    use rand::seq::SliceRandom;
+    
     let mut rng = rand::rng();
 
     println!(
