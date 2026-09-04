@@ -215,28 +215,108 @@ impl<'a> Solver<'a> {
             capacity_bounds.push(heuristic::capacity_bound(i, max_k));
         }
 
-        active_guesses.par_iter().for_each(|&g| {
-            let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(
-                matrix,
-                max_k,
-                dict,
-                metrics,
-                &capacity_bounds,
-                &global_cache,
-            );
-            let val = solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
+        if !active_guesses.is_empty() {
+            let first_g = active_guesses[0];
 
-            // atomic min
-            let mut current = beta.load(Ordering::Relaxed);
-            while val < current {
-                match beta.compare_exchange_weak(current, val, Ordering::Relaxed, Ordering::Relaxed)
-                {
-                    Ok(_) => break,
-                    Err(new_current) => current = new_current,
+            // To prevent 7 cores from sitting idle while evaluating the massive first guess,
+            // we parallelize its buckets! Since this is the best guess, it's very unlikely to be pruned,
+            // so we don't lose much alpha-beta efficiency by evaluating buckets in parallel.
+
+            let mut counts = [0u16; 243];
+            let mut non_empty_indices = [0u8; 243];
+            let mut num_non_empty = 0;
+
+            for &c in set {
+                let r_idx = matrix.get(first_g, c).0 as usize;
+                if counts[r_idx] == 0 {
+                    non_empty_indices[num_non_empty] = r_idx as u8;
+                    num_non_empty += 1;
                 }
+                counts[r_idx] += 1;
             }
-        });
+
+            let mut offsets = [0usize; 244];
+            for r_idx in 0..243 {
+                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+            }
+            let mut sorted_set = vec![0usize; set.len()];
+            let mut current_offsets = offsets;
+            for &c in set {
+                let r_idx = matrix.get(first_g, c).0 as usize;
+                let pos = current_offsets[r_idx];
+                sorted_set[pos] = c;
+                current_offsets[r_idx] += 1;
+            }
+
+            let mut bucket_tasks = Vec::new();
+            let mut base_cost = 0;
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                if r_idx == crate::core::Response::WIN.0 as usize {
+                    base_cost += 1;
+                    continue;
+                }
+                if p_len <= 2 {
+                    let lb = heuristic::capacity_bound(p_len, max_k);
+                    base_cost += lb;
+                    continue;
+                }
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                bucket_tasks.push(sorted_set[start..end].to_vec());
+            }
+
+            bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.len()));
+
+            let bucket_costs: u32 = bucket_tasks
+                .into_par_iter()
+                .map(|bucket| {
+                    let mut solver = Solver::new(
+                        matrix,
+                        max_k,
+                        dict,
+                        metrics,
+                        &capacity_bounds,
+                        &global_cache,
+                    );
+                    // For a bucket, the cost is evaluated via min_state_val.
+                    // We use a very loose beta since we evaluate in parallel.
+                    solver.min_state_val(&bucket, &active_guesses, initial_greedy_cost, 2)
+                })
+                .sum();
+
+            let val = base_cost + bucket_costs;
+            beta.fetch_min(val, Ordering::Relaxed);
+
+            // Now evaluate the remaining guesses in parallel with the tight beta
+            active_guesses[1..].par_iter().for_each(|&g| {
+                let current_beta = beta.load(Ordering::Relaxed);
+                let mut local_solver = Solver::new(
+                    matrix,
+                    max_k,
+                    dict,
+                    metrics,
+                    &capacity_bounds,
+                    &global_cache,
+                );
+                let val = local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
+
+                // atomic min
+                let mut current = beta.load(Ordering::Relaxed);
+                while val < current {
+                    match beta.compare_exchange_weak(
+                        current,
+                        val,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => current = actual,
+                    }
+                }
+            });
+        }
 
         beta.load(Ordering::Relaxed)
     }
@@ -533,4 +613,3 @@ impl<'a> Solver<'a> {
         cost
     }
 }
-
