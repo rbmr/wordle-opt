@@ -66,6 +66,9 @@ pub struct Solver<'a> {
 }
 
 impl<'a> Solver<'a> {
+    /// A fast, non-optimal greedy solver used exclusively to seed the initial `beta` upper bound.
+    /// It recursively selects the guess with the lowest Expected Remaining Candidates heuristic,
+    /// generating a highly efficient (though mathematically suboptimal) decision tree.
     pub fn greedy_solve(
         matrix: &ResponseMatrix,
         dict: &'a crate::dict::Dictionary,
