@@ -19,6 +19,25 @@ impl GlobalCache {
         if is_exact {
             packed |= 1 << 12;
         }
+
+        let old = self.entries[index].load(Ordering::Relaxed);
+        if old != 0 {
+            let old_hash51 = old >> 13;
+            if old_hash51 != hash51 {
+                // Different state: keep the one with the larger value (harder subtree)
+                let old_value = (old & 0xFFF) as u32;
+                if value < old_value {
+                    return;
+                }
+            } else {
+                // Same state: keep exact bound over upper bound
+                let old_exact = (old & (1 << 12)) != 0;
+                if old_exact && !is_exact {
+                    return;
+                }
+            }
+        }
+
         self.entries[index].store(packed, Ordering::Relaxed);
     }
 
@@ -27,7 +46,7 @@ impl GlobalCache {
         let index = (full_hash as usize) & (self.entries.len() - 1);
         let packed = self.entries[index].load(Ordering::Relaxed);
         let hash51 = full_hash >> 13;
-
+        
         if packed != 0 && (packed >> 13) == hash51 {
             let is_exact = (packed & (1 << 12)) != 0;
             let value = (packed & 0xFFF) as u32;
