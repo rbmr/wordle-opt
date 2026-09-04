@@ -208,7 +208,7 @@ impl<'a> Solver<'a> {
         beta.load(Ordering::Relaxed)
     }
 
-    fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], mut beta: u32) -> u32 {
+    fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
         self.metrics.states_evaluated.fetch_add(1, Ordering::Relaxed);
         
         if let Some(gb) = self.global_beta {
