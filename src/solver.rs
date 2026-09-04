@@ -249,12 +249,12 @@ impl<'a> Solver<'a> {
             }
 
             let mut bucket_tasks = Vec::new();
-            let mut base_cost = 0;
+            let mut base_cost = set.len() as u32;
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
                 if r_idx == crate::core::Response::WIN.0 as usize {
-                    base_cost += 1;
+                    
                     continue;
                 }
                 if p_len <= 2 {
