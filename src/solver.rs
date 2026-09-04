@@ -444,7 +444,7 @@ impl<'a> Solver<'a> {
                 let count = counts[r_idx];
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != crate::core::Response::WIN.0 as usize {
-                    lb_cost += crate::heuristic::capacity_bound(count as usize, self.max_k);
+                    lb_cost += self.capacity_bounds[count as usize];
                 }
             }
 
