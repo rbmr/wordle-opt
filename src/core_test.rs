@@ -55,4 +55,13 @@ mod tests {
         // r, e, n -> black
         assert_eq!(r3.0, 1 + 81);
     }
+
+    #[test]
+    fn test_compute_response_all_black() {
+        let secret = Word::new("apple");
+        let guess = Word::new("ghost");
+        let r = Response::compute(&secret, &guess);
+        // ghost against apple -> all black -> 0
+        assert_eq!(r.0, 0);
+    }
 }
