@@ -33,7 +33,7 @@ impl<'a> NaiveSolver<'a> {
 
         let mut best_val = beta;
         
-        let mut _evals = 0; for &g in allowed_guesses { _evals += 1; if _evals % 100 == 0 && set.len() == 6 { println!("Evaluated {} guesses at root, best_val = {}", _evals, best_val); }
+        for &g in allowed_guesses {
             let mut counts = [0u16; 243];
             let mut num_non_empty = 0;
             for &c in set {
