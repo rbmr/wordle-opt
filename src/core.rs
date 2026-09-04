@@ -9,8 +9,11 @@ impl Word {
         Word(bytes)
     }
 
-    pub fn to_string(&self) -> String {
-        String::from_utf8(self.0.to_vec()).unwrap()
+}
+
+impl std::fmt::Display for Word {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", std::str::from_utf8(&self.0).unwrap())
     }
 }
 
