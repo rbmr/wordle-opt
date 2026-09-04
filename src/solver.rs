@@ -260,6 +260,7 @@ impl<'a> Solver<'a> {
         }
 
         self.seen_projections.clear();
+        let mut local_max_k = 0;
         let mut equiv_pruned = 0;
 
         for &g in allowed_guesses {
@@ -291,6 +292,9 @@ impl<'a> Solver<'a> {
                 counts[r] += 1;
             }
 
+            if num_non_empty > local_max_k {
+                local_max_k = num_non_empty;
+            }
             let useless = num_non_empty == 1;
             if useless {
                 continue;
@@ -308,6 +312,11 @@ impl<'a> Solver<'a> {
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, Ordering::Relaxed);
         active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
+
+        let local_lb = heuristic::capacity_bound(c_len, local_max_k);
+        if local_lb >= beta {
+            return beta;
+        }
 
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
         for &g in &active_guesses {
