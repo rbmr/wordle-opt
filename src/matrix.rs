@@ -74,6 +74,7 @@ mod tests {
         candidates.push(Word::new("maple"));
         
         let dict = Dictionary {
+            guess_chars: guesses.iter().map(|w| [w.0[0]-b'a', w.0[1]-b'a', w.0[2]-b'a', w.0[3]-b'a', w.0[4]-b'a']).collect(),
             guesses,
             candidates,
         };

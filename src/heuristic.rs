@@ -78,3 +78,24 @@ mod tests {
         assert_eq!(capacity_bound(4, 3), 8); // 1 at depth 1, 2 at depth 2, 1 at depth 3 (cost 1+4+3)
     }
 }
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+
+    #[test]
+    fn test_capacity_bound_scaling() {
+        // Test edge cases
+        assert_eq!(capacity_bound(0, 100), 0);
+        assert_eq!(capacity_bound(1, 100), 1);
+        assert_eq!(capacity_bound(2, 100), 3);
+        
+        // Test tight branching (k=3)
+        // n=7: 1 at depth 1, 2 at depth 2 (cost 4), 4 at depth 3 (cost 12) -> total 17
+        assert_eq!(capacity_bound(7, 3), 1 + 4 + 12);
+        
+        // Test wide branching (k=100) for n=20
+        // 1 at depth 1, 19 at depth 2 -> 1 + 38 = 39
+        assert_eq!(capacity_bound(20, 100), 39);
+    }
+}
