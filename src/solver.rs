@@ -1,9 +1,9 @@
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 static EVAL_COUNT: AtomicUsize = AtomicUsize::new(0);
-use crate::matrix::ResponseMatrix;
 use crate::core::Response;
 use crate::heuristic;
+use crate::matrix::ResponseMatrix;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -63,8 +63,11 @@ pub struct Solver<'a> {
 }
 
 impl<'a> Solver<'a> {
-
-    pub fn greedy_solve(matrix: &ResponseMatrix, dict: &'a crate::dict::Dictionary, set: &[usize]) -> u32 {
+    pub fn greedy_solve(
+        matrix: &ResponseMatrix,
+        dict: &'a crate::dict::Dictionary,
+        set: &[usize],
+    ) -> u32 {
         if set.len() <= 2 {
             return (set.len() * (set.len() + 1) / 2) as u32;
         }
@@ -104,7 +107,9 @@ impl<'a> Solver<'a> {
             }
 
             let useless = num_non_empty == 1 && !set.contains(&g);
-            if useless { continue; }
+            if useless {
+                continue;
+            }
 
             let mut expected_rem = 0u32;
             for &count in &counts {
@@ -119,7 +124,7 @@ impl<'a> Solver<'a> {
         }
 
         let best_guess = active_tuples[0].0;
-        
+
         let mut counts = [0u16; 243];
         for &c in set {
             counts[matrix.get(best_guess, c).0 as usize] += 1;
@@ -141,7 +146,12 @@ impl<'a> Solver<'a> {
         }
         cost
     }
-    pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, metrics: &'a Metrics) -> Self {
+    pub fn new(
+        matrix: &'a ResponseMatrix,
+        max_k: usize,
+        dict: &'a crate::dict::Dictionary,
+        metrics: &'a Metrics,
+    ) -> Self {
         Self {
             matrix,
             max_k,
@@ -155,19 +165,22 @@ impl<'a> Solver<'a> {
     ///
     /// Evaluates all initial guesses in parallel using Rayon, sharing the global
     /// best upper bound (`beta`) atomically for heavy cross-thread pruning.
-    pub fn solve(matrix: &'a ResponseMatrix, initial_candidates: &[usize], dict: &'a crate::dict::Dictionary, metrics: &'a Metrics) -> u32 {
+    pub fn solve(
+        matrix: &'a ResponseMatrix,
+        initial_candidates: &[usize],
+        dict: &'a crate::dict::Dictionary,
+        metrics: &'a Metrics,
+    ) -> u32 {
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
-        
+
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
         heuristic::sort_guesses_by_expected_remaining(matrix, initial_candidates, &mut guesses);
-        
+
         let set = initial_candidates;
-        
-        
+
         let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
         let beta = AtomicU32::new(initial_greedy_cost);
-        
-        
+
         // Filter active guesses
         let mut active_guesses = Vec::with_capacity(guesses.len());
         for &g in &guesses {
@@ -186,41 +199,39 @@ impl<'a> Solver<'a> {
                 active_guesses.push(g);
             }
         }
-        
+
         heuristic::sort_guesses_by_expected_remaining(matrix, set, &mut active_guesses);
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
             let mut solver = Solver::new(matrix, max_k, dict, metrics);
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta);
-            
 
             // atomic min
             let mut current = beta.load(Ordering::Relaxed);
             while val < current {
-                match beta.compare_exchange_weak(current, val, Ordering::Relaxed, Ordering::Relaxed) {
+                match beta.compare_exchange_weak(current, val, Ordering::Relaxed, Ordering::Relaxed)
+                {
                     Ok(_) => break,
                     Err(new_current) => current = new_current,
                 }
             }
-            
-
         });
-        
+
         beta.load(Ordering::Relaxed)
     }
 
     /// Computes the minimum expected cost to solve a subset of candidates using ANY valid guess.
-    /// 
+    ///
     /// This function performs the top-level iteration over all available `allowed_guesses`.
     /// To maximize alpha-beta pruning, guesses are first evaluated heuristically and sorted
     /// by their expected capacity. We also aggressively prune symmetrically equivalent guesses
     /// using a bitwise projection filter `seen_projections`.
     fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
-        self.metrics.states_evaluated.fetch_add(1, Ordering::Relaxed);
-        
+        self.metrics
+            .states_evaluated
+            .fetch_add(1, Ordering::Relaxed);
 
-        
         let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         if count.is_multiple_of(10_000_000) {
             println!("Evaluated {} states... Cache size: 0", count);
@@ -238,15 +249,13 @@ impl<'a> Solver<'a> {
             return 3;
         }
 
-        
-
-let lb = heuristic::capacity_bound(c_len, self.max_k);
+        let lb = heuristic::capacity_bound(c_len, self.max_k);
         if lb >= beta {
             return beta;
         }
 
         let mut best_val = beta;
-        
+
         // In deeper layers we want to only iterate allowed_guesses, but we also want to sort them.
         // For performance, we sort top N guesses, or just filter useless guesses.
         // Let's filter out useless guesses and sort the remaining.
@@ -255,7 +264,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
         }
-        
+
         self.seen_projections.clear();
         let mut equiv_pruned = 0;
 
@@ -272,7 +281,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
             proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
             let l4 = chars[4] as u32;
             proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-            
+
             if !self.seen_projections.insert(proj) {
                 equiv_pruned += 1;
                 continue;
@@ -300,35 +309,41 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
 
             active_tuples.push((g, expected_rem));
         }
-        
-        self.metrics.pruned_by_equivalence.fetch_add(equiv_pruned, Ordering::Relaxed);
+
+        self.metrics
+            .pruned_by_equivalence
+            .fetch_add(equiv_pruned, Ordering::Relaxed);
         active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
 
-        
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
         for &g in &active_guesses {
             best_val = self.min_guess_val(set, g, &active_guesses, best_val);
         }
 
-
-
-
         best_val
     }
 
     /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
-    /// 
+    ///
     /// This mathematically partitions the candidates into up to 243 ternary response buckets.
     /// It recursively queries `min_state_val` on each sub-bucket. Alpha-beta pruning is applied
     /// at the bucket level: if the cumulative cost of resolved buckets plus the theoretical
     /// heuristic minimum cost of the remaining unresolved buckets exceeds `beta`, evaluation
     /// is immediately aborted.
-    fn min_guess_val(&mut self, set: &[usize], guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
-        self.metrics.guesses_evaluated.fetch_add(1, Ordering::Relaxed);
+    fn min_guess_val(
+        &mut self,
+        set: &[usize],
+        guess: usize,
+        allowed_guesses: &[usize],
+        beta: u32,
+    ) -> u32 {
+        self.metrics
+            .guesses_evaluated
+            .fetch_add(1, Ordering::Relaxed);
         let mut counts = [0u16; 243];
         let mut non_empty_indices = [0u8; 243];
         let mut num_non_empty = 0;
-        
+
         for &c in set {
             let r = self.matrix.get(guess, c).0 as usize;
             if counts[r] == 0 {
@@ -347,11 +362,12 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
         // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
         // Benchmarks show this sorting step halves the total number of evaluated states.
-        non_empty_indices[0..num_non_empty].sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
+        non_empty_indices[0..num_non_empty]
+            .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
 
         let mut cost = set.len() as u32;
         let mut p_lbs = [0u32; 243];
-        
+
         for i in 0..num_non_empty {
             let r_idx = non_empty_indices[i] as usize;
             if r_idx == Response::WIN.0 as usize {
@@ -364,7 +380,9 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         }
 
         if cost >= beta {
-            self.metrics.pruned_by_bounds.fetch_add(1, Ordering::Relaxed);
+            self.metrics
+                .pruned_by_bounds
+                .fetch_add(1, Ordering::Relaxed);
             return beta;
         }
 
@@ -374,7 +392,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         for r_idx in 0..243 {
             offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
         }
-        
+
         let mut current_offsets = offsets;
         for &c in set {
             let r_idx = self.matrix.get(guess, c).0 as usize;
@@ -399,7 +417,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
 
             let b = cost - p_lbs[r_idx];
             let new_beta = beta - b;
-            
+
             let val = self.min_state_val(p, allowed_guesses, new_beta);
             if b + val >= beta {
                 return beta;
@@ -414,35 +432,46 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Word;
     use crate::dict::Dictionary;
     use crate::matrix::ResponseMatrix;
-    use crate::core::Word;
 
     #[test]
     fn test_solver_tiny() {
         let mut guesses = Vec::new();
         let mut candidates = Vec::new();
-        
+
         guesses.push(Word::new("apple"));
         guesses.push(Word::new("berry"));
         guesses.push(Word::new("peach"));
-        
+
         candidates.push(Word::new("apple"));
         candidates.push(Word::new("berry"));
 
         let dict = Dictionary {
-            guess_chars: guesses.iter().map(|w| [w.0[0]-b'a', w.0[1]-b'a', w.0[2]-b'a', w.0[3]-b'a', w.0[4]-b'a']).collect(),
+            guess_chars: guesses
+                .iter()
+                .map(|w| {
+                    [
+                        w.0[0] - b'a',
+                        w.0[1] - b'a',
+                        w.0[2] - b'a',
+                        w.0[3] - b'a',
+                        w.0[4] - b'a',
+                    ]
+                })
+                .collect(),
             guesses,
             candidates,
         };
 
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
-        
+
         let initial_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
         let cost = Solver::solve(&matrix, &initial_candidates, &dict, &metrics);
-        
-        // 2 candidates. Best guess is 'apple'. 
+
+        // 2 candidates. Best guess is 'apple'.
         // If guess is 'apple', candidate 'apple' -> WIN (cost 1).
         // candidate 'berry' -> non-WIN (cost 1 to guess apple, then 1 to guess berry).
         // Wait, if it's apple, and we get WIN, that's 1.
@@ -455,31 +484,41 @@ mod tests {
     fn test_solver_three_candidates() {
         let mut guesses = Vec::new();
         let mut candidates = Vec::new();
-        
+
         guesses.push(Word::new("abcde"));
         guesses.push(Word::new("abcdf"));
         guesses.push(Word::new("abcdg"));
         guesses.push(Word::new("efghi"));
-        
+
         candidates.push(Word::new("abcde"));
         candidates.push(Word::new("abcdf"));
         candidates.push(Word::new("abcdg"));
 
         let dict = Dictionary {
-            guess_chars: guesses.iter().map(|w| [w.0[0]-b'a', w.0[1]-b'a', w.0[2]-b'a', w.0[3]-b'a', w.0[4]-b'a']).collect(),
+            guess_chars: guesses
+                .iter()
+                .map(|w| {
+                    [
+                        w.0[0] - b'a',
+                        w.0[1] - b'a',
+                        w.0[2] - b'a',
+                        w.0[3] - b'a',
+                        w.0[4] - b'a',
+                    ]
+                })
+                .collect(),
             guesses,
             candidates,
         };
 
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
-        
+
         let initial_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
         let cost = Solver::solve(&matrix, &initial_candidates, &dict, &metrics);
-        
+
         // 3 candidates. Best guess might be the disjoint word "efghi" which uniquely identifies them,
         // or one of the candidates itself. The exact cost doesn't matter, just ensuring it calculates properly.
         assert!(cost >= 5 && cost <= 6);
     }
 }
-

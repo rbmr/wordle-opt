@@ -2,7 +2,7 @@ use crate::core::Response;
 use crate::dict::Dictionary;
 
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
-/// 
+///
 /// The matrix is flattened into a 1D vector and stored in row-major order: `guess * num_candidates + candidate`.
 /// This layout guarantees $O(1)$ lookup time and maximizes L1 CPU cache locality during inner solver loops.
 pub struct ResponseMatrix {
@@ -38,21 +38,23 @@ impl ResponseMatrix {
         }
 
         use rayon::prelude::*;
-        
+
         // Pre-allocate the data array
         data.resize(dict.guesses.len() * dict.candidates.len(), Response(0));
-        
+
         let num_candidates = dict.candidates.len();
         let guesses = &dict.guesses;
         let candidates = &dict.candidates;
 
         // Compute rows in parallel
-        data.par_chunks_mut(num_candidates).enumerate().for_each(|(g, row)| {
-            let guess = &guesses[g];
-            for (c, candidate) in candidates.iter().enumerate() {
-                row[c] = Response::compute(candidate, guess);
-            }
-        });
+        data.par_chunks_mut(num_candidates)
+            .enumerate()
+            .for_each(|(g, row)| {
+                let guess = &guesses[g];
+                for (c, candidate) in candidates.iter().enumerate() {
+                    row[c] = Response::compute(candidate, guess);
+                }
+            });
 
         Self {
             num_guesses,
@@ -72,8 +74,8 @@ impl ResponseMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{Response, Word};
     use crate::dict::Dictionary;
-    use crate::core::{Word, Response};
 
     #[test]
     fn test_matrix_computation() {
@@ -83,20 +85,31 @@ mod tests {
         guesses.push(Word::new("berry"));
         candidates.push(Word::new("apple"));
         candidates.push(Word::new("maple"));
-        
+
         let dict = Dictionary {
-            guess_chars: guesses.iter().map(|w| [w.0[0]-b'a', w.0[1]-b'a', w.0[2]-b'a', w.0[3]-b'a', w.0[4]-b'a']).collect(),
+            guess_chars: guesses
+                .iter()
+                .map(|w| {
+                    [
+                        w.0[0] - b'a',
+                        w.0[1] - b'a',
+                        w.0[2] - b'a',
+                        w.0[3] - b'a',
+                        w.0[4] - b'a',
+                    ]
+                })
+                .collect(),
             guesses,
             candidates,
         };
-        
+
         let matrix = ResponseMatrix::new(&dict);
         assert_eq!(matrix.num_guesses, 2);
         assert_eq!(matrix.num_candidates, 2);
-        
+
         // guess 0: apple, candidate 0: apple -> WIN
         assert_eq!(matrix.get(0, 0), Response::WIN);
-        
+
         // guess 0: apple, candidate 1: maple
         // a: black, p: green, p: green, l: green, e: green => [0, 2, 2, 2, 2] -> 0 + 2*3 + 2*9 + 2*27 + 2*81 = 6 + 18 + 54 + 162 = 240
         // Wait, let's just test it's not WIN.

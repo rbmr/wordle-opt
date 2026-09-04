@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::core::{Word, Response};
+    use crate::core::{Response, Word};
 
     #[test]
     fn test_compute_response_greens() {
@@ -44,10 +44,10 @@ mod tests {
         // 'h' black -> 0
         // 'a' green -> 1
         assert_eq!(r2.0, 1 + 81);
-        
+
         // Priority of green over yellow
         let secret3 = Word::new("abaca"); // 'a' at 0, 2, 4
-        let guess3 = Word::new("arena");  // 'a' at 0, 4, 'e', 'r', 'n'
+        let guess3 = Word::new("arena"); // 'a' at 0, 4, 'e', 'r', 'n'
         let r3 = Response::compute(&secret3, &guess3);
         // arena against abaca
         // a at 0 -> green

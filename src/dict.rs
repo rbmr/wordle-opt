@@ -1,7 +1,7 @@
+use crate::core::Word;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use crate::core::Word;
 
 /// Represents a loaded Wordle dictionary containing valid guesses and possible secret candidates.
 /// Both vectors are deduplicated and sorted to enable deterministic subset caching.
@@ -72,27 +72,27 @@ mod tests {
     fn test_dictionary_loading_and_dedup() {
         let mut guesses_file = NamedTempFile::new().unwrap();
         let mut candidates_file = NamedTempFile::new().unwrap();
-        
+
         writeln!(guesses_file, "apple\nberry\npeach\nberry").unwrap();
         writeln!(candidates_file, "apple\nmaple\n").unwrap();
-        
+
         let dict = Dictionary::load(guesses_file.path(), candidates_file.path());
-        
+
         // Candidates should be exactly apple, maple
         assert_eq!(dict.candidates.len(), 2);
         assert_eq!(dict.candidates[0].to_string(), "apple");
         assert_eq!(dict.candidates[1].to_string(), "maple");
-        
+
         // Guesses should be apple, berry, cherry, AND maple (since candidates must be in guesses)
         // And they should be sorted and deduplicated.
         // debug what it actually read
-        
+
         assert_eq!(dict.guesses.len(), 4);
         assert_eq!(dict.guesses[0].to_string(), "apple");
         assert_eq!(dict.guesses[1].to_string(), "berry");
         assert_eq!(dict.guesses[2].to_string(), "maple");
         assert_eq!(dict.guesses[3].to_string(), "peach");
-        
+
         // Ensure guess_chars was populated correctly
         assert_eq!(dict.guess_chars.len(), 4);
         assert_eq!(dict.guess_chars[0], [0, 15, 15, 11, 4]); // apple

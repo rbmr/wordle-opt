@@ -19,7 +19,7 @@ pub struct Response(pub u8);
 
 impl Response {
     pub const WIN: Response = Response::new(1, 1, 1, 1, 1);
-    
+
     // b = 0, g = 1, y = 2
     pub const fn new(r0: u8, r1: u8, r2: u8, r3: u8, r4: u8) -> Self {
         Response(r0 + r1 * 3 + r2 * 9 + r3 * 27 + r4 * 81)
