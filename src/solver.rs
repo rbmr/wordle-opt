@@ -466,7 +466,10 @@ impl<'a> Solver<'a> {
 
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _, _)| g).collect();
 
-        if depth == 1 && active_guesses.len() > 1 {
+        // DISABLE depth==1 parallelism. Rayon task overhead for microsecond evaluations
+        // of tiny depth-1 buckets (size ~10) is a massive performance drag.
+        // We already have 14,855 parallel tasks at the root!
+        if false && depth == 1 && active_guesses.len() > 1 {
             let shared_best = std::sync::atomic::AtomicU32::new(best_val);
             let first_g = active_guesses[0];
             let val = self.min_guess_val(
