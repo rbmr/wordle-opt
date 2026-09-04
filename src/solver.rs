@@ -53,7 +53,6 @@ pub struct Solver<'a> {
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
-    pub global_beta: Option<&'a std::sync::atomic::AtomicU32>,
     pub seen_projections: rustc_hash::FxHashSet<u32>,
 }
 
@@ -138,13 +137,12 @@ impl<'a> Solver<'a> {
         }
         cost
     }
-    pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, metrics: &'a Metrics, global_beta: Option<&'a AtomicU32>) -> Self {
+    pub fn new(matrix: &'a ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, metrics: &'a Metrics) -> Self {
         Self {
             matrix,
             max_k,
             dict,
             metrics,
-            global_beta,
             seen_projections: rustc_hash::FxHashSet::default(),
         }
     }
@@ -189,7 +187,7 @@ impl<'a> Solver<'a> {
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k, dict, metrics, Some(&beta));
+            let mut solver = Solver::new(matrix, max_k, dict, metrics);
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta);
             
 
@@ -211,12 +209,7 @@ impl<'a> Solver<'a> {
     fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
         self.metrics.states_evaluated.fetch_add(1, Ordering::Relaxed);
         
-        if let Some(gb) = self.global_beta {
-            let current_global = gb.load(Ordering::Relaxed);
-            if current_global < beta {
-                beta = current_global;
-            }
-        }
+
         
         let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         if count % 10_000_000 == 0 {
