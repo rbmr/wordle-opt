@@ -17,7 +17,7 @@ impl<'a> NaiveSolver<'a> {
         self.min_state_val(set, &allowed_guesses, u32::MAX)
     }
 
-    fn min_state_val(&self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
+    fn min_state_val(&self, set: &[usize], allowed_guesses: &[usize], _beta: u32) -> u32 {
         let c_len = set.len();
         if c_len == 0 {
             return 0;
@@ -49,7 +49,7 @@ impl<'a> NaiveSolver<'a> {
             }
 
             let mut cost = set.len() as u32;
-            let mut possible = true;
+            
             
             for r_idx in 0..243 {
                 if r_idx == Response::WIN.0 as usize {
