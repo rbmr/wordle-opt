@@ -77,7 +77,7 @@ fn main() {
     println!("Computed matrix of size {}x{} in {:?}", matrix.num_guesses, matrix.num_candidates, duration);
 
     if is_benchmark {
-        let sizes = vec![10, 20, 50, 100, 150, 200, 250, 300];
+        let sizes = vec![10, 20, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
         run_benchmark(&matrix, &dict, &sizes);
     } else {
         let size = subset_size.min(dict.candidates.len());
