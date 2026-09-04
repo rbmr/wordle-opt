@@ -8,13 +8,6 @@ use crate::matrix::ResponseMatrix;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
 
-#[derive(Clone, Copy)]
-pub struct CacheEntry {
-    pub cost: u32,
-    pub beta: u32,
-}
-
-
 impl std::borrow::Borrow<[usize]> for CandidateSet {
     fn borrow(&self) -> &[usize] {
         &self.0
@@ -67,7 +60,6 @@ pub struct Solver<'a> {
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     pub seen_projections: rustc_hash::FxHashSet<u32>,
-    pub cache: &'a dashmap::DashMap<CandidateSet, CacheEntry>,
 }
 
 impl<'a> Solver<'a> {
@@ -159,7 +151,6 @@ impl<'a> Solver<'a> {
         max_k: usize,
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
-        cache: &'a dashmap::DashMap<CandidateSet, CacheEntry>,
     ) -> Self {
         Self {
             matrix,
@@ -167,7 +158,6 @@ impl<'a> Solver<'a> {
             dict,
             metrics,
             seen_projections: rustc_hash::FxHashSet::default(),
-            cache,
         }
     }
 
@@ -188,25 +178,7 @@ impl<'a> Solver<'a> {
 
         let set = initial_candidates;
 
-        // Stronger Initial Beta Seed
-        // Instead of a pure greedy solve, run an exact solve restricted to the top 10 guesses!
-        let mut initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
-        let mut top_guesses: Vec<usize> = (0..dict.guesses.len()).collect();
-        crate::heuristic::sort_guesses_by_expected_remaining(matrix, initial_candidates, &mut top_guesses);
-        top_guesses.truncate(10);
-        let global_cache = dashmap::DashMap::new();
-        let mut seed_solver = Solver {
-            metrics,
-            max_k: crate::heuristic::compute_max_branching_factor(matrix, initial_candidates),
-            matrix,
-            dict,
-            seen_projections: rustc_hash::FxHashSet::default(),
-            cache: &global_cache,
-        };
-        let tight_seed = seed_solver.min_state_val(initial_candidates, &top_guesses, initial_greedy_cost);
-        if tight_seed < initial_greedy_cost {
-            initial_greedy_cost = tight_seed;
-        }
+        let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
         let beta = AtomicU32::new(initial_greedy_cost);
 
         // Filter active guesses
@@ -232,7 +204,7 @@ impl<'a> Solver<'a> {
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k, dict, metrics, &global_cache);
+            let mut solver = Solver::new(matrix, max_k, dict, metrics);
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta);
 
             // atomic min
@@ -348,24 +320,6 @@ impl<'a> Solver<'a> {
             best_val = self.min_guess_val(set, g, &active_guesses, best_val);
         }
 
-        use dashmap::mapref::entry::Entry;
-        match self.cache.entry(CandidateSet(set.to_vec())) {
-            Entry::Occupied(mut occ) => {
-                let existing = occ.get();
-                let should_overwrite = if existing.cost < existing.beta {
-                    best_val < beta
-                } else {
-                    best_val < beta || best_val > existing.cost
-                };
-                if should_overwrite {
-                    occ.insert(CacheEntry { cost: best_val, beta });
-                }
-            }
-            Entry::Vacant(vac) => {
-                vac.insert(CacheEntry { cost: best_val, beta });
-            }
-        }
-        
         best_val
     }
 
