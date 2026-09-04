@@ -1,6 +1,5 @@
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-static EVAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 use crate::core::Response;
 use crate::heuristic;
 use crate::matrix::ResponseMatrix;
@@ -231,11 +230,6 @@ impl<'a> Solver<'a> {
         self.metrics
             .states_evaluated
             .fetch_add(1, Ordering::Relaxed);
-
-        let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-        if count.is_multiple_of(10_000_000) {
-            println!("Evaluated {} states... Cache size: 0", count);
-        }
 
         let c_len = set.len();
 
