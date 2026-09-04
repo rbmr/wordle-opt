@@ -214,30 +214,3 @@ By analyzing the bottleneck of N=1500, I realized that pruning candidates inside
 
 I hoisted the `capacity_bound(bucket_size)` check mathematically UP into the `min_state_val` loop. This allows the solver to strictly evaluate and discard 99.9% of candidate guesses *before* they are added to the active tuples slice.
 This reduced `Guesses Eval` by over 300x, shrinking N=750 runtime natively from 30s down to 22.9s. As depth expands for N=2340, this pre-emptive bounds culling is mathematically critical for halting the factorial explosion.
-## Benchmark Run: 1788547876
-| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
-|------|------|---------|--------|---------|----------|----------|------------|
-## Benchmark Run: 1788547921
-| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
-|------|------|---------|--------|---------|----------|----------|------------|
-| 100 | 247 | 0.150 | 65 | 14953 | 89751 | 640697 | 1 |
-| 250 | 683 | 2.664 | 307 | 15143 | 934450 | 2149159 | 37 |
-
-## Benchmark Run: 1788548436
-| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
-|------|------|---------|--------|---------|----------|----------|------------|
-| 100 | 247 | 0.143 | 31 | 14906 | 60525 | 326055 | 1 |
-| 250 | 680 | 1.130 | 293 | 15135 | 1086462 | 1952744 | 61 |
-
-## Benchmark Run: 1788561599
-| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
-|------|------|---------|--------|---------|----------|----------|------------|
-| 100 | 246 | 0.189 | 13 | 14879 | 28075 | 142831 | 0 |
-| 250 | 683 | 2.255 | 324 | 15100 | 1310343 | 1884455 | 51 |
-
-## Benchmark Run: 1788561676
-| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
-|------|------|---------|--------|---------|----------|----------|------------|
-| 100 | 242 | 0.155 | 29 | 14908 | 47961 | 300815 | 2 |
-| 250 | 678 | 0.918 | 61 | 14901 | 252792 | 369465 | 5 |
-
