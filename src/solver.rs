@@ -22,6 +22,7 @@ impl std::borrow::Borrow<[usize]> for CandidateSet {
 /// - `FxHashMap` based subtree memoization
 pub struct Metrics {
     pub states_evaluated: AtomicUsize,
+    pub max_depth: AtomicUsize,
     pub guesses_evaluated: AtomicUsize,
     pub pruned_by_bounds: AtomicUsize,
     pub pruned_by_equivalence: AtomicUsize,
@@ -38,6 +39,7 @@ impl Metrics {
     pub fn new() -> Self {
         Self {
             states_evaluated: AtomicUsize::new(0),
+            max_depth: AtomicUsize::new(0),
             guesses_evaluated: AtomicUsize::new(0),
             pruned_by_bounds: AtomicUsize::new(0),
             pruned_by_equivalence: AtomicUsize::new(0),
@@ -204,7 +206,7 @@ impl<'a> Solver<'a> {
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
             let mut solver = Solver::new(matrix, max_k, dict, metrics);
-            let val = solver.min_guess_val(set, g, &active_guesses, current_beta);
+            let val = solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
 
             // atomic min
             let mut current = beta.load(Ordering::Relaxed);
@@ -226,7 +228,8 @@ impl<'a> Solver<'a> {
     /// To maximize alpha-beta pruning, guesses are first evaluated heuristically and sorted
     /// by their expected capacity. We also aggressively prune symmetrically equivalent guesses
     /// using a bitwise projection filter `seen_projections`.
-    fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
+    fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32, depth: usize) -> u32 {
+        self.metrics.max_depth.fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
         self.metrics
             .states_evaluated
             .fetch_add(1, Ordering::Relaxed);
@@ -320,7 +323,7 @@ impl<'a> Solver<'a> {
 
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
         for &g in &active_guesses {
-            best_val = self.min_guess_val(set, g, &active_guesses, best_val);
+            best_val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
         }
 
         best_val
@@ -339,6 +342,7 @@ impl<'a> Solver<'a> {
         guess: usize,
         allowed_guesses: &[usize],
         beta: u32,
+        depth: usize,
     ) -> u32 {
         self.metrics
             .guesses_evaluated
@@ -421,7 +425,7 @@ impl<'a> Solver<'a> {
             let b = cost - p_lbs[r_idx];
             let new_beta = beta - b;
 
-            let val = self.min_state_val(p, allowed_guesses, new_beta);
+            let val = self.min_state_val(p, allowed_guesses, new_beta, depth + 1);
             if b + val >= beta {
                 return beta;
             }

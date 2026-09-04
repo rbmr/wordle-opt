@@ -15,21 +15,8 @@ use std::io::Write;
 use std::time::Instant;
 
 fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
-    println!(
-        "{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<10} | {:<10}",
-        "Size",
-        "Cost",
-        "Time(s)",
-        "States Eval",
-        "Guesses Eval",
-        "Bounds Pruned",
-        "Equiv Pruned",
-        "Cache Hits"
-    );
-    println!(
-        "{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<10}-+-{:-<10}",
-        "", "", "", "", "", "", "", ""
-    );
+    println!("{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}", "Size", "Cost", "Time(s)", "States Eval", "Guesses Eval", "Bounds Pruned", "Equiv Pruned", "Cache Hits", "Max Depth");
+    println!("{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<12}-+-{:-<10}-+-{:-<10}", "", "", "", "", "", "", "", "", "");
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -83,10 +70,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             .cache_hits
             .load(std::sync::atomic::Ordering::Relaxed);
 
-        println!(
-            "{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<10} | {:<10}",
-            size, cost, secs, states, guesses, bounds, equiv, chits
-        );
+        println!("{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}", size, cost, secs, states, guesses, bounds, equiv, chits, metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed));
 
         writeln!(
             file,
@@ -119,7 +103,7 @@ fn main() {
     );
 
     if args.len() > 1 && args[1] == "benchmark" {
-        let sizes = vec![10, 20, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000];
+        let sizes = vec![100, 250, 500, 750, 1000];
         run_benchmark(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "verify" {
         verify::run_verification(&dict, &matrix, 50, 4);
