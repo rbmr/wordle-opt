@@ -161,3 +161,11 @@ For any candidate set of size `n <= 2`, the optimal Wordle search cost is mathem
   - Total optimal cost across both subtrees is exactly `1 + 2 = 3`.
 
 These bounds are exact minima and do not sacrifice alpha-beta correctness.
+| 500 | 1469 | 220.294 | 14814 | 35747046 | 35726927 | 75957809 | 13748 |
+| 750 | 2256 | 529.253 | 43128 | 107603202 | 107536813 | 312874967 | 70190 |
+
+## Memoization and Pruning Bounds
+The Transposition Table (`GlobalCache`) correctly differentiates between **Exact Costs** and **Lower Bounds**:
+- When a subtree search completes fully without exceeding `beta`, the exact minimum cost is stored with `is_exact = true`.
+- When a subtree is aborted early because its running cost `val >= beta`, the true cost is unknown, but we know it is at least `beta`. It is stored as a lower bound with `is_exact = false`. 
+- Upon a cache hit, if `is_exact = false`, the cached lower bound is only reused if it is `>= current_beta`. This guarantees we never reuse a lower bound when a tighter constraint demands further searching, maintaining strict alpha-beta correctness.
