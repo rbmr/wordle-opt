@@ -1,5 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Lock-free Transposition Table for caching branch results across threads.
+///
+/// Uses `AtomicU64` to pack a 51-bit Zobrist signature, a 12-bit cost value, and a 1-bit `is_exact` flag.
+/// A Depth-Preferred replacement policy is used to protect large subtrees from being evicted by shallow ones.
 pub struct GlobalCache {
     entries: Vec<AtomicU64>,
 }
