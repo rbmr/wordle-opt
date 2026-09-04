@@ -1,4 +1,3 @@
-use smallvec::SmallVec;
 use crate::core::Response;
 use crate::heuristic;
 use crate::matrix::ResponseMatrix;
