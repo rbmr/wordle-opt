@@ -1,3 +1,4 @@
+use rand::seq::SliceRandom;
 pub mod core;
 pub mod dict;
 pub mod heuristic;
@@ -15,11 +16,14 @@ use std::io::Write;
 use std::time::Instant;
 
 fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
+    use rand::seq::SliceRandom;
+    let mut rng = rand::rng();
+
     println!(
-        "{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
+        "{:<6} | {:<6} | {:<22} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
         "Size",
         "Cost",
-        "Time(s)",
+        "Time [Min/Avg/Max]",
         "States Eval",
         "Guesses Eval",
         "Bounds Pruned",
@@ -28,7 +32,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         "Max Depth"
     );
     println!(
-        "{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<12}-+-{:-<10}-+-{:-<10}",
+        "{:-<6}-+-{:-<6}-+-{:-<22}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<12}-+-{:-<10}-+-{:-<10}",
         "", "", "", "", "", "", "", "", ""
     );
 
@@ -58,55 +62,78 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     )
     .unwrap();
 
+    let all_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
+
     for &s in sizes {
         let size = s.min(dict.candidates.len());
-        let initial_candidates: Vec<usize> = (0..size).collect();
-        let metrics = Metrics::new();
+        let iterations = if size >= 750 { 1 } else { 3 };
+        
+        let mut sum_secs = 0.0;
+        let mut min_secs = f64::MAX;
+        let mut max_secs = f64::MIN;
+        
+        let mut last_cost = 0;
+        let mut last_states = 0;
+        let mut last_guesses = 0;
+        let mut last_bounds = 0;
+        let mut last_equiv = 0;
+        let mut last_chits = 0;
+        let mut last_depth = 0;
 
-        let start = Instant::now();
-        let cost = Solver::solve(matrix, &initial_candidates, dict, &metrics);
-        let duration = start.elapsed();
-        let secs = duration.as_secs_f64();
+        for _ in 0..iterations {
+            let mut initial_candidates = all_candidates.clone();
+            initial_candidates.shuffle(&mut rng);
+            initial_candidates.truncate(size);
+            initial_candidates.sort_unstable();
 
-        let states = metrics
-            .states_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let guesses = metrics
-            .guesses_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let bounds = metrics
-            .pruned_by_bounds
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let equiv = metrics
-            .pruned_by_equivalence
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let chits = metrics
-            .cache_hits
-            .load(std::sync::atomic::Ordering::Relaxed);
+            let metrics = Metrics::new();
+            let start = Instant::now();
+            let cost = Solver::solve(matrix, &initial_candidates, dict, &metrics);
+            let duration = start.elapsed();
+            let secs = duration.as_secs_f64();
+
+            sum_secs += secs;
+            min_secs = min_secs.min(secs);
+            max_secs = max_secs.max(secs);
+
+            last_cost = cost;
+            last_states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+            last_guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+            last_bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
+            last_equiv = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+            last_chits = metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+            last_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
+        }
+
+        let avg_secs = sum_secs / (iterations as f64);
+        let time_str = if iterations > 1 {
+            format!("{:.2}/{:.2}/{:.2}", min_secs, avg_secs, max_secs)
+        } else {
+            format!("{:.4}", avg_secs)
+        };
 
         println!(
-            "{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
+            "{:<6} | {:<6} | {:<22} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
             size,
-            cost,
-            secs,
-            states,
-            guesses,
-            bounds,
-            equiv,
-            chits,
-            metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed)
+            last_cost,
+            time_str,
+            last_states,
+            last_guesses,
+            last_bounds,
+            last_equiv,
+            last_chits,
+            last_depth
         );
 
         writeln!(
             file,
             "| {} | {} | {:.3} | {} | {} | {} | {} | {} |",
-            size, cost, secs, states, guesses, bounds, equiv, chits
+            size, last_cost, avg_secs, last_states, last_guesses, last_bounds, last_equiv, last_chits
         )
         .unwrap();
     }
     writeln!(file).unwrap();
 }
-
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -134,6 +161,7 @@ fn main() {
         }
         
         let is_compute = std::fs::read_to_string("/etc/hostname").map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute").unwrap_or(false);
+
         if !is_compute && max_n > 500 {
             eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
             std::process::exit(1);

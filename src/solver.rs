@@ -181,7 +181,9 @@ impl<'a> Solver<'a> {
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
     ) -> u32 {
-        let global_cache = crate::cache::GlobalCache::new(512 * 1024 * 1024);
+        let is_compute = std::fs::read_to_string("/etc/hostname").map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute").unwrap_or(false);
+        let cache_size = if is_compute { 512 * 1024 * 1024 } else { 64 * 1024 * 1024 };
+        let global_cache = crate::cache::GlobalCache::new(cache_size);
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
 
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
