@@ -23,8 +23,9 @@ pub fn sort_guesses_by_expected_remaining(
 }
 
 pub fn compute_max_branching_factor(matrix: &crate::matrix::ResponseMatrix, candidates: &[usize]) -> usize {
-    let mut max_k = 0;
-    for g in 0..matrix.num_guesses {
+    use rayon::prelude::*;
+    
+    (0..matrix.num_guesses).into_par_iter().map(|g| {
         let mut seen = [false; 243];
         let mut k = 0;
         for &c in candidates {
@@ -34,11 +35,8 @@ pub fn compute_max_branching_factor(matrix: &crate::matrix::ResponseMatrix, cand
                 k += 1;
             }
         }
-        if k > max_k {
-            max_k = k;
-        }
-    }
-    max_k
+        k
+    }).max().unwrap_or(0)
 }
 
 /// Computes the absolute minimum total cost to solve a subset of size `n`
