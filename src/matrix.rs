@@ -37,11 +37,22 @@ impl ResponseMatrix {
             candidate_masks.push(mask);
         }
 
-        for guess in &dict.guesses {
-            for candidate in &dict.candidates {
-                data.push(Response::compute(candidate, guess));
+        use rayon::prelude::*;
+        
+        // Pre-allocate the data array
+        data.resize(dict.guesses.len() * dict.candidates.len(), Response(0));
+        
+        let num_candidates = dict.candidates.len();
+        let guesses = &dict.guesses;
+        let candidates = &dict.candidates;
+
+        // Compute rows in parallel
+        data.par_chunks_mut(num_candidates).enumerate().for_each(|(g, row)| {
+            let guess = &guesses[g];
+            for (c, candidate) in candidates.iter().enumerate() {
+                row[c] = Response::compute(candidate, guess);
             }
-        }
+        });
 
         Self {
             num_guesses,
