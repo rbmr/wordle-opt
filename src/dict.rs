@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::core::Word;
 use std::fs::File;
 use std::io::{BufRead, BufReader};

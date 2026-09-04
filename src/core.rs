@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Word(pub [u8; 5]);
 

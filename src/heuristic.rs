@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::matrix::ResponseMatrix;
 
 pub fn compute_expected_remaining(

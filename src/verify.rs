@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
 use crate::naive::NaiveSolver;

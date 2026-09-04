@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Lock-free Transposition Table for caching branch results across threads.

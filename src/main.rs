@@ -1,4 +1,5 @@
 #![allow(clippy::needless_range_loop)]
+#![allow(clippy::needless_range_loop)]
 use rand::prelude::SliceRandom;
 
 pub mod core;

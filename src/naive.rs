@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 use crate::core::Response;
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
