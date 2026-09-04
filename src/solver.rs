@@ -72,13 +72,18 @@ impl<'a> Solver<'a> {
 
         let mut seen_projections = rustc_hash::FxHashSet::default();
         for g in 0..dict.guesses.len() {
+            let chars = &dict.guess_chars[g];
             let mut proj = 0u32;
-            for i in 0..5 {
-                let letter = dict.guesses[g].0[i] - b'a';
-                if (c_mask & (1 << letter)) != 0 {
-                    proj |= ((letter as u32) + 1) << (i * 5);
-                }
-            }
+            let l0 = chars[0] as u32;
+            if (c_mask & (1 << l0)) != 0 { proj |= l0 + 1; }
+            let l1 = chars[1] as u32;
+            if (c_mask & (1 << l1)) != 0 { proj |= (l1 + 1) << 5; }
+            let l2 = chars[2] as u32;
+            if (c_mask & (1 << l2)) != 0 { proj |= (l2 + 1) << 10; }
+            let l3 = chars[3] as u32;
+            if (c_mask & (1 << l3)) != 0 { proj |= (l3 + 1) << 15; }
+            let l4 = chars[4] as u32;
+            if (c_mask & (1 << l4)) != 0 { proj |= (l4 + 1) << 20; }
             if !seen_projections.insert(proj) {
                 continue;
             }
@@ -252,13 +257,18 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         let mut equiv_pruned = 0;
 
         for &g in allowed_guesses {
+            let chars = &self.dict.guess_chars[g];
             let mut proj = 0u32;
-            for i in 0..5 {
-                let letter = self.dict.guesses[g].0[i] - b'a';
-                if (c_mask & (1 << letter)) != 0 {
-                    proj |= ((letter as u32) + 1) << (i * 5);
-                }
-            }
+            let l0 = chars[0] as u32;
+            if (c_mask & (1 << l0)) != 0 { proj |= l0 + 1; }
+            let l1 = chars[1] as u32;
+            if (c_mask & (1 << l1)) != 0 { proj |= (l1 + 1) << 5; }
+            let l2 = chars[2] as u32;
+            if (c_mask & (1 << l2)) != 0 { proj |= (l2 + 1) << 10; }
+            let l3 = chars[3] as u32;
+            if (c_mask & (1 << l3)) != 0 { proj |= (l3 + 1) << 15; }
+            let l4 = chars[4] as u32;
+            if (c_mask & (1 << l4)) != 0 { proj |= (l4 + 1) << 20; }
             
             if !self.seen_projections.insert(proj) {
                 equiv_pruned += 1;

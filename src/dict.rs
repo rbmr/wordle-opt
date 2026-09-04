@@ -7,6 +7,7 @@ use crate::core::Word;
 /// Both vectors are deduplicated and sorted to enable deterministic subset caching.
 pub struct Dictionary {
     pub guesses: Vec<Word>,
+    pub guess_chars: Vec<[u8; 5]>,
     pub candidates: Vec<Word>,
 }
 
@@ -29,8 +30,18 @@ impl Dictionary {
         guesses.sort();
         guesses.dedup();
 
+        let mut guess_chars = Vec::with_capacity(guesses.len());
+        for g in &guesses {
+            let mut chars = [0u8; 5];
+            for i in 0..5 {
+                chars[i] = g.0[i] - b'a';
+            }
+            guess_chars.push(chars);
+        }
+
         Self {
             guesses,
+            guess_chars,
             candidates,
         }
     }
