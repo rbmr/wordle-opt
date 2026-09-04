@@ -29,6 +29,12 @@ pub struct Metrics {
     pub cache_hits: AtomicUsize,
 }
 
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Metrics {
     pub fn new() -> Self {
         Self {
@@ -58,7 +64,7 @@ pub struct Solver<'a> {
 
 impl<'a> Solver<'a> {
 
-    pub fn greedy_solve(matrix: &ResponseMatrix, max_k: usize, dict: &'a crate::dict::Dictionary, set: &[usize], metrics: &'a Metrics) -> u32 {
+    pub fn greedy_solve(matrix: &ResponseMatrix, dict: &'a crate::dict::Dictionary, set: &[usize]) -> u32 {
         if set.len() <= 2 {
             return (set.len() * (set.len() + 1) / 2) as u32;
         }
@@ -131,7 +137,7 @@ impl<'a> Solver<'a> {
                     subset.push(c);
                 }
             }
-            cost += Self::greedy_solve(matrix, max_k, dict, &subset, metrics);
+            cost += Self::greedy_solve(matrix, dict, &subset);
         }
         cost
     }
@@ -158,7 +164,7 @@ impl<'a> Solver<'a> {
         let set = initial_candidates;
         
         
-        let initial_greedy_cost = Self::greedy_solve(matrix, max_k, dict, initial_candidates, metrics);
+        let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
         let beta = AtomicU32::new(initial_greedy_cost);
         
         
@@ -216,7 +222,7 @@ impl<'a> Solver<'a> {
 
         
         let count = EVAL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-        if count % 10_000_000 == 0 {
+        if count.is_multiple_of(10_000_000) {
             println!("Evaluated {} states... Cache size: 0", count);
         }
 

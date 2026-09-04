@@ -49,7 +49,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             
         writeln!(file, "| {} | {} | {:.3} | {} | {} | {} | {} | {} |", size, cost, secs, states, guesses, bounds, equiv, chits).unwrap();
     }
-    writeln!(file, "").unwrap();
+    writeln!(file).unwrap();
 }
 
 fn main() {

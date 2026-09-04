@@ -24,7 +24,7 @@ impl Dictionary {
         // Ensure all candidates are in guesses
         for c in &candidates {
             if !guesses.contains(c) {
-                guesses.push(c.clone());
+                guesses.push(*c);
             }
         }
         guesses.sort();
