@@ -336,14 +336,13 @@ impl<'a> Solver<'a> {
             let mut expected_rem = 0u32;
             let mut guess_lb = c_len as u32;
             for r in 0..243 {
-                let count = counts[r];
-                if count > 0 {
-                    expected_rem += (count as u32) * (count as u32);
-                    if r != crate::core::Response::WIN.0 as usize {
-                        guess_lb += self.capacity_bounds[count as usize];
-                    }
-                }
+                let count = counts[r] as usize;
+                expected_rem += (count as u32) * (count as u32);
+                guess_lb += self.capacity_bounds[count];
             }
+            // WIN response is index 242. If present, it contributes 1 to capacity_bounds,
+            // but it's already counted in `c_len`. We subtract it to avoid double-counting.
+            guess_lb -= counts[242] as u32;
             
             if guess_lb >= beta {
                 continue;
@@ -355,7 +354,7 @@ impl<'a> Solver<'a> {
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
         
-        active_tuples.sort_unstable_by_key(|&(_, exp, _)| exp);
+        active_tuples.sort_unstable_by_key(|&(_, exp, lb)| (lb, exp));
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
         if local_lb >= beta {
