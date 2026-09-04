@@ -418,10 +418,14 @@ impl<'a> Solver<'a> {
             }
 
             let mut counts = [0u16; 243];
+            let mut non_empty = [0u8; 243];
             let mut num_non_empty = 0;
             for &c in set {
                 let r = self.matrix.get(g, c).0 as usize;
-                num_non_empty += (counts[r] == 0) as usize;
+                if counts[r] == 0 {
+                    non_empty[num_non_empty] = r as u8;
+                    num_non_empty += 1;
+                }
                 counts[r] += 1;
             }
 
@@ -434,24 +438,30 @@ impl<'a> Solver<'a> {
             }
 
             let mut expected_rem = 0u32;
-            for &count in &counts {
+            let mut lb_cost = set.len() as u32;
+            for i in 0..num_non_empty {
+                let r_idx = non_empty[i] as usize;
+                let count = counts[r_idx];
                 expected_rem += (count as u32) * (count as u32);
+                if r_idx != crate::core::Response::WIN.0 as usize {
+                    lb_cost += crate::heuristic::capacity_bound(count as usize, self.max_k);
+                }
             }
 
-            active_tuples.push((g, expected_rem));
+            active_tuples.push((g, expected_rem, lb_cost));
         }
         self.metrics
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
 
-        active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
+        active_tuples.sort_unstable_by_key(|&(_, exp, _)| exp);
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
         if local_lb >= beta {
             return beta;
         }
 
-        let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
+        let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _, _)| g).collect();
 
         if depth == 1 && active_guesses.len() > 1 {
             let shared_best = std::sync::atomic::AtomicU32::new(best_val);
@@ -469,7 +479,12 @@ impl<'a> Solver<'a> {
                 best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
             } else {
                 use rayon::prelude::*;
-                active_guesses[1..].par_iter().for_each(|&g| {
+                active_tuples[1..].par_iter().for_each(|&(g, _, g_lb)| {
+                    let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
+                    if g_lb >= current_best {
+                        self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
                     let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
                     if current_best <= local_lb {
                         return;
@@ -491,7 +506,11 @@ impl<'a> Solver<'a> {
                 best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
             }
         } else {
-            for &(g, _) in &active_tuples {
+            for &(g, _, g_lb) in &active_tuples {
+                if g_lb >= best_val {
+                    self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    continue;
+                }
                 let val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
                 if val < best_val {
                     best_val = val;
