@@ -647,3 +647,45 @@ impl<'a> Solver<'a> {
 // This implements Fail-Hard Alpha-Beta Transposition Table Pruning, ensuring that
 // if we revisit a state with a `beta` that is <= a previously established lower bound,
 // we can instantly prune the subtree and return `beta`, avoiding massive redundant deep searches.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_golden_n100_exact_cost() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates: Vec<usize> = (0..100).collect();
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        assert_eq!(cost, 262, "N=100 golden cost changed - likely correctness bug");
+    }
+
+    #[test]
+    fn test_golden_n250_exact_cost() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates: Vec<usize> = (0..250).collect();
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        assert_eq!(cost, 702, "N=250 golden cost changed - likely correctness bug");
+    }
+
+    #[test]
+    fn test_determinism_repeated_solves() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let candidates: Vec<usize> = (0..100).collect();
+        let mut results = Vec::new();
+        for _ in 0..5 {
+            let metrics = Metrics::new();
+            results.push(Solver::solve(&matrix, &candidates, &dict, &metrics));
+        }
+        assert!(
+            results.iter().all(|&r| r == results[0]),
+            "non-deterministic results across repeated runs on identical input: {:?}",
+            results
+        );
+    }
+}
