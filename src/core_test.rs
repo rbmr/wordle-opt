@@ -9,7 +9,7 @@ mod tests {
         let guess = Word::new("abaci");
         let r = Response::compute(&secret, &guess);
         // greens: 1
-        assert_eq!(r.0, 1 + 3 + 9 + 27 + 0);
+        assert_eq!(r.0, 1 + 3 + 9 + 27);
     }
 
     #[test]
