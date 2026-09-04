@@ -128,7 +128,18 @@ fn main() {
     );
 
     if args.len() > 1 && args[1] == "benchmark" {
-        let sizes = vec![100, 250, 500, 750, 1000, 1500, 2340];
+        let mut max_n = 2340;
+        if args.len() > 3 && args[2] == "-n" {
+            max_n = args[3].parse().unwrap();
+        }
+        
+        let is_compute = std::fs::read_to_string("/etc/hostname").map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute").unwrap_or(false);
+        if !is_compute && max_n > 500 {
+            eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
+            std::process::exit(1);
+        }
+
+        let sizes: Vec<usize> = vec![100, 250, 500, 750, 1000, 1500, 2340].into_iter().filter(|&x| x <= max_n).collect();
         run_benchmark(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "verify" {
         verify::run_verification(&dict, &matrix, 50, 4);
