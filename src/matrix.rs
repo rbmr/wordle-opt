@@ -10,6 +10,7 @@ pub struct ResponseMatrix {
     pub num_candidates: usize,
     pub guess_masks: Vec<u32>,
     pub candidate_masks: Vec<u32>,
+    pub zobrist: Vec<u64>,
     data: Vec<Response>,
 }
 
@@ -20,6 +21,11 @@ impl ResponseMatrix {
         let mut data = Vec::with_capacity(num_guesses * num_candidates);
         let mut guess_masks = Vec::with_capacity(num_guesses);
         let mut candidate_masks = Vec::with_capacity(num_candidates);
+        let mut zobrist = Vec::with_capacity(num_candidates);
+        let mut rng = fastrand::Rng::with_seed(42);
+        for _ in 0..num_candidates {
+            zobrist.push(rng.u64(..));
+        }
 
         for guess in &dict.guesses {
             let mut mask = 0u32;
@@ -61,6 +67,7 @@ impl ResponseMatrix {
             num_candidates,
             guess_masks,
             candidate_masks,
+            zobrist,
             data,
         }
     }

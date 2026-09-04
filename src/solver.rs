@@ -55,13 +55,23 @@ impl Metrics {
 /// - Expected Remaining Candidate Heuristics
 /// - Equivalence Class Guess Projections
 /// - `FxHashMap` based subtree memoization
+
+#[derive(Clone, Copy)]
+pub struct CacheEntry {
+    pub value: u32,
+    pub is_exact: bool,
+}
+
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
+    pub capacity_bounds: &'a [u32],
     pub seen_projections: rustc_hash::FxHashSet<u32>,
+    pub cache: rustc_hash::FxHashMap<u64, CacheEntry>,
 }
+
 
 impl<'a> Solver<'a> {
     pub fn greedy_solve(
@@ -152,6 +162,7 @@ impl<'a> Solver<'a> {
         max_k: usize,
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
+        capacity_bounds: &'a [u32],
     ) -> Self {
         Self {
             matrix,
@@ -159,6 +170,8 @@ impl<'a> Solver<'a> {
             dict,
             metrics,
             seen_projections: rustc_hash::FxHashSet::default(),
+            capacity_bounds,
+            cache: rustc_hash::FxHashMap::default(),
         }
     }
 
@@ -203,9 +216,14 @@ impl<'a> Solver<'a> {
 
         heuristic::sort_guesses_by_expected_remaining(matrix, set, &mut active_guesses);
 
+        let mut capacity_bounds = Vec::with_capacity(dict.candidates.len() + 1);
+        for i in 0..=dict.candidates.len() {
+            capacity_bounds.push(heuristic::capacity_bound(i, max_k));
+        }
+
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k, dict, metrics);
+            let mut solver = Solver::new(matrix, max_k, dict, metrics, &capacity_bounds);
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
 
             // atomic min
@@ -230,32 +248,38 @@ impl<'a> Solver<'a> {
     /// using a bitwise projection filter `seen_projections`.
     fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32, depth: usize) -> u32 {
         self.metrics.max_depth.fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
+
+        let mut hash = 0;
+        for &c in set {
+            hash ^= self.matrix.zobrist[c];
+        }
+
+        if let Some(entry) = self.cache.get(&hash) {
+            self.metrics.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if entry.is_exact {
+                return entry.value;
+            }
+            if entry.value >= beta {
+                return beta;
+            }
+        }
+
         self.metrics
             .states_evaluated
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let c_len = set.len();
+        if c_len == 0 { return 0; }
+        if c_len == 1 { return 1; }
+        if c_len == 2 { return 3; }
 
-        if c_len == 0 {
-            return 0;
-        }
-        if c_len == 1 {
-            return 1;
-        }
-        if c_len == 2 {
-            return 3;
-        }
-
-        let lb = heuristic::capacity_bound(c_len, self.max_k);
-        if lb >= beta {
+        let global_lb = self.capacity_bounds[c_len];
+        if global_lb >= beta {
             return beta;
         }
 
         let mut best_val = beta;
 
-        // In deeper layers we want to only iterate allowed_guesses, but we also want to sort them.
-        // For performance, we sort top N guesses, or just filter useless guesses.
-        // Let's filter out useless guesses and sort the remaining.
         let mut active_tuples = Vec::with_capacity(allowed_guesses.len());
         let mut c_mask = 0u32;
         for &c in set {
@@ -289,17 +313,15 @@ impl<'a> Solver<'a> {
             let mut num_non_empty = 0;
             for &c in set {
                 let r = self.matrix.get(g, c).0 as usize;
-                if counts[r] == 0 {
-                    num_non_empty += 1;
-                }
+                num_non_empty += (counts[r] == 0) as usize;
                 counts[r] += 1;
             }
 
             if num_non_empty > local_max_k {
                 local_max_k = num_non_empty;
             }
-            let useless = num_non_empty == 1;
-            if useless {
+
+            if num_non_empty == 1 {
                 continue;
             }
 
@@ -307,13 +329,13 @@ impl<'a> Solver<'a> {
             for &count in &counts {
                 expected_rem += (count as u32) * (count as u32);
             }
-
+            
             active_tuples.push((g, expected_rem));
         }
-
         self.metrics
             .pruned_by_equivalence
-            .fetch_add(equiv_pruned, Ordering::Relaxed);
+            .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
+        
         active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
@@ -322,10 +344,51 @@ impl<'a> Solver<'a> {
         }
 
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
-        for &g in &active_guesses {
-            best_val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
+        
+        if depth == 1 && active_guesses.len() > 1 {
+            let shared_best = std::sync::atomic::AtomicU32::new(best_val);
+            let first_g = active_guesses[0];
+            let val = self.min_guess_val(set, first_g, &active_guesses, shared_best.load(std::sync::atomic::Ordering::Relaxed), depth);
+            shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
+            
+            if shared_best.load(std::sync::atomic::Ordering::Relaxed) <= local_lb {
+                best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
+            } else {
+                use rayon::prelude::*;
+                active_guesses[1..].par_iter().for_each(|&g| {
+                    let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
+                    if current_best <= local_lb { return; }
+                    
+                    let mut local_solver = Solver::new(
+                        self.matrix,
+                        self.max_k,
+                        self.dict,
+                        self.metrics,
+                        self.capacity_bounds,
+                    );
+                    
+                    let val = local_solver.min_guess_val(set, g, &active_guesses, current_best, depth);
+                    shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
+                });
+                best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
+            }
+        } else {
+            for &(g, _) in &active_tuples {
+                let val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
+                if val < best_val {
+                    best_val = val;
+                    if best_val <= local_lb {
+                        break;
+                    }
+                }
+            }
         }
 
+        if best_val < beta {
+            self.cache.insert(hash, CacheEntry { value: best_val, is_exact: true });
+        } else {
+            self.cache.insert(hash, CacheEntry { value: beta, is_exact: false });
+        }
         best_val
     }
 
