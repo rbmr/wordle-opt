@@ -56,20 +56,15 @@ impl Metrics {
 /// - Equivalence Class Guess Projections
 /// - `FxHashMap` based subtree memoization
 
-#[derive(Clone, Copy)]
-pub struct CacheEntry {
-    pub value: u32,
-    pub is_exact: bool,
-}
 
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
-    pub capacity_bounds: &'a [u32],
+        capacity_bounds: &'a [u32],
     pub seen_projections: rustc_hash::FxHashSet<u32>,
-    pub cache: rustc_hash::FxHashMap<u64, CacheEntry>,
+    pub cache: &'a crate::cache::GlobalCache,
 }
 
 
@@ -163,6 +158,7 @@ impl<'a> Solver<'a> {
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
         capacity_bounds: &'a [u32],
+        cache: &'a crate::cache::GlobalCache,
     ) -> Self {
         Self {
             matrix,
@@ -171,7 +167,7 @@ impl<'a> Solver<'a> {
             metrics,
             seen_projections: rustc_hash::FxHashSet::default(),
             capacity_bounds,
-            cache: rustc_hash::FxHashMap::default(),
+            cache,
         }
     }
 
@@ -185,6 +181,7 @@ impl<'a> Solver<'a> {
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
     ) -> u32 {
+        let global_cache = crate::cache::GlobalCache::new(16 * 1024 * 1024);
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
 
         let mut guesses: Vec<usize> = (0..matrix.num_guesses).collect();
@@ -223,7 +220,7 @@ impl<'a> Solver<'a> {
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k, dict, metrics, &capacity_bounds);
+            let mut solver = Solver::new(matrix, max_k, dict, metrics, &capacity_bounds, &global_cache);
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
 
             // atomic min
@@ -262,12 +259,12 @@ impl<'a> Solver<'a> {
             hash ^= self.matrix.zobrist[c];
         }
 
-        if let Some(entry) = self.cache.get(&hash) {
+        if let Some((value, is_exact)) = self.cache.get(hash) {
             self.metrics.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if entry.is_exact {
-                return entry.value;
+            if is_exact {
+                return value;
             }
-            if entry.value >= beta {
+            if value >= beta {
                 return beta;
             }
         }
@@ -373,6 +370,7 @@ impl<'a> Solver<'a> {
                         self.dict,
                         self.metrics,
                         self.capacity_bounds,
+                        self.cache,
                     );
                     
                     let val = local_solver.min_guess_val(set, g, &active_guesses, current_best, depth);
@@ -393,9 +391,9 @@ impl<'a> Solver<'a> {
         }
 
         if best_val < beta {
-            self.cache.insert(hash, CacheEntry { value: best_val, is_exact: true });
+            self.cache.insert(hash, best_val, true);
         } else {
-            self.cache.insert(hash, CacheEntry { value: beta, is_exact: false });
+            self.cache.insert(hash, beta, false);
         }
         best_val
     }
