@@ -27,3 +27,9 @@ For testing larger subsets ($N > 150$), local machines typically thermal throttl
 
 ## Benchmarks & Scaling
 The engine scales predictably in both time and state evaluations. Refer to `benchmark_history.md` for historical throughput data and asymptotic scaling analysis. At peak performance, the engine reliably evaluates ~6-8 Million pruning bounds per second.
+
+### Correctness Verification
+To run the automated differential correctness fuzzer (which compares the optimized solver against an unoptimized naive reference on random subsets):
+```bash
+cargo run --release -- verify
+```
