@@ -635,3 +635,9 @@ impl<'a> Solver<'a> {
         cost
     }
 }
+
+// Note: GlobalCache now stores both Exact values (when a full search completes)
+// and Lower Bounds (when a search fails high against `beta`).
+// This implements Fail-Hard Alpha-Beta Transposition Table Pruning, ensuring that
+// if we revisit a state with a `beta` that is <= a previously established lower bound,
+// we can instantly prune the subtree and return `beta`, avoiding massive redundant deep searches.
