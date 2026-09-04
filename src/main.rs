@@ -119,10 +119,10 @@ fn main() {
     );
 
     if args.len() > 1 && args[1] == "benchmark" {
-        let sizes = vec![10, 20, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
+        let sizes = vec![10, 20, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000];
         run_benchmark(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "verify" {
-        verify::run_verification(&dict, &matrix, 10, 6);
+        verify::run_verification(&dict, &matrix, 50, 4);
         verify::run_stress_test(&dict, &matrix);
     } else {
         println!("Please specify 'benchmark' or 'verify' as an argument.");

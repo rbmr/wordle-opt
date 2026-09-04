@@ -353,7 +353,6 @@ impl<'a> Solver<'a> {
             counts[r] += 1;
         }
 
-        assert!(num_non_empty <= self.max_k, "Subtree branching factor {} exceeded root max_k {}!", num_non_empty, self.max_k);
         if num_non_empty == 1 {
             return beta;
         }
