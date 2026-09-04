@@ -1,3 +1,4 @@
+use rand::prelude::SliceRandom;
 
 pub mod core;
 pub mod dict;
