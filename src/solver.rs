@@ -204,6 +204,12 @@ impl<'a> Solver<'a> {
         beta.load(Ordering::Relaxed)
     }
 
+    /// Computes the minimum expected cost to solve a subset of candidates using ANY valid guess.
+    /// 
+    /// This function performs the top-level iteration over all available `allowed_guesses`.
+    /// To maximize alpha-beta pruning, guesses are first evaluated heuristically and sorted
+    /// by their expected capacity. We also aggressively prune symmetrically equivalent guesses
+    /// using a bitwise projection filter `seen_projections`.
     fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32) -> u32 {
         self.metrics.states_evaluated.fetch_add(1, Ordering::Relaxed);
         
@@ -304,6 +310,13 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
         best_val
     }
 
+    /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
+    /// 
+    /// This mathematically partitions the candidates into up to 243 ternary response buckets.
+    /// It recursively queries `min_state_val` on each sub-bucket. Alpha-beta pruning is applied
+    /// at the bucket level: if the cumulative cost of resolved buckets plus the theoretical
+    /// heuristic minimum cost of the remaining unresolved buckets exceeds `beta`, evaluation
+    /// is immediately aborted.
     fn min_guess_val(&mut self, set: &[usize], guess: usize, allowed_guesses: &[usize], beta: u32) -> u32 {
         self.metrics.guesses_evaluated.fetch_add(1, Ordering::Relaxed);
         let mut counts = [0u16; 243];
