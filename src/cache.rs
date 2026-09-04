@@ -60,3 +60,59 @@ impl GlobalCache {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_exact_vs_lower_bound() {
+        let cache = GlobalCache::new(1024);
+        let hash = 0x123456789ABCDEF0;
+        
+        // Insert lower bound
+        cache.insert(hash, 50, false);
+        let (val, exact) = cache.get(hash).unwrap();
+        assert_eq!(val, 50);
+        assert!(!exact);
+
+        // Overwrite with exact bound
+        cache.insert(hash, 55, true);
+        let (val, exact) = cache.get(hash).unwrap();
+        assert_eq!(val, 55);
+        assert!(exact);
+
+        // Attempt to overwrite exact with lower bound (should be ignored)
+        cache.insert(hash, 40, false);
+        let (val, exact) = cache.get(hash).unwrap();
+        assert_eq!(val, 55);
+        assert!(exact);
+    }
+
+    #[test]
+    fn test_cache_collision_harder_subtree() {
+        let cache = GlobalCache::new(1024); // Size is 1024, index uses bottom 10 bits.
+        let hash1 = 0x1000000000000001; // Index 1
+        let hash2 = 0x2000000000000001; // Index 1 (collision, different hash51)
+
+        // Insert easier subtree
+        cache.insert(hash1, 10, true);
+        
+        // Insert harder subtree (value 20 > 10)
+        cache.insert(hash2, 20, true);
+        
+        // hash2 should have overwritten hash1
+        assert!(cache.get(hash1).is_none());
+        let (val, _) = cache.get(hash2).unwrap();
+        assert_eq!(val, 20);
+
+        // Insert easier subtree again (value 5 < 20)
+        let hash3 = 0x3000000000000001; // Index 1
+        cache.insert(hash3, 5, true);
+        
+        // hash2 should still be there, hash3 ignored
+        assert!(cache.get(hash3).is_none());
+        let (val, _) = cache.get(hash2).unwrap();
+        assert_eq!(val, 20);
+    }
+}
