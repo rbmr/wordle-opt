@@ -1,10 +1,10 @@
-pub mod verify;
-pub mod naive;
 pub mod core;
 pub mod dict;
 pub mod heuristic;
 pub mod matrix;
+pub mod naive;
 pub mod solver;
+pub mod verify;
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
@@ -15,8 +15,22 @@ use std::io::Write;
 use std::time::Instant;
 
 fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
-    println!("{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}", "Size", "Cost", "Time(s)", "States Eval", "Guesses Eval", "Bounds Pruned", "Equiv Pruned", "Cache Hits", "Max Depth");
-    println!("{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<12}-+-{:-<10}-+-{:-<10}", "", "", "", "", "", "", "", "", "");
+    println!(
+        "{:<6} | {:<6} | {:<12} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
+        "Size",
+        "Cost",
+        "Time(s)",
+        "States Eval",
+        "Guesses Eval",
+        "Bounds Pruned",
+        "Equiv Pruned",
+        "Cache Hits",
+        "Max Depth"
+    );
+    println!(
+        "{:-<6}-+-{:-<6}-+-{:-<12}-+-{:-<14}-+-{:-<16}-+-{:-<14}-+-{:-<12}-+-{:-<10}-+-{:-<10}",
+        "", "", "", "", "", "", "", "", ""
+    );
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -70,7 +84,18 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             .cache_hits
             .load(std::sync::atomic::Ordering::Relaxed);
 
-        println!("{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}", size, cost, secs, states, guesses, bounds, equiv, chits, metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed));
+        println!(
+            "{:<6} | {:<6} | {:<12.4} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
+            size,
+            cost,
+            secs,
+            states,
+            guesses,
+            bounds,
+            equiv,
+            chits,
+            metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed)
+        );
 
         writeln!(
             file,
@@ -84,7 +109,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     println!("Loading dictionary...");
     let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
     println!(

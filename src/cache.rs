@@ -27,7 +27,7 @@ impl GlobalCache {
         let index = (full_hash as usize) & (self.entries.len() - 1);
         let packed = self.entries[index].load(Ordering::Relaxed);
         let hash51 = full_hash >> 13;
-        
+
         if packed != 0 && (packed >> 13) == hash51 {
             let is_exact = (packed & (1 << 12)) != 0;
             let value = (packed & 0xFFF) as u32;

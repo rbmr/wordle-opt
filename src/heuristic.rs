@@ -69,7 +69,9 @@ pub fn capacity_bound(n: usize, k: usize) -> u32 {
     let mut remaining = n as u32;
     let mut cost = 0;
     let mut depth = 1;
-    if k <= 1 { panic!("Infinite loop: n={}, k={}", n, k); }
+    if k <= 1 {
+        panic!("Infinite loop: n={}, k={}", n, k);
+    }
     let mut capacity_at_depth = 1u32;
 
     while remaining > 0 {

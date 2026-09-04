@@ -1,8 +1,8 @@
-use rayon::prelude::*;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use crate::core::Response;
 use crate::heuristic;
 use crate::matrix::ResponseMatrix;
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -55,18 +55,15 @@ impl Metrics {
 /// - Expected Remaining Candidate Heuristics
 /// - Equivalence Class Guess Projections
 /// - `FxHashMap` based subtree memoization
-
-
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
-        capacity_bounds: &'a [u32],
+    capacity_bounds: &'a [u32],
     pub seen_projections: rustc_hash::FxHashSet<u32>,
     pub cache: &'a crate::cache::GlobalCache,
 }
-
 
 impl<'a> Solver<'a> {
     pub fn greedy_solve(
@@ -220,7 +217,14 @@ impl<'a> Solver<'a> {
 
         active_guesses.par_iter().for_each(|&g| {
             let current_beta = beta.load(Ordering::Relaxed);
-            let mut solver = Solver::new(matrix, max_k, dict, metrics, &capacity_bounds, &global_cache);
+            let mut solver = Solver::new(
+                matrix,
+                max_k,
+                dict,
+                metrics,
+                &capacity_bounds,
+                &global_cache,
+            );
             let val = solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
 
             // atomic min
@@ -251,8 +255,16 @@ impl<'a> Solver<'a> {
     /// 2. **Alpha-Beta Bounds Pruning**: Uses `global_lb` and dynamically computes `local_lb` to instantly prune search if the mathematical optimum is reached.
     /// 3. **Young Brothers Wait Concept (YBWC)**: For `depth == 1`, evaluates the most promising root guess sequentially to establish a strict bound, then evaluates the rest in parallel using Rayon.
     /// 4. **Equivalence Class Projection**: Skips identical guesses using a bitwise character projection and an O(1) generation array.
-    fn min_state_val(&mut self, set: &[usize], allowed_guesses: &[usize], beta: u32, depth: usize) -> u32 {
-        self.metrics.max_depth.fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
+    fn min_state_val(
+        &mut self,
+        set: &[usize],
+        allowed_guesses: &[usize],
+        beta: u32,
+        depth: usize,
+    ) -> u32 {
+        self.metrics
+            .max_depth
+            .fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
 
         let mut hash = 0;
         for &c in set {
@@ -260,7 +272,9 @@ impl<'a> Solver<'a> {
         }
 
         if let Some((value, is_exact)) = self.cache.get(hash) {
-            self.metrics.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.metrics
+                .cache_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if is_exact {
                 return value;
             }
@@ -274,9 +288,15 @@ impl<'a> Solver<'a> {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let c_len = set.len();
-        if c_len == 0 { return 0; }
-        if c_len == 1 { return 1; }
-        if c_len == 2 { return 3; }
+        if c_len == 0 {
+            return 0;
+        }
+        if c_len == 1 {
+            return 1;
+        }
+        if c_len == 2 {
+            return 3;
+        }
 
         let global_lb = self.capacity_bounds[c_len];
         if global_lb >= beta {
@@ -334,13 +354,13 @@ impl<'a> Solver<'a> {
             for &count in &counts {
                 expected_rem += (count as u32) * (count as u32);
             }
-            
+
             active_tuples.push((g, expected_rem));
         }
         self.metrics
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
-        
+
         active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
@@ -349,21 +369,29 @@ impl<'a> Solver<'a> {
         }
 
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
-        
+
         if depth == 1 && active_guesses.len() > 1 {
             let shared_best = std::sync::atomic::AtomicU32::new(best_val);
             let first_g = active_guesses[0];
-            let val = self.min_guess_val(set, first_g, &active_guesses, shared_best.load(std::sync::atomic::Ordering::Relaxed), depth);
+            let val = self.min_guess_val(
+                set,
+                first_g,
+                &active_guesses,
+                shared_best.load(std::sync::atomic::Ordering::Relaxed),
+                depth,
+            );
             shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
-            
+
             if shared_best.load(std::sync::atomic::Ordering::Relaxed) <= local_lb {
                 best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
             } else {
                 use rayon::prelude::*;
                 active_guesses[1..].par_iter().for_each(|&g| {
                     let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
-                    if current_best <= local_lb { return; }
-                    
+                    if current_best <= local_lb {
+                        return;
+                    }
+
                     let mut local_solver = Solver::new(
                         self.matrix,
                         self.max_k,
@@ -372,8 +400,9 @@ impl<'a> Solver<'a> {
                         self.capacity_bounds,
                         self.cache,
                     );
-                    
-                    let val = local_solver.min_guess_val(set, g, &active_guesses, current_best, depth);
+
+                    let val =
+                        local_solver.min_guess_val(set, g, &active_guesses, current_best, depth);
                     shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
                 });
                 best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
