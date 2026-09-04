@@ -151,3 +151,13 @@ N       Time(s)    Growth(T)    Guesses       Growth(G)    Throughput(G/s)
 |------|------|---------|--------|---------|----------|----------|------------|
 | 100 | 262 | 0.874 | 58 | 163364 | 163284 | 482301 | 4 |
 | 250 | 702 | 24.084 | 1461 | 4250344 | 4248643 | 7030108 | 255 |
+
+## Mathematical Proof of Early Exact Bounds
+For any candidate set of size `n <= 2`, the optimal Wordle search cost is mathematically exact and bounded statically without recursion:
+- `n = 1`: The only remaining candidate must be guessed. Cost is exactly `1`.
+- `n = 2`: Since the dictionary of 14,855 allowed guesses contains the candidates themselves, one can always guess one of the two targets. 
+  - If it is the secret, cost = 1.
+  - If it is not, the secret is the other candidate (cost = 2). 
+  - Total optimal cost across both subtrees is exactly `1 + 2 = 3`.
+
+These bounds are exact minima and do not sacrifice alpha-beta correctness.
