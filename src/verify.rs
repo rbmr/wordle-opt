@@ -41,7 +41,7 @@ pub fn run_verification(dict: &Dictionary, matrix: &ResponseMatrix, iterations: 
             break;
         }
         
-        if (i + 1) % 1 == 0 {
+        if (i + 1) % 5 == 0 {
             println!("Passed {}/{} fuzz iterations...", i + 1, iterations);
         }
     }

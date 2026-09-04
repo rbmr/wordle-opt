@@ -288,7 +288,7 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        let mut active_tuples: Vec<(usize, u32, u32)> = Vec::with_capacity(allowed_guesses.len());
+        let mut active_tuples = Vec::with_capacity(allowed_guesses.len());
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
@@ -334,48 +334,38 @@ impl<'a> Solver<'a> {
             }
 
             let mut expected_rem = 0u32;
-            let mut guess_lb = c_len as u32;
-            for r in 0..243 {
-                let count = counts[r] as usize;
+            for &count in &counts {
                 expected_rem += (count as u32) * (count as u32);
-                guess_lb += self.capacity_bounds[count];
-            }
-            // WIN response is index 242. If present, it contributes 1 to capacity_bounds,
-            // but it's already counted in `c_len`. We subtract it to avoid double-counting.
-            guess_lb -= counts[242] as u32;
-            
-            if guess_lb >= beta {
-                continue;
             }
             
-            active_tuples.push((g, expected_rem, guess_lb));
+            active_tuples.push((g, expected_rem));
         }
         self.metrics
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
         
-        active_tuples.sort_unstable_by_key(|&(_, exp, _)| exp);
+        active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
         if local_lb >= beta {
             return beta;
         }
 
-        let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _, _)| g).collect();
+        let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _)| g).collect();
         
-        if depth == 1 && active_tuples.len() > 1 {
+        if depth == 1 && active_guesses.len() > 1 {
             let shared_best = std::sync::atomic::AtomicU32::new(best_val);
-            let first_tuple = active_tuples[0];
-            let val = self.min_guess_val(set, first_tuple.0, &active_guesses, shared_best.load(std::sync::atomic::Ordering::Relaxed), depth);
+            let first_g = active_guesses[0];
+            let val = self.min_guess_val(set, first_g, &active_guesses, shared_best.load(std::sync::atomic::Ordering::Relaxed), depth);
             shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
             
             if shared_best.load(std::sync::atomic::Ordering::Relaxed) <= local_lb {
                 best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
             } else {
                 use rayon::prelude::*;
-                active_tuples[1..].par_iter().for_each(|&tuple| {
+                active_guesses[1..].par_iter().for_each(|&g| {
                     let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
-                    if current_best <= local_lb || tuple.2 >= current_best { return; }
+                    if current_best <= local_lb { return; }
                     
                     let mut local_solver = Solver::new(
                         self.matrix,
@@ -385,14 +375,13 @@ impl<'a> Solver<'a> {
                         self.capacity_bounds,
                     );
                     
-                    let val = local_solver.min_guess_val(set, tuple.0, &active_guesses, current_best, depth);
+                    let val = local_solver.min_guess_val(set, g, &active_guesses, current_best, depth);
                     shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
                 });
                 best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
             }
         } else {
-            for &(g, _, guess_lb) in &active_tuples {
-                if guess_lb >= best_val { continue; }
+            for &(g, _) in &active_tuples {
                 let val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
                 if val < best_val {
                     best_val = val;
