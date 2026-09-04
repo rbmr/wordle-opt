@@ -33,3 +33,6 @@ We employ Rayon for work-stealing parallel iterators at the root levels. The hot
 Guesses that produce structurally identical partitions of the remaining valid candidates are skipped entirely.
 
 *Exploited Status:* Fully exploited. We construct a 25-bit projection mask for each guess based on its intersection with the letter inventory of the active candidate set, caching seen projections.
+
+### 7. Transposition Table Lower Bound Pruning (Fail-Hard)
+Standard Alpha-Beta search caches exact bounds. However, most nodes fail high (evaluating cost $\ge \beta$), producing a lower bound. Our `GlobalCache` natively stores `is_exact = false` when saving a lower bound. We have implemented fail-hard pruning during Cache retrieval: if the cached lower bound is $\ge \beta$, the node instantly fails high without any expansion. This mathematically prevents redundantly searching identical wide subtrees that we previously proved could never beat our current upper bound.
