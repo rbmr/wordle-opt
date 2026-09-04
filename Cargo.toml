@@ -2,6 +2,10 @@
 name = "wordle-opt"
 version = "0.1.0"
 edition = "2024"
+authors = ["Robert Mertens <robertmertens10@gmail.com>"]
+description = "A mathematically optimal, SIMD-parallelized Wordle solver designed to compute the theoretically perfect guessing strategy."
+repository = "https://github.com/rbmr/wordle-opt"
+license = "MIT"
 
 [dependencies]
 rayon = "1.12.0"
