@@ -103,7 +103,7 @@ fn main() {
     );
 
     if args.len() > 1 && args[1] == "benchmark" {
-        let sizes = vec![100, 250, 500, 750, 1000, 1500];
+        let sizes = vec![100, 250, 500, 750, 1000, 1500, 2340];
         run_benchmark(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "verify" {
         verify::run_verification(&dict, &matrix, 50, 4);
