@@ -117,3 +117,38 @@ mod extra_tests {
         assert_eq!(capacity_bound(20, 100), 39);
     }
 }
+
+#[cfg(test)]
+mod expected_remaining_tests {
+    use super::*;
+    use crate::dict::Dictionary;
+
+    #[test]
+    fn test_compute_expected_remaining() {
+        // Create a fake dictionary and matrix for testing expected remaining logic
+        let words = vec![
+            crate::core::Word::new("abcde"),
+            crate::core::Word::new("abcdf"),
+            crate::core::Word::new("xyzab"),
+        ];
+        let dict = Dictionary {
+            guesses: words.clone(),
+            candidates: words.clone(),
+            guess_chars: vec![
+                [0, 1, 2, 3, 4],
+                [0, 1, 2, 3, 5],
+                [23, 24, 25, 0, 1],
+            ],
+        };
+        let matrix = ResponseMatrix::new(&dict);
+        let set = vec![0, 1, 2];
+
+        // Guess 0 (abcde) against candidate 0 (abcde) is WIN
+        // Guess 0 against candidate 1 (abcdf) is 4 greens, 1 black
+        // Guess 0 against candidate 2 (xyzab) is 2 yellows (ab), 3 blacks
+        // So the 3 candidates fall into 3 distinct buckets. 
+        // sum(1^2 + 1^2 + 1^2) = 3
+        let exp0 = compute_expected_remaining(&matrix, &set, 0);
+        assert_eq!(exp0, 3);
+    }
+}
