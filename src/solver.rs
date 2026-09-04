@@ -102,9 +102,7 @@ impl<'a> Solver<'a> {
 
             let mut expected_rem = 0u32;
             for &count in &counts {
-                if count > 0 {
-                    expected_rem += (count as u32) * (count as u32);
-                }
+                expected_rem += (count as u32) * (count as u32);
             }
             active_tuples.push((g, expected_rem));
         }
@@ -285,9 +283,7 @@ let lb = heuristic::capacity_bound(c_len, self.max_k);
 
             let mut expected_rem = 0u32;
             for &count in &counts {
-                if count > 0 {
-                    expected_rem += (count as u32) * (count as u32);
-                }
+                expected_rem += (count as u32) * (count as u32);
             }
 
             active_tuples.push((g, expected_rem));
