@@ -391,7 +391,8 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        let mut active_tuples = Vec::with_capacity(allowed_guesses.len());
+        // Conservative initial capacity; active_tuples is usually much smaller than allowed_guesses.
+        let mut active_tuples = Vec::new();
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
@@ -432,12 +433,12 @@ impl<'a> Solver<'a> {
                 counts[r] += 1;
             }
 
-            if num_non_empty > local_max_k {
-                local_max_k = num_non_empty;
-            }
-
             if num_non_empty == 1 {
                 continue;
+            }
+
+            if num_non_empty > local_max_k {
+                local_max_k = num_non_empty;
             }
 
             let mut expected_rem = 0u32;
@@ -451,6 +452,14 @@ impl<'a> Solver<'a> {
                 }
             }
 
+            // Pre-prune by current beta: if lb_cost >= beta this guess can never improve best_val.
+            if lb_cost >= beta {
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
+
             active_tuples.push((g, expected_rem, lb_cost));
         }
         self.metrics
@@ -458,6 +467,12 @@ impl<'a> Solver<'a> {
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
 
         active_tuples.sort_unstable_by_key(|&(_, exp, _)| exp);
+
+        // If local_max_k == 0, no guess can partition the set at all — return beta.
+        // If local_max_k == 1, all useful guesses were pruned (the minimum lb_cost >= beta).
+        if local_max_k <= 1 {
+            return beta;
+        }
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
         if local_lb >= beta {
