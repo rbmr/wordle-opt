@@ -451,10 +451,6 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            if set.binary_search(&g).is_ok() {
-                expected_rem = (expected_rem as f64 * 0.90) as u32;
-            }
-
             active_tuples.push((g, expected_rem, lb_cost));
         }
         self.metrics
