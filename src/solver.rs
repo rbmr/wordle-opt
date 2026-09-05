@@ -28,6 +28,8 @@ pub struct Metrics {
     pub pruned_by_bounds: AtomicUsize,
     pub pruned_by_equivalence: AtomicUsize,
     pub cache_hits: AtomicUsize,
+    /// Number of root-level first guesses fully evaluated (for progress reporting).
+    pub root_guesses_done: AtomicUsize,
 }
 
 impl Default for Metrics {
@@ -45,6 +47,7 @@ impl Metrics {
             pruned_by_bounds: AtomicUsize::new(0),
             pruned_by_equivalence: AtomicUsize::new(0),
             cache_hits: AtomicUsize::new(0),
+            root_guesses_done: AtomicUsize::new(0),
         }
     }
 }
@@ -344,6 +347,8 @@ impl<'a> Solver<'a> {
                         Err(actual) => current = actual,
                     }
                 }
+
+                metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
             });
         }
 

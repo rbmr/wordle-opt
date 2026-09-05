@@ -146,20 +146,45 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     }
 
     let all_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
-    println!("Running full N={} optimal solve...", all_candidates.len());
+    let n_candidates = all_candidates.len();
+    println!("Running full N={} optimal solve...", n_candidates);
+    let _ = std::io::Write::flush(&mut std::io::stdout());
 
-    let metrics = Metrics::new();
+    let metrics = std::sync::Arc::new(Metrics::new());
     let start = Instant::now();
+
+    // Progress-reporting thread: prints status every 60 seconds.
+    let metrics_clone = std::sync::Arc::clone(&metrics);
+    let start_clone = start;
+    let progress_thread = std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let elapsed = start_clone.elapsed().as_secs_f64();
+            let done = metrics_clone.root_guesses_done.load(std::sync::atomic::Ordering::Relaxed);
+            // We don't have a direct count of total_active_guesses here, so just report done count.
+            eprintln!(
+                "[progress] elapsed={:.0}s root_guesses_done={} states={} bounds_pruned={}",
+                elapsed,
+                done,
+                metrics_clone.states_evaluated.load(std::sync::atomic::Ordering::Relaxed),
+                metrics_clone.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed),
+            );
+        }
+    });
+    // Thread is intentionally leaked (daemon-like); process exits when solve completes.
+    drop(progress_thread);
+
     let cost = Solver::solve(matrix, &all_candidates, dict, &metrics);
     let elapsed = start.elapsed();
 
     println!("\n=== FULL RUN COMPLETE ===");
-    println!("Candidates: {}", all_candidates.len());
+    println!("Candidates: {}", n_candidates);
     println!("Optimal total cost: {}", cost);
-    println!("Avg guesses: {:.6}", cost as f64 / all_candidates.len() as f64);
+    println!("Avg guesses: {:.6}", cost as f64 / n_candidates as f64);
     println!("Wall time: {:.3}s ({:.2}h)", elapsed.as_secs_f64(), elapsed.as_secs_f64() / 3600.0);
     println!("States evaluated: {}", metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed));
     println!("Guesses evaluated: {}", metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed));
+    println!("Root guesses done: {}", metrics.root_guesses_done.load(std::sync::atomic::Ordering::Relaxed));
     println!("Bounds pruned: {}", metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed));
     println!("Equiv pruned: {}", metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed));
     println!("Cache hits: {}", metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed));
@@ -172,7 +197,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         .expect("Cannot open benchmark_history.md");
     writeln!(file, "## FULL RUN N=2340: {:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap();
     writeln!(file, "- Optimal cost: {}", cost).unwrap();
-    writeln!(file, "- Avg guesses: {:.6}", cost as f64 / all_candidates.len() as f64).unwrap();
+    writeln!(file, "- Avg guesses: {:.6}", cost as f64 / n_candidates as f64).unwrap();
     writeln!(file, "- Time: {:.3}s", elapsed.as_secs_f64()).unwrap();
     writeln!(file).unwrap();
 }
