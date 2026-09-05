@@ -479,68 +479,26 @@ impl<'a> Solver<'a> {
             return beta;
         }
 
+        // Build a flat guess-index slice from active_tuples for child calls.
+        // We reuse the `active_tuples` allocation to avoid a separate Vec.
+        // The ordering of allowed_guesses passed to children is irrelevant —
+        // each child's min_state_val re-sorts by expected_rem for its own candidate set.
         let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _, _)| g).collect();
 
-        // DISABLE depth==1 parallelism. Rayon task overhead for microsecond evaluations
-        // of tiny depth-1 buckets (size ~10) is a massive performance drag.
-        // We already have 14,855 parallel tasks at the root!
-        if false && depth == 1 && active_guesses.len() > 1 {
-            let shared_best = std::sync::atomic::AtomicU32::new(best_val);
-            let first_g = active_guesses[0];
-            let val = self.min_guess_val(
-                set,
-                first_g,
-                &active_guesses,
-                shared_best.load(std::sync::atomic::Ordering::Relaxed),
-                depth,
-            );
-            shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
-
-            if shared_best.load(std::sync::atomic::Ordering::Relaxed) <= local_lb {
-                best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
-            } else {
-                use rayon::prelude::*;
-                active_tuples[1..].par_iter().for_each(|&(g, _, g_lb)| {
-                    let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
-                    if g_lb >= current_best {
-                        self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        return;
-                    }
-                    let current_best = shared_best.load(std::sync::atomic::Ordering::Relaxed);
-                    if current_best <= local_lb {
-                        return;
-                    }
-
-                    let mut local_solver = Solver::new(
-                        self.matrix,
-                        self.max_k,
-                        self.dict,
-                        self.metrics,
-                        self.capacity_bounds,
-                        self.cache,
-                    );
-
-                    let val =
-                        local_solver.min_guess_val(set, g, &active_guesses, current_best, depth);
-                    shared_best.fetch_min(val, std::sync::atomic::Ordering::Relaxed);
-                });
-                best_val = shared_best.load(std::sync::atomic::Ordering::Relaxed);
+        for &(g, _, g_lb) in &active_tuples {
+            if g_lb >= best_val {
+                self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
             }
-        } else {
-            for &(g, _, g_lb) in &active_tuples {
-                if g_lb >= best_val {
-                    self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    continue;
-                }
-                let val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
-                if val < best_val {
-                    best_val = val;
-                    if best_val <= local_lb {
-                        break;
-                    }
+            let val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
+            if val < best_val {
+                best_val = val;
+                if best_val <= local_lb {
+                    break;
                 }
             }
         }
+
 
         if best_val < beta {
             self.cache.insert(hash, best_val, true);
