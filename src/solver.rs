@@ -56,6 +56,9 @@ impl Metrics {
 /// - Expected Remaining Candidate Heuristics
 /// - Equivalence Class Guess Projections
 /// - `FxHashMap` based subtree memoization
+/// Sentinel used by non-root Solver instances; never tightened, so never causes spurious abort.
+static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
+
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
@@ -64,6 +67,9 @@ pub struct Solver<'a> {
     capacity_bounds: &'a [u32],
     pub seen_projections: rustc_hash::FxHashSet<u32>,
     pub cache: &'a crate::cache::GlobalCache,
+    /// Shared global upper bound across all parallel root-level tasks.
+    /// When a thread improves beta, others see it immediately and can abort early.
+    global_beta: &'a AtomicU32,
 }
 
 impl<'a> Solver<'a> {
@@ -153,6 +159,7 @@ impl<'a> Solver<'a> {
         }
         cost
     }
+
     pub fn new(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -160,6 +167,18 @@ impl<'a> Solver<'a> {
         metrics: &'a Metrics,
         capacity_bounds: &'a [u32],
         cache: &'a crate::cache::GlobalCache,
+    ) -> Self {
+        Self::new_with_global_beta(matrix, max_k, dict, metrics, capacity_bounds, cache, &SENTINEL_BETA)
+    }
+
+    pub fn new_with_global_beta(
+        matrix: &'a ResponseMatrix,
+        max_k: usize,
+        dict: &'a crate::dict::Dictionary,
+        metrics: &'a Metrics,
+        capacity_bounds: &'a [u32],
+        cache: &'a crate::cache::GlobalCache,
+        global_beta: &'a AtomicU32,
     ) -> Self {
         Self {
             matrix,
@@ -169,6 +188,7 @@ impl<'a> Solver<'a> {
             seen_projections: rustc_hash::FxHashSet::default(),
             capacity_bounds,
             cache,
+            global_beta,
         }
     }
 
@@ -295,16 +315,19 @@ impl<'a> Solver<'a> {
             let val = base_cost + bucket_costs;
             beta.fetch_min(val, Ordering::Relaxed);
 
-            // Now evaluate the remaining guesses in parallel with the tight beta
+            // Now evaluate the remaining guesses in parallel with the tight beta.
+            // Each solver holds a reference to the shared beta so it can abort early
+            // if another thread finds a better solution while this one is running.
             active_guesses[1..].par_iter().for_each(|&g| {
                 let current_beta = beta.load(Ordering::Relaxed);
-                let mut local_solver = Solver::new(
+                let mut local_solver = Solver::new_with_global_beta(
                     matrix,
                     max_k,
                     dict,
                     metrics,
                     &capacity_bounds,
                     &global_cache,
+                    &beta,
                 );
                 let val = local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
 
@@ -604,8 +627,20 @@ impl<'a> Solver<'a> {
             let b = cost - p_lbs[r_idx];
             let new_beta = beta - b;
 
-            let val = self.min_state_val(p, allowed_guesses, new_beta, depth + 1);
+            // Also respect the global beta from concurrent threads: if another thread
+            // already found a solution cheaper than beta, tighten our local bound.
+            let effective_beta = new_beta.min(self.global_beta.load(Ordering::Relaxed).saturating_sub(b));
+            if effective_beta == 0 {
+                return beta;
+            }
+
+            let val = self.min_state_val(p, allowed_guesses, effective_beta, depth + 1);
             if b + val >= beta {
+                return beta;
+            }
+            // Propagate any tightening from the global beta.
+            let global_now = self.global_beta.load(Ordering::Relaxed);
+            if b + val >= global_now {
                 return beta;
             }
             cost = b + val;
