@@ -136,6 +136,47 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     }
     writeln!(file).unwrap();
 }
+fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
+    let is_compute = std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute")
+        .unwrap_or(false);
+    if !is_compute {
+        eprintln!("HARD GUARD: full run must execute on compute node (ubuntu-main). Use rsync + ssh.");
+        std::process::exit(1);
+    }
+
+    let all_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
+    println!("Running full N={} optimal solve...", all_candidates.len());
+
+    let metrics = Metrics::new();
+    let start = Instant::now();
+    let cost = Solver::solve(matrix, &all_candidates, dict, &metrics);
+    let elapsed = start.elapsed();
+
+    println!("\n=== FULL RUN COMPLETE ===");
+    println!("Candidates: {}", all_candidates.len());
+    println!("Optimal total cost: {}", cost);
+    println!("Avg guesses: {:.6}", cost as f64 / all_candidates.len() as f64);
+    println!("Wall time: {:.3}s ({:.2}h)", elapsed.as_secs_f64(), elapsed.as_secs_f64() / 3600.0);
+    println!("States evaluated: {}", metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed));
+    println!("Guesses evaluated: {}", metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed));
+    println!("Bounds pruned: {}", metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed));
+    println!("Equiv pruned: {}", metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed));
+    println!("Cache hits: {}", metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed));
+
+    // Append to benchmark history
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("benchmark_history.md")
+        .expect("Cannot open benchmark_history.md");
+    writeln!(file, "## FULL RUN N=2340: {:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap();
+    writeln!(file, "- Optimal cost: {}", cost).unwrap();
+    writeln!(file, "- Avg guesses: {:.6}", cost as f64 / all_candidates.len() as f64).unwrap();
+    writeln!(file, "- Time: {:.3}s", elapsed.as_secs_f64()).unwrap();
+    writeln!(file).unwrap();
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -161,21 +202,29 @@ fn main() {
         if args.len() > 3 && args[2] == "-n" {
             max_n = args[3].parse().unwrap();
         }
-        
-        let is_compute = std::fs::read_to_string("/etc/hostname").map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute").unwrap_or(false);
+
+        let is_compute = std::fs::read_to_string("/etc/hostname")
+            .map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute")
+            .unwrap_or(false);
 
         if !is_compute && max_n > 500 {
             eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
             std::process::exit(1);
         }
 
-        let sizes: Vec<usize> = vec![100, 250, 500, 750, 1000, 1500, 2340].into_iter().filter(|&x| x <= max_n).collect();
+        let sizes: Vec<usize> = vec![100, 250, 500, 750, 1000, 1500, 2340]
+            .into_iter()
+            .filter(|&x| x <= max_n)
+            .collect();
         run_benchmark(&matrix, &dict, &sizes);
+    } else if args.len() > 1 && args[1] == "full" {
+        run_full(&matrix, &dict);
     } else if args.len() > 1 && args[1] == "verify" {
         verify::run_verification(&dict, &matrix, 50, 4);
         verify::run_stress_test(&dict, &matrix);
     } else {
-        println!("Please specify 'benchmark' or 'verify' as an argument.");
+        println!("Usage: wordle-opt <benchmark [-n N] | full | verify>");
     }
 }
 pub mod cache;
+
