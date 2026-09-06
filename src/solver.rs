@@ -279,7 +279,6 @@ impl<'a> Solver<'a> {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
                 if r_idx == crate::core::Response::WIN.0 as usize {
-                    
                     continue;
                 }
                 if p_len <= 2 {
@@ -351,20 +350,21 @@ impl<'a> Solver<'a> {
         beta.load(Ordering::Relaxed)
     }
 
-    /// Computes the minimum expected cost to solve a subset of candidates using ANY valid guess.
-    ///
-    /// This function performs the top-level iteration over all available `allowed_guesses`.
-    /// To maximize alpha-beta pruning, guesses are first evaluated heuristically and sorted
-    /// by their expected capacity. We also aggressively prune symmetrically equivalent guesses
-    /// using a bitwise projection filter `seen_projections`.
-    /// Evaluates the minimum expected cost of the entire state given a set of candidates.
-    ///
-    /// This function acts as the `Max` node in the Min-Max tree (maximizing our efficiency/
-    /// minimizing the expected cost). It uses several heavy optimization techniques:
-    /// 1. **Transposition Table (Cache)**: Caches deep identical subtrees using a lock-free thread-local Zobrist hash.
-    /// 2. **Alpha-Beta Bounds Pruning**: Uses `global_lb` and dynamically computes `local_lb` to instantly prune search if the mathematical optimum is reached.
-    /// 3. **Young Brothers Wait Concept (YBWC)**: For `depth == 1`, evaluates the most promising root guess sequentially to establish a strict bound, then evaluates the rest in parallel using Rayon.
-    /// 4. **Equivalence Class Projection**: Skips identical guesses using a bitwise character projection and an O(1) generation array.
+    /// Computes the minimum expected cost to solve `set`, minimizing over every guess in
+    /// `allowed_guesses`. This is the search's main per-state entry point:
+    /// 1. **Transposition table lookup**: an exact cached value returns immediately; a cached
+    ///    lower bound `>= beta` fails high immediately (see the module-level note above on
+    ///    fail-hard transposition pruning).
+    /// 2. **Capacity lower bound pruning**: `capacity_bounds[c_len]` (global) and a per-node
+    ///    `local_max_k`-derived bound both give an instant return once they prove `beta`
+    ///    can't be beaten.
+    /// 3. **Equivalence-class projection**: guesses that partition `set` identically to one
+    ///    already tried at this node are skipped via a bitwise projection over the candidate
+    ///    set's letter inventory (`seen_projections`).
+    /// 4. **Guess ordering + fail-hard alpha-beta**: remaining guesses are sorted by expected
+    ///    remaining candidates and evaluated via `min_guess_val`, tightening `best_val` as
+    ///    better guesses are found and stopping early once `best_val` reaches the proven
+    ///    local lower bound.
     fn min_state_val(
         &mut self,
         set: &[usize],
@@ -523,7 +523,6 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-
 
         if best_val < beta {
             self.cache.insert(hash, best_val, true);
