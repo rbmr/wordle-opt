@@ -14,13 +14,8 @@ impl std::borrow::Borrow<[usize]> for CandidateSet {
     }
 }
 
-/// The optimal Wordle solver using Branch and Bound.
-///
-/// Implements aggressive search space pruning through:
-/// - Exact Capacity Lower Bounds
-/// - Expected Remaining Candidate Heuristics
-/// - Equivalence Class Guess Projections
-/// - `FxHashMap` based subtree memoization
+/// Instrumentation counters for a single `Solver::solve` run, used for
+/// benchmarking and progress reporting. Not part of the solving logic itself.
 pub struct Metrics {
     pub states_evaluated: AtomicUsize,
     pub max_depth: AtomicUsize,
@@ -52,16 +47,17 @@ impl Metrics {
     }
 }
 
-/// The optimal Wordle solver using Branch and Bound.
-///
-/// Implements aggressive search space pruning through:
-/// - Exact Capacity Lower Bounds
-/// - Expected Remaining Candidate Heuristics
-/// - Equivalence Class Guess Projections
-/// - `FxHashMap` based subtree memoization
 /// Sentinel used by non-root Solver instances; never tightened, so never causes spurious abort.
 static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 
+/// The optimal Wordle solver using Branch and Bound.
+///
+/// Implements aggressive search space pruning through:
+/// - Exact capacity lower bounds (see `heuristic::capacity_bound`)
+/// - Expected-remaining-candidate guess ordering heuristic
+/// - Equivalence-class guess projection (skips guesses that are
+///   indistinguishable given the current candidate set)
+/// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
@@ -480,14 +476,15 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            // Pre-prune by current beta: if lb_cost >= beta this guess can never improve best_val.
-            if lb_cost >= beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                continue;
-            }
-
+            // Deliberately NOT pruning by `lb_cost >= beta` here: active_tuples also
+            // seeds `active_guesses`, which is passed down as `allowed_guesses` to
+            // every child call. A guess that can't beat *this* level's beta may still
+            // be exactly what a child needs, since children search against their own
+            // (looser) sub-beta. Filtering here silently narrows the guess pool
+            // available to descendants, producing suboptimal results. The equivalent
+            // prune for "should I try this guess at this level" already happens safely
+            // below via `g_lb >= best_val`, which only affects iteration order/early
+            // exit, not what gets handed to children.
             active_tuples.push((g, expected_rem, lb_cost));
         }
         self.metrics
@@ -678,6 +675,22 @@ mod tests {
         let candidates: Vec<usize> = (0..100).collect();
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
         assert_eq!(cost, 262, "N=100 golden cost changed - likely correctness bug");
+    }
+
+    #[test]
+    fn test_golden_n750_exact_cost() {
+        // Deliberately larger than the other golden tests: catches a real
+        // regression class the N<=250 tests miss, where a guess pruned for
+        // *this* node's beta is wrongly withheld from the pool passed down
+        // to children, who may need it for their own (looser) sub-beta.
+        // That bug produced cost=2264 here (wrong, too high) while leaving
+        // N=100/250 unaffected. Costs ~10s; worth it for what it catches.
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates: Vec<usize> = (0..750).collect();
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        assert_eq!(cost, 2256, "N=750 golden cost changed - likely correctness bug");
     }
 
     #[test]
