@@ -37,6 +37,10 @@ aggressively while guaranteeing the final answer is still exactly optimal:
 # Deterministic benchmark at increasing sizes (see Benchmarking below)
 cargo run --release -- benchmark [-n MAX_N]
 
+# Randomized multi-sample benchmark: several random subsets per size
+# instead of one fixed slice (see Benchmarking below)
+cargo run --release -- benchmark-random [-n MAX_N] [-k SAMPLES_PER_SIZE]
+
 # Solve the full candidate set (guarded to run only on the designated
 # compute host - see run_full in src/main.rs)
 cargo run --release -- full
@@ -86,3 +90,18 @@ Earlier benchmarking used randomly sampled candidates and untracked commits,
 which made results non-reproducible and non-comparable; that history is
 preserved for reference in `benchmark_history_legacy.md` but should not be
 used to judge whether a change is an improvement or a regression.
+
+`cargo run --release -- benchmark-random [-n MAX_N] [-k SAMPLES_PER_SIZE]`
+is the more statistically meaningful sibling of `benchmark`: the first-N
+sorted slice is a single, arbitrary sample (alphabetically-first words
+aren't necessarily representative of a "typical" N-word instance), so it
+can't distinguish a real improvement from that one input happening to be
+easy or hard. This mode draws `SAMPLES_PER_SIZE` (default 5) independent
+random subsets per size from a single `fastrand::Rng` seeded with a fixed
+constant (`BENCHMARK_RANDOM_SEED` in `src/main.rs`), and reports
+min/avg/max cost, time, and states across them. The fixed seed means this
+is exactly as reproducible as the deterministic benchmark - the same seed,
+sizes, and sample count always draw the same sequence of subsets - it's
+just reproducible over a representative spread of inputs instead of one
+fixed slice. This is the mode to use for tracking real scaling/performance
+progress; use `benchmark` for quick, single-sample sanity checks.

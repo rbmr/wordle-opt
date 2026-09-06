@@ -202,6 +202,160 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     }
     writeln!(file).unwrap();
 }
+
+/// A fixed seed for `run_benchmark_random`'s sampling. Fixed (not time-based)
+/// so that re-running this benchmark against the same code and the same
+/// dictionary files draws the exact same sequence of random subsets every
+/// time - "randomized" here means "not biased toward one arbitrary slice of
+/// the dictionary" (see doc comment below), not "different every run".
+const BENCHMARK_RANDOM_SEED: u64 = 20260906;
+
+/// Runs the solver on `samples_per_size` independently-drawn random subsets
+/// per size in `sizes`, instead of `run_benchmark`'s single fixed first-N
+/// slice.
+///
+/// `run_benchmark`'s deterministic first-N-sorted subset is reproducible,
+/// but it's still just one arbitrary sample - the first N candidates in
+/// dictionary (alphabetical) order aren't necessarily representative of a
+/// "typical" N-word instance, and a single sample can't distinguish a real
+/// improvement from that one input happening to be easy or hard. Multiple
+/// random samples per size give an actual distribution (reported as
+/// min/avg/max cost and time), and because the RNG is seeded with a fixed
+/// constant, the exact same set of samples is drawn on every re-run - so
+/// this stays exactly as reproducible as the deterministic benchmark, it's
+/// just reproducible over a representative spread of inputs instead of one
+/// fixed slice.
+fn run_benchmark_random(
+    matrix: &ResponseMatrix,
+    dict: &Dictionary,
+    sizes: &[usize],
+    samples_per_size: usize,
+) {
+    let commit = git_commit_hash();
+    let host = hostname();
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    println!(
+        "Randomized benchmark run: commit={} host={} cpus={} seed={} samples_per_size={} unix_time={}",
+        commit, host, cpus, BENCHMARK_RANDOM_SEED, samples_per_size, timestamp
+    );
+    println!(
+        "{:<6} | {:<8} | {:<24} | {:<24}",
+        "Size", "Samples", "Cost [Min/Avg/Max]", "Time(s) [Min/Avg/Max]"
+    );
+    println!("{:-<6}-+-{:-<8}-+-{:-<24}-+-{:-<24}", "", "", "", "");
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("benchmark_history.md")
+        .expect("Cannot open benchmark_history.md");
+
+    writeln!(
+        file,
+        "## Randomized Benchmark Run: commit={} host={} cpus={} seed={} samples_per_size={} unix_time={}",
+        commit, host, cpus, BENCHMARK_RANDOM_SEED, samples_per_size, timestamp
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "Each size draws {} independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with {} at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.",
+        samples_per_size, BENCHMARK_RANDOM_SEED
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |"
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "|------|---------|---------------------|------------------------|----------------------|"
+    )
+    .unwrap();
+
+    let mut rng = fastrand::Rng::with_seed(BENCHMARK_RANDOM_SEED);
+    let n_candidates = dict.candidates.len();
+
+    for &s in sizes {
+        let size = s.min(n_candidates);
+        let mut costs = Vec::with_capacity(samples_per_size);
+        let mut times = Vec::with_capacity(samples_per_size);
+        let mut states = Vec::with_capacity(samples_per_size);
+
+        for sample_idx in 0..samples_per_size {
+            let mut subset = Vec::with_capacity(size);
+            while subset.len() < size {
+                let idx = rng.usize(0..n_candidates);
+                if !subset.contains(&idx) {
+                    subset.push(idx);
+                }
+            }
+            subset.sort_unstable();
+
+            let metrics = Metrics::new();
+            let start = Instant::now();
+            let cost = Solver::solve(matrix, &subset, dict, &metrics);
+            let secs = start.elapsed().as_secs_f64();
+
+            println!(
+                "  size={} sample={}/{} cost={} time={:.3}s",
+                size,
+                sample_idx + 1,
+                samples_per_size,
+                cost,
+                secs
+            );
+
+            costs.push(cost);
+            times.push(secs);
+            states.push(metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed));
+        }
+
+        let cost_min = *costs.iter().min().unwrap();
+        let cost_max = *costs.iter().max().unwrap();
+        let cost_avg = costs.iter().sum::<u32>() as f64 / costs.len() as f64;
+        let time_min = times.iter().cloned().fold(f64::MAX, f64::min);
+        let time_max = times.iter().cloned().fold(f64::MIN, f64::max);
+        let time_avg = times.iter().sum::<f64>() / times.len() as f64;
+        let states_min = *states.iter().min().unwrap();
+        let states_max = *states.iter().max().unwrap();
+        let states_avg = states.iter().sum::<usize>() as f64 / states.len() as f64;
+
+        println!(
+            "{:<6} | {:<8} | {:<24} | {:<24}",
+            size,
+            samples_per_size,
+            format!("{}/{:.1}/{}", cost_min, cost_avg, cost_max),
+            format!("{:.2}/{:.2}/{:.2}", time_min, time_avg, time_max)
+        );
+
+        writeln!(
+            file,
+            "| {} | {} | {}/{:.1}/{} | {:.2}/{:.2}/{:.2} | {}/{:.1}/{} |",
+            size,
+            samples_per_size,
+            cost_min,
+            cost_avg,
+            cost_max,
+            time_min,
+            time_avg,
+            time_max,
+            states_min,
+            states_avg,
+            states_max
+        )
+        .unwrap();
+    }
+    writeln!(file).unwrap();
+}
+
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     if !is_compute_host() {
         eprintln!("HARD GUARD: full run must execute on the compute host (hostname 'ubuntu-main' or 'compute'). Use rsync + ssh, or deploy_and_bench.sh.");
@@ -301,6 +455,29 @@ fn main() {
             .filter(|&x| x <= max_n)
             .collect();
         run_benchmark(&matrix, &dict, &sizes);
+    } else if args.len() > 1 && args[1] == "benchmark-random" {
+        let mut max_n = 1500;
+        let mut samples = 5;
+        let mut i = 2;
+        while i + 1 < args.len() {
+            match args[i].as_str() {
+                "-n" => max_n = args[i + 1].parse().unwrap(),
+                "-k" => samples = args[i + 1].parse().unwrap(),
+                _ => {}
+            }
+            i += 2;
+        }
+
+        if !is_compute_host() && max_n > 500 {
+            eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
+            std::process::exit(1);
+        }
+
+        let sizes: Vec<usize> = vec![100, 250, 500, 750, 1000, 1500]
+            .into_iter()
+            .filter(|&x| x <= max_n)
+            .collect();
+        run_benchmark_random(&matrix, &dict, &sizes, samples);
     } else if args.len() > 1 && args[1] == "full" {
         run_full(&matrix, &dict);
     } else if args.len() > 1 && args[1] == "verify" {
@@ -310,7 +487,7 @@ fn main() {
             std::process::exit(1);
         }
     } else {
-        println!("Usage: wordle-opt <benchmark [-n N] | full | verify>");
+        println!("Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | full | verify>");
     }
 }
 pub mod cache;
