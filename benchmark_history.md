@@ -18,3 +18,24 @@ Entries are appended automatically; do not hand-edit past runs.
 - Prior exploratory benchmarking (randomly sampled candidates, no commit
   stamping, narrative claims not tied to a specific run) has been moved to
   `benchmark_history_legacy.md` and should not be used for comparisons.
+## Randomized Benchmark Run: commit=13b66ad host=ubuntu-main cpus=8 seed=20260906 samples_per_size=1 unix_time=1788701526
+Each size draws 1 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |
+|------|---------|---------------------|------------------------|----------------------|
+| 100 | 1 | 248/248.0/248 | 0.03/0.03/0.03 | 10/10.0/10 |
+| 250 | 1 | 685/685.0/685 | 0.91/0.91/0.91 | 668/668.0/668 |
+| 500 | 1 | 1455/1455.0/1455 | 14.87/14.87/14.87 | 13960/13960.0/13960 |
+| 750 | 1 | 2270/2270.0/2270 | 43.79/43.79/43.79 | 77303/77303.0/77303 |
+| 1000 | 1 | 3125/3125.0/3125 | 259.96/259.96/259.96 | 514308/514308.0/514308 |
+| 1500 | 1 | 4889/4889.0/4889 | 6280.28/6280.28/6280.28 | 8778324/8778324.0/8778324 |
+
+## Randomized Benchmark Run: commit=13b66ad host=ubuntu-main cpus=8 seed=20260906 samples_per_size=5 unix_time=1788708169
+Each size draws 5 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |
+|------|---------|---------------------|------------------------|----------------------|
+| 100 | 5 | 248/250.4/253 | 0.03/0.07/0.12 | 10/62.4/136 |
+| 250 | 5 | 677/679.8/684 | 0.37/0.52/0.81 | 135/292.2/562 |
+| 500 | 5 | 1453/1459.0/1463 | 13.16/16.01/19.12 | 11924/15733.8/20830 |
+| 750 | 5 | 2263/2277.2/2296 | 38.04/53.15/79.55 | 66064/102589.2/158813 |
+| 1000 | 5 | 3124/3132.8/3139 | 183.11/245.92/323.24 | 380374/498201.0/628400 |
+
