@@ -204,7 +204,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 }
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     if !is_compute_host() {
-        eprintln!("HARD GUARD: full run must execute on compute node (ubuntu-main). Use rsync + ssh.");
+        eprintln!("HARD GUARD: full run must execute on the compute host (hostname 'ubuntu-main' or 'compute'). Use rsync + ssh, or deploy_and_bench.sh.");
         std::process::exit(1);
     }
 
