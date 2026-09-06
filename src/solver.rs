@@ -281,8 +281,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 if p_len <= 2 {
-                    let lb = heuristic::capacity_bound(p_len, max_k);
-                    base_cost += lb;
+                    base_cost += capacity_bounds[p_len];
                     continue;
                 }
                 let start = offsets[r_idx];
@@ -590,7 +589,12 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let p_len = counts[r_idx] as u32;
-            let lb = heuristic::capacity_bound(p_len as usize, self.max_k);
+            // self.capacity_bounds[n] == capacity_bound(n, self.max_k) for every n up to
+            // dict.candidates.len() (see solve()'s setup) - self.max_k is fixed at
+            // construction and never changes across recursion, so this is always exactly
+            // the same value capacity_bound() would compute, just without redoing the
+            // O(log n) loop on every one of this hot function's calls.
+            let lb = self.capacity_bounds[p_len as usize];
             cost += lb;
             p_lbs[r_idx] = lb;
         }
