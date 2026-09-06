@@ -76,6 +76,39 @@ lookups sound (never reusing a bound that doesn't apply to a tighter
 current constraint) while still avoiding a full re-expansion when it does
 apply.
 
+## Known Scaling Behavior: depth transitions, not a smooth curve
+
+`benchmark-random` (see README's Benchmarking section) showed avg
+cost/candidate scaling smoothly from N=1000 to N=1500 (~3.13 -> ~3.26
+guesses/candidate) while wall-clock time jumped ~25x. Investigated with
+`diagnose` (see `diagnose_history.md`): the cause is `max_depth` - the
+deepest guess-sequence the search has to explore to *prove* optimality -
+stepping from 4 to 5 somewhere between N=1100 and N=1200. That single
+step, not smooth growth in N, dominates: wall time jumped 5.2x for only
+a 1.09x increase in N right at that transition, and the transposition
+table's cache-hit rate dropped from ~61-63% to ~46-56% at the same
+point.
+
+Why a depth transition costs so much more than sample-count growth
+alone would suggest: transposition-table reuse depends on different
+guess orderings converging on the *same* candidate subset, and the
+number of distinct subsets reachable grows combinatorially with depth -
+so reuse gets rarer each level deeper. Cost-per-candidate barely moves
+because only a minority of candidates in a given sample actually need
+the extra guess, but the search still has to exhaustively rule out a
+shallower solution for the *whole* set before it can conclude a deeper
+one is needed - and that exhaustive ruling-out is what balloons.
+
+This matters for the N=2340/10-hour goal: expect similar step-function
+jumps, not smooth extrapolation, at every depth threshold the full-scale
+search crosses (it will almost certainly need depth 5, likely 6, for the
+hardest real Wordle answers). Improving cache/transposition-table reuse
+at depth, or reducing how often the search re-proves a shallower
+solution impossible before searching deeper, looks like a higher-leverage
+target than per-node micro-optimization - though this is one investigation
+at one point in the search space, not a proven optimization strategy;
+treat it as a lead to chase, not a conclusion to build on unverified.
+
 ## Verifying claims in this document
 
 Every algorithmic claim here should be checkable against the code it cites

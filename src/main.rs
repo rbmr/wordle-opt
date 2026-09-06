@@ -386,6 +386,30 @@ const DIAGNOSE_SEED: u64 = 20260910;
 fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     let mut rng = fastrand::Rng::with_seed(DIAGNOSE_SEED);
     let n_candidates = dict.candidates.len();
+    let commit = git_commit_hash();
+    let host = hostname();
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("diagnose_history.md")
+        .expect("Cannot open diagnose_history.md");
+    writeln!(
+        file,
+        "## Diagnose Run: commit={} host={} seed={} sizes={:?}",
+        commit, host, DIAGNOSE_SEED, sizes
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn |"
+    )
+    .unwrap();
+    writeln!(
+        file,
+        "|------|------|-------|------|---------|--------|---------|----------|----------|---------|"
+    )
+    .unwrap();
 
     println!(
         "{:<6} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
@@ -418,7 +442,14 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             "{:<6} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
             size, max_k, max_depth, cost, secs, states, guesses, cache_hits, equiv_pruned, bounds_pruned
         );
+        writeln!(
+            file,
+            "| {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} |",
+            size, max_k, max_depth, cost, secs, states, guesses, cache_hits, equiv_pruned, bounds_pruned
+        )
+        .unwrap();
     }
+    writeln!(file).unwrap();
 }
 
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {

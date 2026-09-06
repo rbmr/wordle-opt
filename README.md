@@ -41,6 +41,13 @@ cargo run --release -- benchmark [-n MAX_N]
 # instead of one fixed slice (see Benchmarking below)
 cargo run --release -- benchmark-random [-n MAX_N] [-k SAMPLES_PER_SIZE]
 
+# Full Metrics breakdown (branching factor, search depth, cache hit
+# rate, prune counters) for one random sample per size - use this to
+# investigate *why* time scales the way it does, not just that it did.
+# Appends to diagnose_history.md. See ARCHITECTURE.md's "Known Scaling
+# Behavior" section for a worked example.
+cargo run --release -- diagnose [-n N1,N2,...]
+
 # Solve the full candidate set (guarded to run only on the designated
 # compute host - see run_full in src/main.rs)
 cargo run --release -- full
