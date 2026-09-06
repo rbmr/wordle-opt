@@ -38,6 +38,17 @@ fn hostname() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+/// Whether this process is running on the designated high-memory/high-core
+/// compute host, as opposed to a laptop/dev machine. Gates both the
+/// transposition table size (`Solver::solve`) and which CLI operations are
+/// allowed to run locally (`run_full`, `benchmark`'s size guard) - kept as a
+/// single check so the two decisions can't silently drift apart if the
+/// compute host's name ever changes.
+pub fn is_compute_host() -> bool {
+    let host = hostname();
+    host == "ubuntu-main" || host == "compute"
+}
+
 /// Runs the solver on fixed, deterministic candidate subsets (the first `n`
 /// dictionary entries, sorted - identical to the golden regression tests in
 /// `solver.rs`) and appends a self-contained, traceable record to
@@ -192,10 +203,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     writeln!(file).unwrap();
 }
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
-    let is_compute = std::fs::read_to_string("/etc/hostname")
-        .map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute")
-        .unwrap_or(false);
-    if !is_compute {
+    if !is_compute_host() {
         eprintln!("HARD GUARD: full run must execute on compute node (ubuntu-main). Use rsync + ssh.");
         std::process::exit(1);
     }
@@ -283,11 +291,7 @@ fn main() {
             max_n = args[3].parse().unwrap();
         }
 
-        let is_compute = std::fs::read_to_string("/etc/hostname")
-            .map(|s| s.trim() == "ubuntu-main" || s.trim() == "compute")
-            .unwrap_or(false);
-
-        if !is_compute && max_n > 500 {
+        if !is_compute_host() && max_n > 500 {
             eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
             std::process::exit(1);
         }
