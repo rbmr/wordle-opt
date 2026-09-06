@@ -414,8 +414,10 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        // Conservative initial capacity; active_tuples is usually much smaller than allowed_guesses.
-        let mut active_tuples = Vec::new();
+        // Upper-bounded by allowed_guesses.len() (at most one tuple pushed per guess
+        // below), so this avoids the repeated reallocation-and-copy a capacity-less
+        // Vec would otherwise pay for on every one of this hot function's calls.
+        let mut active_tuples = Vec::with_capacity(allowed_guesses.len());
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
