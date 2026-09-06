@@ -1,5 +1,4 @@
 #![allow(clippy::needless_range_loop)]
-use rand::prelude::SliceRandom;
 
 pub mod core;
 pub mod dict;
@@ -17,10 +16,57 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
 
-fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
-    
-    let mut rng = rand::rng();
+/// Short git commit hash of the working tree, or "unknown" if git isn't
+/// available. Every benchmark run is stamped with this so a number in
+/// `benchmark_history.md` can always be traced back to the exact code that
+/// produced it - a claim about performance is only as good as being able to
+/// check it against the commit it came from.
+fn git_commit_hash() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
+fn hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Runs the solver on fixed, deterministic candidate subsets (the first `n`
+/// dictionary entries, sorted - identical to the golden regression tests in
+/// `solver.rs`) and appends a self-contained, traceable record to
+/// `benchmark_history.md`.
+///
+/// Determinism is the whole point: it's what makes a number in the history
+/// file *comparable* across runs and across commits. Earlier versions of
+/// this function sampled a random subset of candidates at each size, which
+/// meant two "N=750" entries could legitimately report different costs,
+/// states, and timings for reasons that had nothing to do with the code
+/// changing - making the history file useless for judging whether a change
+/// actually helped. Fixed candidate sets remove that confound; only real
+/// machine/thread-scheduling jitter remains, which is why we still repeat
+/// small sizes and report min/avg/max wall time.
+fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
+    let commit = git_commit_hash();
+    let host = hostname();
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    println!(
+        "Benchmark run: commit={} host={} cpus={} unix_time={}",
+        commit, host, cpus, timestamp
+    );
     println!(
         "{:<6} | {:<6} | {:<22} | {:<14} | {:<16} | {:<14} | {:<12} | {:<10} | {:<10}",
         "Size",
@@ -46,35 +92,37 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
     writeln!(
         file,
-        "## Benchmark Run: {:?}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+        "## Benchmark Run: commit={} host={} cpus={} unix_time={}",
+        commit, host, cpus, timestamp
     )
     .unwrap();
     writeln!(
         file,
-        "| Size | Cost | Time(s) | States | Guesses | B-Pruned | E-Pruned | Cache Hits |"
+        "Candidates are deterministic: the first N entries of the dictionary, sorted (same convention as the golden tests in `solver.rs`)."
     )
     .unwrap();
     writeln!(
         file,
-        "|------|------|---------|--------|---------|----------|----------|------------|"
+        "| Size | Cost | Time(s) [Min/Avg/Max] | States | Guesses | B-Pruned | E-Pruned | Cache Hits |"
     )
     .unwrap();
-
-    let all_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
+    writeln!(
+        file,
+        "|------|------|------------------------|--------|---------|----------|----------|------------|"
+    )
+    .unwrap();
 
     for &s in sizes {
         let size = s.min(dict.candidates.len());
+        // Fixed, deterministic subset - not a random sample. See doc comment above.
+        let candidates: Vec<usize> = (0..size).collect();
         let iterations = if size >= 750 { 1 } else { 3 };
-        
+
         let mut sum_secs = 0.0;
         let mut min_secs = f64::MAX;
         let mut max_secs = f64::MIN;
-        
-        let mut last_cost = 0;
+
+        let mut last_cost = None;
         let mut last_states = 0;
         let mut last_guesses = 0;
         let mut last_bounds = 0;
@@ -83,22 +131,28 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         let mut last_depth = 0;
 
         for _ in 0..iterations {
-            let mut initial_candidates = all_candidates.clone();
-            initial_candidates.shuffle(&mut rng);
-            initial_candidates.truncate(size);
-            initial_candidates.sort_unstable();
-
             let metrics = Metrics::new();
             let start = Instant::now();
-            let cost = Solver::solve(matrix, &initial_candidates, dict, &metrics);
-            let duration = start.elapsed();
-            let secs = duration.as_secs_f64();
+            let cost = Solver::solve(matrix, &candidates, dict, &metrics);
+            let secs = start.elapsed().as_secs_f64();
 
             sum_secs += secs;
             min_secs = min_secs.min(secs);
             max_secs = max_secs.max(secs);
 
-            last_cost = cost;
+            // Same input, same code, same machine: cost must be identical
+            // across iterations. If it isn't, the solver has a
+            // nondeterminism bug (e.g. thread-scheduling-dependent
+            // reduction order) - surface that loudly instead of silently
+            // reporting whichever iteration ran last.
+            if let Some(prev) = last_cost {
+                assert_eq!(
+                    cost, prev,
+                    "nondeterministic solve at N={}: cost varied across repeated runs on identical input",
+                    size
+                );
+            }
+            last_cost = Some(cost);
             last_states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
             last_guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
             last_bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
@@ -107,6 +161,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             last_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
         }
 
+        let last_cost = last_cost.unwrap();
         let avg_secs = sum_secs / (iterations as f64);
         let time_str = if iterations > 1 {
             format!("{:.2}/{:.2}/{:.2}", min_secs, avg_secs, max_secs)
@@ -129,8 +184,8 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
         writeln!(
             file,
-            "| {} | {} | {:.3} | {} | {} | {} | {} | {} |",
-            size, last_cost, avg_secs, last_states, last_guesses, last_bounds, last_equiv, last_chits
+            "| {} | {} | {:.2}/{:.2}/{:.2} | {} | {} | {} | {} | {} |",
+            size, last_cost, min_secs, avg_secs, max_secs, last_states, last_guesses, last_bounds, last_equiv, last_chits
         )
         .unwrap();
     }
