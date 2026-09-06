@@ -5,7 +5,8 @@ use crate::dict::Dictionary;
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
 ///
 /// The matrix is flattened into a 1D vector and stored in row-major order: `guess * num_candidates + candidate`.
-/// This layout guarantees $O(1)$ lookup time and maximizes L1 CPU cache locality during inner solver loops.
+/// This gives O(1) lookup, and keeps a single guess's row contiguous for the inner solver loops that
+/// iterate candidates for a fixed guess.
 pub struct ResponseMatrix {
     pub num_guesses: usize,
     pub num_candidates: usize,
@@ -118,9 +119,11 @@ mod tests {
         // guess 0: apple, candidate 0: apple -> WIN
         assert_eq!(matrix.get(0, 0), Response::WIN);
 
-        // guess 0: apple, candidate 1: maple
-        // a: black, p: green, p: green, l: green, e: green => [0, 2, 2, 2, 2] -> 0 + 2*3 + 2*9 + 2*27 + 2*81 = 6 + 18 + 54 + 162 = 240
-        // Wait, let's just test it's not WIN.
-        assert_ne!(matrix.get(0, 1), Response::WIN);
+        // guess 0: apple, candidate 1: maple (secret=maple, guess=apple):
+        // a: not green, secret's only 'a' (index 1) unused -> yellow
+        // p: green (index 2) -> consumes secret's only 'p', second 'p' has none left -> black
+        // l: green, e: green
+        // => [2, 0, 1, 1, 1] -> 2 + 0*3 + 1*9 + 1*27 + 1*81 = 119
+        assert_eq!(matrix.get(0, 1), Response::new(2, 0, 1, 1, 1));
     }
 }

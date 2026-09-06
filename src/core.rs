@@ -89,15 +89,38 @@ mod tests {
 
     #[test]
     fn test_response_mixed() {
-        // secret=aabbc, guess=abcde: a=green@0, b=yellow@1(present@0 but used), wait...
-        // Let's use a cleaner case.
-        // secret=crane, guess=crate: c=G,r=G,a=G,t=B,e=Y (e in crane, position 4 not match pos 4 which is 'e' in crane wait)
-        // crane: c=0,r=1,a=2,n=3,e=4
-        // crate: c=0,r=1,a=2,t=3,e=4 -> c=G,r=G,a=G,t=B(no t in crane),e=G
+        // crane vs crate: c/r/a match position, e matches position, t doesn't appear.
         let secret = Word::new("crane");
         let guess = Word::new("crate");
         let r = Response::compute(&secret, &guess);
-        // c G, r G, a G, t B, e G
-        assert_eq!(r, Response::new(1, 1, 1, 0, 1));
+        assert_eq!(r, Response::new(1, 1, 1, 0, 1)); // c G, r G, a G, t B, e G
+    }
+
+    #[test]
+    fn test_response_duplicate_letter_capped_by_green() {
+        // secret has exactly one 'b' (at position 1). guess repeats 'b' at
+        // positions 0 and 1: the green match at position 1 must consume the
+        // secret's only 'b', so the position-0 'b' has nothing left to match
+        // and must be black, not yellow. This is the classic Wordle
+        // duplicate-letter rule and the main way a naive per-letter-count
+        // implementation goes wrong (double-counting yellows for a letter
+        // that only appears once in the secret).
+        let secret = Word::new("abcde");
+        let guess = Word::new("bbfff");
+        let r = Response::compute(&secret, &guess);
+        assert_eq!(r, Response::new(0, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn test_response_duplicate_letter_only_first_occurrence_yellow() {
+        // secret has exactly one 'x' (position 1), never guessed at that
+        // position. guess has two 'x's, at positions 0 and 2 - neither
+        // green. Only the secret's single 'x' is available to match, so
+        // the first guess occurrence (position 0) should come back yellow
+        // and the second (position 2) black, not both yellow.
+        let secret = Word::new("mxcde");
+        let guess = Word::new("xqxrs");
+        let r = Response::compute(&secret, &guess);
+        assert_eq!(r, Response::new(2, 0, 0, 0, 0));
     }
 }

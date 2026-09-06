@@ -300,8 +300,11 @@ fn main() {
     } else if args.len() > 1 && args[1] == "full" {
         run_full(&matrix, &dict);
     } else if args.len() > 1 && args[1] == "verify" {
-        verify::run_verification(&dict, &matrix, 50, 4);
-        verify::run_stress_test(&dict, &matrix);
+        let fuzz_ok = verify::run_verification(&dict, &matrix, 50, 4);
+        let stress_ok = verify::run_stress_test(&dict, &matrix);
+        if !fuzz_ok || !stress_ok {
+            std::process::exit(1);
+        }
     } else {
         println!("Usage: wordle-opt <benchmark [-n N] | full | verify>");
     }

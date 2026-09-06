@@ -23,6 +23,16 @@ const HASH_SHIFT: u32 = VALUE_BITS + 1;          // 19
 
 impl GlobalCache {
     pub fn new(size: usize) -> Self {
+        // Index lookup uses `hash & (len - 1)` instead of `hash % len` (see
+        // insert()/get()), which only distributes uniformly over the full
+        // table when `size` is a power of two - a non-power-of-two size
+        // wouldn't be unsafe (the mask still yields an in-bounds index) but
+        // would silently waste capacity by only ever hitting some slots.
+        assert!(
+            size.is_power_of_two(),
+            "GlobalCache size must be a power of two, got {}",
+            size
+        );
         let mut entries = Vec::with_capacity(size);
         entries.resize_with(size, || AtomicU64::new(0));
         Self { entries }

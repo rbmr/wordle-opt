@@ -84,10 +84,8 @@ mod tests {
         assert_eq!(dict.candidates[0].to_string(), "apple");
         assert_eq!(dict.candidates[1].to_string(), "maple");
 
-        // Guesses should be apple, berry, cherry, AND maple (since candidates must be in guesses)
-        // And they should be sorted and deduplicated.
-        // debug what it actually read
-
+        // Guesses should be apple, berry, peach, AND maple (since candidates must be in guesses),
+        // sorted and deduplicated.
         assert_eq!(dict.guesses.len(), 4);
         assert_eq!(dict.guesses[0].to_string(), "apple");
         assert_eq!(dict.guesses[1].to_string(), "berry");
