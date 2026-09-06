@@ -1,38 +1,87 @@
-# Wordle-Opt Architecture & Optimization Vectors
+# Wordle-Opt Architecture
 
-This document outlines the architectural decisions and exactness-preserving algorithmic optimizations implemented in `wordle-opt`, explicitly tracking the vectors of potential improvement.
+This document describes the algorithmic techniques `wordle-opt` uses to make
+an exhaustive optimal search over the Wordle candidate set tractable, and
+where to look in the code for each one. All of these preserve exactness:
+the solver always returns the true optimal cost, never an approximation.
 
-## 1. Cross-Branch Memoization (Transposition Caching)
-The solver uses a thread-safe `DashMap` (aliased as `GlobalCache`) to memoize the exact values (and deep search results) of unique subset configurations. Because a subset of $N$ candidates can be reached via multiple distinct sequences of guesses, this prevents re-evaluating the entire subtree.
+## 1. Transposition Table (`src/cache.rs::GlobalCache`)
 
-*Exploited Status:* Fully exploited. Cache hits demonstrably scale exponentially as search depth increases (e.g. 500,000+ cache hits for N=1000). 
+A subset of candidates can be reached via multiple distinct guess
+sequences; the transposition table memoizes results so an already-solved
+subtree isn't re-searched. This is **not** a `DashMap` or any lock-based
+structure - it's a fixed-size `Vec<AtomicU64>`, each slot packing a 45-bit
+Zobrist hash, an 18-bit cost value, and a 1-bit exact/lower-bound flag, read
+and written with relaxed atomics and no locking.
 
-## 2. Per-Subtree Tight Bounds (Capacity Bounds)
-Instead of a single global bounding constant, the solver dynamically computes a theoretical minimum cost (lower bound) required to isolate the remaining candidates based on the maximum branching factor ($k$).
+`insert()` has a known, deliberately-accepted TOCTOU race: a concurrent
+writer's update can occasionally be lost. This does not affect correctness
+- alpha-beta search with a transposition table is correct even when entries
+are lost, since a lost entry just costs a redundant recompute, not a wrong
+answer - so the code accepts the race rather than paying for a
+compare_exchange retry loop under contention. See issue #4 for the original
+analysis and `src/cache.rs`'s comment on `insert()`.
 
-*Exploited Status:* Highly exploited. The bounds computation was hoisted directly into the subset-partitioning loop (`expected_rem`), acting as an eager alpha-beta pruner. This algorithmically eliminates over 99.9% of candidate guesses before allocating slices for recursive dispatch. The capacity bounds are currently derived from the global $max_k$, though `local_max_k` is dynamically updated during evaluation.
+## 2. Capacity Bounds (`src/heuristic.rs::capacity_bound`)
 
-## 3. Initial Beta/Upper-Bound Quality
-The alpha-beta pruning requires a tight initial upper bound to quickly discard sub-optimal paths. 
-We generate this by first running a fast, single-threaded greedy heuristic search (optimizing strictly for `expected_remaining`) before kicking off the heavy parallel search.
+Rather than a single global bound, the solver computes a per-subtree lower
+bound: the minimum possible total cost to solve `n` remaining candidates
+given the maximum observed branching factor `k` at that node (an
+information-theoretic packing argument - see the doc comment on
+`capacity_bound` and its tests for the exact recurrence). A guess whose
+lower bound already exceeds the current best cannot possibly improve on it
+and is discarded before its subtree is ever expanded.
 
-*Exploited Status:* Fully exploited. The greedy seed immediately provides a tight mathematical ceiling (usually within 1-5 points of the true optimal), vastly accelerating early cutoffs at the root.
+## 3. Initial Upper Bound (`src/solver.rs::greedy_solve`)
 
-## 4. Move Ordering Quality
-For alpha-beta pruning to be most effective, the best moves must be evaluated first.
-The guesses are sorted ascendingly by their `expected_remaining` subset sizes. 
+Alpha-beta pruning is only as effective as its initial bound is tight. A
+fast, single-threaded greedy pre-pass (always picking the guess that
+minimizes expected remaining candidates) runs first to produce a decent
+upper bound before the parallel exhaustive search begins, so early cutoffs
+in the main search have something real to prune against from the start.
 
-*Exploited Status:* Fully exploited. Sorting by minimum expected sum of squared bucket sizes ($E[size]$) is mathematically identical to sorting by maximum information gain, ensuring that the first evaluated branch sets an incredibly tight beta for subsequent branches.
+## 4. Move Ordering (`src/heuristic.rs::sort_guesses_by_expected_remaining`)
 
-## 5. Parallelism and Data-Structure Efficiency
-We employ Rayon for work-stealing parallel iterators at the root levels. The hot loop avoids heap allocations entirely, using statically sized arrays (`counts[243]`, `non_empty[243]`) for bucket histogramming, and a flat 1D lookup array for capacity bounds.
+Guesses are evaluated in ascending order of their expected-remaining-
+candidates score (sum of squared bucket sizes over the guess's response
+partition). Trying the guess most likely to be strong first tightens beta
+earlier, which prunes more of the guesses evaluated afterward.
 
-*Exploited Status:* Highly exploited. Re-computing subset equivalence masks utilizes contiguous memory traversal and bitwise ops.
+## 5. Equivalence-Class Guess Pruning
 
-## 6. Equivalent Guess Pruning
-Guesses that produce structurally identical partitions of the remaining valid candidates are skipped entirely.
+Guesses that partition the current candidate set identically to one
+already tried can't produce a different search outcome and are skipped.
+Each guess's partition is summarized as a projection over the active
+candidate set's letter inventory; guesses producing a projection already
+seen at this node are skipped. See `min_state_val` in `src/solver.rs`.
 
-*Exploited Status:* Fully exploited. We construct a 25-bit projection mask for each guess based on its intersection with the letter inventory of the active candidate set, caching seen projections.
+## 6. Parallelism (`rayon`)
 
-### 7. Transposition Table Lower Bound Pruning (Fail-Hard)
-Standard Alpha-Beta search caches exact bounds. However, most nodes fail high (evaluating cost $\ge \beta$), producing a lower bound. Our `GlobalCache` natively stores `is_exact = false` when saving a lower bound. We have implemented fail-hard pruning during Cache retrieval: if the cached lower bound is $\ge \beta$, the node instantly fails high without any expansion. This mathematically prevents redundantly searching identical wide subtrees that we previously proved could never beat our current upper bound.
+Work-stealing parallelism is applied at the root: the first root guess's
+response buckets are evaluated in parallel, then the remaining root
+guesses are evaluated in parallel against each other, sharing a single
+atomic `global_beta` so one thread's progress prunes the others' search
+space. Recursion below the root is single-threaded per branch. Bucket
+histogramming in the hot loop uses fixed-size stack arrays (`counts[243]`,
+etc., since there are at most 243 distinct Wordle responses) rather than
+heap allocation.
+
+## 7. Fail-Hard Transposition Cache Lookups
+
+Most search nodes fail high (their cost reaches `beta` before completing),
+producing a lower bound rather than an exact value; `GlobalCache` stores
+these with `is_exact = false`. On a cache hit, a stored lower bound is only
+usable to prune if it's already `>= beta` at the current node - this keeps
+lookups sound (never reusing a bound that doesn't apply to a tighter
+current constraint) while still avoiding a full re-expansion when it does
+apply.
+
+## Verifying claims in this document
+
+Every algorithmic claim here should be checkable against the code it cites
+and against `cargo test --release` (the golden regression tests in
+`src/solver.rs` pin down exact expected costs for fixed inputs) or
+`benchmark_history.md` (deterministic, commit-stamped timing and search-
+statistics data - see README.md's Benchmarking section). If a future change
+makes a section here inaccurate, fix the section rather than leaving it as
+aspirational documentation of what used to be true.
