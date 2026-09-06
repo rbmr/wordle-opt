@@ -15,9 +15,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Run tests
-      run: cargo test --verbose
-      
+      # --release: several tests (the golden regression tests in particular)
+      # run the real solver on real instances and are far too slow in debug
+      # builds. --test-threads=1: multiple tests each internally use rayon
+      # across all cores; running them concurrently oversubscribes CPU and
+      # makes the whole suite slower, not faster - serializing tests lets
+      # each one get full-core throughput in turn.
+      run: cargo test --release --verbose -- --test-threads=1
+
     - name: Run clippy
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --release -- -D warnings
