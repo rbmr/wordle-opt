@@ -290,14 +290,7 @@ fn run_benchmark_random(
         let mut states = Vec::with_capacity(samples_per_size);
 
         for sample_idx in 0..samples_per_size {
-            let mut subset = Vec::with_capacity(size);
-            while subset.len() < size {
-                let idx = rng.usize(0..n_candidates);
-                if !subset.contains(&idx) {
-                    subset.push(idx);
-                }
-            }
-            subset.sort_unstable();
+            let subset = sample_random_subset(&mut rng, n_candidates, size);
 
             let metrics = Metrics::new();
             let start = Instant::now();
@@ -354,6 +347,78 @@ fn run_benchmark_random(
         .unwrap();
     }
     writeln!(file).unwrap();
+}
+
+/// Draws one random subset of `size` distinct candidate indices (no
+/// replacement) from `rng`, sorted. Shared by `benchmark-random` and
+/// `diagnose` so both draw samples the same way.
+fn sample_random_subset(rng: &mut fastrand::Rng, n_candidates: usize, size: usize) -> Vec<usize> {
+    let mut subset = Vec::with_capacity(size);
+    while subset.len() < size {
+        let idx = rng.usize(0..n_candidates);
+        if !subset.contains(&idx) {
+            subset.push(idx);
+        }
+    }
+    subset.sort_unstable();
+    subset
+}
+
+/// Separate fixed seed from `BENCHMARK_RANDOM_SEED`, so a `diagnose` run
+/// never silently shares (or is confused for) `benchmark-random`'s sample
+/// sequence - they draw from independent, but each individually
+/// reproducible, RNG streams.
+const DIAGNOSE_SEED: u64 = 20260910;
+
+/// Reports the full `Metrics` breakdown (not just states_evaluated, like
+/// `benchmark-random` does) plus the max branching factor `k` for one random
+/// sample per size in `sizes`. Use this to investigate *why* wall-clock time
+/// scales the way it does relative to cost - e.g. `benchmark-random` showed
+/// avg cost/candidate scaling smoothly from N=1000 to N=1500 while wall time
+/// jumped ~25x, and the aggregate cost metric alone can't say whether that's
+/// weaker equivalence pruning, weaker bounds pruning, worse cache locality,
+/// more guesses needed per state, or a larger branching factor loosening
+/// capacity bounds. This prints the raw counters needed to tell those apart;
+/// it does not try to precompute derived ratios and hand you the answer -
+/// pruned_by_bounds in particular is incremented from two different call
+/// sites in solver.rs (a guess-selection-time prune in min_state_val and a
+/// mid-evaluation prune in min_guess_val) that this doesn't disentangle.
+fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
+    let mut rng = fastrand::Rng::with_seed(DIAGNOSE_SEED);
+    let n_candidates = dict.candidates.len();
+
+    println!(
+        "{:<6} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
+        "Size", "MaxK", "Depth", "Cost", "Time(s)", "States", "Guesses", "CacheHit", "EquivPrn", "BndsPrn"
+    );
+    println!(
+        "{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
+        "", "", "", "", "", "", "", "", "", ""
+    );
+
+    for &s in sizes {
+        let size = s.min(n_candidates);
+        let subset = sample_random_subset(&mut rng, n_candidates, size);
+
+        let max_k = heuristic::compute_max_branching_factor(matrix, &subset);
+
+        let metrics = Metrics::new();
+        let start = Instant::now();
+        let cost = Solver::solve(matrix, &subset, dict, &metrics);
+        let secs = start.elapsed().as_secs_f64();
+
+        let states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+        let guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
+        let cache_hits = metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let bounds_pruned = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
+        let equiv_pruned = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+        let max_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
+
+        println!(
+            "{:<6} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
+            size, max_k, max_depth, cost, secs, states, guesses, cache_hits, equiv_pruned, bounds_pruned
+        );
+    }
 }
 
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
@@ -478,6 +543,25 @@ fn main() {
             .filter(|&x| x <= max_n)
             .collect();
         run_benchmark_random(&matrix, &dict, &sizes, samples);
+    } else if args.len() > 1 && args[1] == "diagnose" {
+        let mut sizes: Vec<usize> = vec![100, 250, 500, 750, 1000, 1500];
+        let mut i = 2;
+        while i + 1 < args.len() {
+            if args[i] == "-n" {
+                sizes = args[i + 1]
+                    .split(',')
+                    .map(|s| s.parse().unwrap())
+                    .collect();
+            }
+            i += 2;
+        }
+
+        if !is_compute_host() && sizes.iter().any(|&x| x > 500) {
+            eprintln!("HARD GUARD: Cannot run heavy diagnostics on local VM. Use deploy_and_bench.sh's host.");
+            std::process::exit(1);
+        }
+
+        run_diagnose(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "full" {
         run_full(&matrix, &dict);
     } else if args.len() > 1 && args[1] == "verify" {
@@ -487,7 +571,7 @@ fn main() {
             std::process::exit(1);
         }
     } else {
-        println!("Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | full | verify>");
+        println!("Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] | full | verify>");
     }
 }
 pub mod cache;
