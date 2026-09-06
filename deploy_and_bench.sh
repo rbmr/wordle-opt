@@ -1,11 +1,17 @@
 #!/bin/bash
 set -e
 
-echo "Syncing to robert@192.168.1.72..."
-rsync -aP --exclude 'target' --exclude '.git' . robert@192.168.1.72:~/wordle-opt/
+# "compute" resolves via Tailscale (see `tailscale status`), which works
+# regardless of which network this script runs from; falls back to the LAN
+# IP if you're not on Tailscale. The VM itself must be powered on first -
+# see pve01 (`qm start 100`) if `ssh compute` doesn't connect.
+HOST="${WORDLE_OPT_COMPUTE_HOST:-robert@compute}"
+
+echo "Syncing to $HOST..."
+rsync -aP --exclude 'target' --exclude '.git' . "$HOST:~/wordle-opt/"
 
 echo "Compiling on compute..."
-ssh robert@192.168.1.72 "cd wordle-opt && ~/.cargo/bin/cargo build --release"
+ssh "$HOST" "cd wordle-opt && ~/.cargo/bin/cargo build --release"
 
-echo "Running full benchmark suite on compute (bounded by timeout 36000)..."
-ssh robert@192.168.1.72 "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark"
+echo "Running randomized benchmark suite on compute (bounded by timeout 36000)..."
+ssh "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark-random"
