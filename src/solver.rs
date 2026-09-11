@@ -311,10 +311,40 @@ impl<'a> Solver<'a> {
             let val = base_cost + bucket_costs;
             beta.fetch_min(val, Ordering::Relaxed);
 
+            // Pre-filter alternative root guesses: only retain those whose
+            // capacity_bound lb is strictly less than the current beta.
+            // A guess with lb >= beta cannot possibly improve the solution,
+            // so we can skip it entirely. Note: allowed_guesses (active_guesses)
+            // is passed unchanged to sub-problems; this filter only affects
+            // which root tasks we launch.
+            let beta_after_first = beta.load(Ordering::Relaxed);
+            let root_candidates: Vec<usize> = active_guesses[1..]
+                .iter()
+                .copied()
+                .filter(|&g| {
+                    let mut counts = [0u16; 243];
+                    for &c in set {
+                        counts[matrix.get(g, c).0 as usize] += 1;
+                    }
+                    let lb: u32 = set.len() as u32
+                        + counts
+                            .iter()
+                            .enumerate()
+                            .filter(|&(r_idx, &cnt)| {
+                                cnt > 0
+                                    && r_idx
+                                        != crate::core::Response::WIN.0 as usize
+                            })
+                            .map(|(_, &cnt)| capacity_bounds[cnt as usize])
+                            .sum::<u32>();
+                    lb < beta_after_first
+                })
+                .collect();
+
             // Now evaluate the remaining guesses in parallel with the tight beta.
             // Each solver holds a reference to the shared beta so it can abort early
             // if another thread finds a better solution while this one is running.
-            active_guesses[1..].par_iter().for_each(|&g| {
+            root_candidates.par_iter().for_each(|&g| {
                 let current_beta = beta.load(Ordering::Relaxed);
                 let mut local_solver = Solver::new_with_global_beta(
                     matrix,
