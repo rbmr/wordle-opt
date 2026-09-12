@@ -32,16 +32,13 @@ information-theoretic packing argument - see the doc comment on
 lower bound already exceeds the current best cannot possibly improve on it
 and is discarded before its subtree is ever expanded.
 
-## 3. Initial Upper Bound (`src/solver.rs::greedy_solve` / `multi_greedy_cost`)
+## 3. Initial Upper Bound (`src/solver.rs::greedy_solve`)
 
 Alpha-beta pruning is only as effective as its initial bound is tight. A
-fast greedy pre-pass runs first to produce an upper bound before the
-parallel exhaustive search begins. For large candidate sets (N ≥ 500),
-`multi_greedy_cost` tries the top-20 heuristic first guesses and takes
-the minimum cost, giving a tighter bound than a single greedy evaluation.
-For smaller N the overhead of 20 separate greedy runs isn't justified and
-a single greedy pass is used. The resulting beta seeds both the root
-parallel search and the pre-filter below.
+fast, single-threaded greedy pre-pass (always picking the guess that
+minimizes expected remaining candidates) runs first to produce a decent
+upper bound before the parallel exhaustive search begins, so early cutoffs
+in the main search have something real to prune against from the start.
 
 ## 3a. Root Pre-Filter (`src/solver.rs::solve`)
 
