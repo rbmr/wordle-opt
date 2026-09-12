@@ -32,13 +32,31 @@ information-theoretic packing argument - see the doc comment on
 lower bound already exceeds the current best cannot possibly improve on it
 and is discarded before its subtree is ever expanded.
 
-## 3. Initial Upper Bound (`src/solver.rs::greedy_solve`)
+## 3. Initial Upper Bound (`src/solver.rs::greedy_solve` / `multi_greedy_cost`)
 
 Alpha-beta pruning is only as effective as its initial bound is tight. A
-fast, single-threaded greedy pre-pass (always picking the guess that
-minimizes expected remaining candidates) runs first to produce a decent
-upper bound before the parallel exhaustive search begins, so early cutoffs
-in the main search have something real to prune against from the start.
+fast greedy pre-pass runs first to produce an upper bound before the
+parallel exhaustive search begins. For large candidate sets (N ≥ 500),
+`multi_greedy_cost` tries the top-20 heuristic first guesses and takes
+the minimum cost, giving a tighter bound than a single greedy evaluation.
+For smaller N the overhead of 20 separate greedy runs isn't justified and
+a single greedy pass is used. The resulting beta seeds both the root
+parallel search and the pre-filter below.
+
+## 3a. Root Pre-Filter (`src/solver.rs::solve`)
+
+After the first root guess is evaluated exactly (tightening beta), the
+remaining root candidates are filtered by their depth-1 capacity-bound
+lower bound before spawning parallel tasks. Any root guess `g` with
+`lb(g, full_set) >= beta` cannot possibly improve on the current best
+and its entire subtree is skipped. `active_guesses` (the full allowed-
+guess list passed to sub-problems) is left unchanged; only the list of
+root tasks to launch is filtered. This is provably correct: each filtered
+guess still participates in sub-problem evaluations, just not as a root
+first guess. For N ≈ 100-500, this eliminates a significant fraction of
+root candidates after a tight greedy beta; for N = 2340 the lb gap to
+beta is large enough that most guesses survive (the filter has little
+effect at full scale).
 
 ## 4. Move Ordering (`src/heuristic.rs::sort_guesses_by_expected_remaining`)
 
