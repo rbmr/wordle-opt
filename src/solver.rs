@@ -499,10 +499,13 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        // Upper-bounded by allowed_guesses.len() (at most one tuple pushed per guess
-        // below), so this avoids the repeated reallocation-and-copy a capacity-less
-        // Vec would otherwise pay for on every one of this hot function's calls.
-        let mut active_tuples = Vec::with_capacity(allowed_guesses.len());
+        // Capacity hint: the number of non-equivalent, non-useless guesses is bounded by
+        // allowed_guesses.len() but for small candidate sets (common at depth 3+) the
+        // actual count is much smaller. Over-allocating to allowed_guesses.len() wastes
+        // 100s of KB per call when depth is 3+ and the set is tiny. A cap of c_len * 300
+        // covers realistic non-equivalent-guess counts; if exceeded, the Vec grows normally.
+        let cap = allowed_guesses.len().min(c_len * 300 + 64);
+        let mut active_tuples = Vec::with_capacity(cap);
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
