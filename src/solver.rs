@@ -159,6 +159,55 @@ impl<'a> Solver<'a> {
         cost
     }
 
+    /// Computes the greedy cost when forced to use `first_guess` at depth 1.
+    /// Sub-buckets use the standard greedy (best heuristic choice recursively).
+    fn greedy_cost_from(
+        matrix: &ResponseMatrix,
+        dict: &'a crate::dict::Dictionary,
+        set: &[usize],
+        first_guess: usize,
+    ) -> u32 {
+        let mut counts = [0u16; 243];
+        for &c in set {
+            counts[matrix.get(first_guess, c).0 as usize] += 1;
+        }
+        let mut cost = set.len() as u32;
+        for r_idx in 0..243 {
+            let p_len = counts[r_idx] as usize;
+            if p_len == 0 || r_idx == crate::core::Response::WIN.0 as usize {
+                continue;
+            }
+            let mut subset = Vec::with_capacity(p_len);
+            for &c in set {
+                if matrix.get(first_guess, c).0 as usize == r_idx {
+                    subset.push(c);
+                }
+            }
+            cost += Self::greedy_solve(matrix, dict, &subset);
+        }
+        cost
+    }
+
+    /// Runs the greedy solver from each of the top-`k` heuristic first guesses and returns
+    /// the minimum cost found. This gives a tighter initial beta than single-start greedy,
+    /// enabling more aggressive pre-filtering of root candidates.
+    pub fn multi_greedy_cost(
+        matrix: &ResponseMatrix,
+        dict: &'a crate::dict::Dictionary,
+        set: &[usize],
+        k: usize,
+    ) -> u32 {
+        let mut guesses: Vec<usize> = (0..dict.guesses.len()).collect();
+        heuristic::sort_guesses_by_expected_remaining(matrix, set, &mut guesses);
+
+        let top_k = k.min(guesses.len());
+        guesses[..top_k]
+            .iter()
+            .map(|&g| Self::greedy_cost_from(matrix, dict, set, g))
+            .min()
+            .unwrap_or(u32::MAX)
+    }
+
     pub fn new(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -210,7 +259,14 @@ impl<'a> Solver<'a> {
 
         let set = initial_candidates;
 
-        let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
+        // For large candidate sets, try the top-20 heuristic guesses at depth 1 and
+        // take the best greedy cost — this gives a tighter initial beta, enabling more
+        // aggressive root pre-filtering. For small N the overhead isn't worth it.
+        let initial_greedy_cost = if initial_candidates.len() >= 500 {
+            Self::multi_greedy_cost(matrix, dict, initial_candidates, 20)
+        } else {
+            Self::greedy_solve(matrix, dict, initial_candidates)
+        };
         let beta = AtomicU32::new(initial_greedy_cost);
 
         // Filter active guesses
