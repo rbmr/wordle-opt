@@ -552,7 +552,14 @@ fn main() {
             .collect();
         run_benchmark(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "benchmark-random" {
-        let mut max_n = 1500;
+        // Default caps at 1000, not 1500: `diagnose` found a sharp cost-cliff
+        // between N=1100 and N=1200 (search depth stepping from 4 to 5 - see
+        // ARCHITECTURE.md's "Known Scaling Behavior") where a single sample
+        // can take 1-2 hours. At the default 5 samples/size, including 1500
+        // could turn a routine benchmark into a many-hour run with no
+        // warning. Request `-n 1500` explicitly (with a low `-k`) when you
+        // actually want that data point.
+        let mut max_n = 1000;
         let mut samples = 5;
         let mut i = 2;
         while i + 1 < args.len() {

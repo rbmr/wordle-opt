@@ -112,3 +112,19 @@ sizes, and sample count always draw the same sequence of subsets - it's
 just reproducible over a representative spread of inputs instead of one
 fixed slice. This is the mode to use for tracking real scaling/performance
 progress; use `benchmark` for quick, single-sample sanity checks.
+
+`MAX_N` defaults to 1000, not the full ladder up to 1500: `diagnose` found
+a sharp cost cliff between N=1100 and N=1200 (see ARCHITECTURE.md's "Known
+Scaling Behavior") where a single sample can take 1-2 hours, so including
+1500 at the default 5 samples/size could silently turn a routine benchmark
+into a many-hour run. Pass `-n 1500` (with a low `-k`) deliberately when
+you want that specific, expensive data point.
+
+Prefer `./deploy_and_bench.sh` over calling `benchmark-random` directly on
+compute - it syncs the current code, runs the test suite first (so a
+broken change is caught before you benchmark it, not after), then
+benchmarks, all bounded by a single outer timeout. It forwards its
+arguments to `benchmark-random`, e.g. `./deploy_and_bench.sh -n 500 -k 3`
+for a fast check while iterating. Never run it (or any other compute job)
+while another one is already running there - concurrent jobs contend for
+the same cores and cache, which silently invalidates both jobs' timings.
