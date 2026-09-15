@@ -73,6 +73,7 @@ pub struct Solver<'a> {
     /// Max depth is naturally bounded, but we provide 32 levels to be safe against deep suboptimal branches.
     scratch_tuples: [Vec<(usize, u32, u32)>; 32],
     scratch_guesses: [Vec<usize>; 32],
+    scratch_sorted_sets: [Vec<usize>; 32],
 }
 
 impl<'a> Solver<'a> {
@@ -195,6 +196,7 @@ impl<'a> Solver<'a> {
             global_beta,
             scratch_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
+            scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
         }
     }
 
@@ -690,7 +692,13 @@ impl<'a> Solver<'a> {
         }
 
         // Fast slice partition using counting sort
-        let mut sorted_set = vec![0; set.len()];
+        let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
+        sorted_set.clear();
+        if sorted_set.capacity() < set.len() {
+            sorted_set.reserve(set.len() - sorted_set.capacity());
+        }
+        sorted_set.resize(set.len(), 0);
+
         let mut offsets = [0usize; 244];
         for r_idx in 0..243 {
             offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
@@ -725,20 +733,25 @@ impl<'a> Solver<'a> {
             // already found a solution cheaper than beta, tighten our local bound.
             let effective_beta = new_beta.min(self.global_beta.load(Ordering::Relaxed).saturating_sub(b));
             if effective_beta == 0 {
+                self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
             }
 
             let val = self.min_state_val(p, allowed_guesses, effective_beta, depth + 1);
             if b + val >= beta {
+                self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
             }
             // Propagate any tightening from the global beta.
             let global_now = self.global_beta.load(Ordering::Relaxed);
             if b + val >= global_now {
+                self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
             }
             cost = b + val;
         }
+
+        self.scratch_sorted_sets[depth] = sorted_set;
 
         cost
     }
