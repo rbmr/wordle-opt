@@ -678,7 +678,7 @@ impl<'a> Solver<'a> {
     /// at the bucket level: if the cumulative cost of resolved buckets plus the theoretical
     /// heuristic minimum cost of the remaining unresolved buckets exceeds `beta`, evaluation
     /// is immediately aborted.
-    fn min_guess_val(
+    pub fn min_guess_val(
         &mut self,
         set: &[usize],
         guess: usize,

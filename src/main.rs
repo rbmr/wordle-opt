@@ -716,6 +716,41 @@ fn main() {
         }
 
         run_diagnose(&matrix, &dict, &sizes);
+    } else if args.len() > 1 && args[1] == "evaluate-root" {
+        let root_guess = args[2].parse::<usize>().unwrap();
+        
+        let initial_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
+        let max_k = heuristic::compute_max_branching_factor(&matrix, &initial_candidates);
+        let mut capacity_bounds = vec![0; initial_candidates.len() + 1];
+        for i in 0..=initial_candidates.len() {
+            capacity_bounds[i] = heuristic::capacity_bound(i, max_k);
+        }
+        
+        let cache_size = if crate::is_compute_host() { 512 * 1024 * 1024 } else { 64 * 1024 * 1024 };
+        let global_cache = crate::cache::GlobalCache::new(cache_size);
+        let metrics = Metrics::new();
+        
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let global_beta = AtomicU32::new(u32::MAX);
+        
+        let mut solver = Solver::new_with_global_beta(
+            &matrix,
+            max_k,
+            &dict,
+            &metrics,
+            &capacity_bounds,
+            &global_cache,
+            &global_beta,
+        );
+        
+        let mut allowed_guesses: Vec<usize> = (0..matrix.num_guesses).collect();
+        // Compute expected remaining for all allowed guesses
+        heuristic::sort_guesses_by_expected_remaining(&matrix, &initial_candidates, &mut allowed_guesses);
+        
+        let start = Instant::now();
+        let val = solver.min_guess_val(&initial_candidates, root_guess, &allowed_guesses, u32::MAX, 1, max_k);
+        println!("Root Guess: {} ({}) -> Cost: {}", root_guess, std::str::from_utf8(&dict.guesses[root_guess].0).unwrap(), val);
+        println!("Time: {:?}", start.elapsed());
     } else if args.len() > 1 && args[1] == "full" {
         run_full(&matrix, &dict);
     } else if args.len() > 1 && args[1] == "verify" {
@@ -726,7 +761,7 @@ fn main() {
         }
     } else {
         println!(
-            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] | full | verify>"
+            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] | full | verify | evaluate-root <GUESS_ID>>"
         );
     }
 }
