@@ -164,7 +164,6 @@ impl<'a> Solver<'a> {
         cost
     }
 
-
     pub fn new(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -173,7 +172,15 @@ impl<'a> Solver<'a> {
         capacity_bounds: &'a [u32],
         cache: &'a crate::cache::GlobalCache,
     ) -> Self {
-        Self::new_with_global_beta(matrix, max_k, dict, metrics, capacity_bounds, cache, &SENTINEL_BETA)
+        Self::new_with_global_beta(
+            matrix,
+            max_k,
+            dict,
+            metrics,
+            capacity_bounds,
+            cache,
+            &SENTINEL_BETA,
+        )
     }
 
     pub fn new_with_global_beta(
@@ -210,7 +217,11 @@ impl<'a> Solver<'a> {
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
     ) -> u32 {
-        let cache_size = if crate::is_compute_host() { 512 * 1024 * 1024 } else { 64 * 1024 * 1024 };
+        let cache_size = if crate::is_compute_host() {
+            512 * 1024 * 1024
+        } else {
+            64 * 1024 * 1024
+        };
         let global_cache = crate::cache::GlobalCache::new(cache_size);
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
 
@@ -340,9 +351,7 @@ impl<'a> Solver<'a> {
                             .iter()
                             .enumerate()
                             .filter(|&(r_idx, &cnt)| {
-                                cnt > 0
-                                    && r_idx
-                                        != crate::core::Response::WIN.0 as usize
+                                cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize
                             })
                             .map(|(_, &cnt)| capacity_bounds[cnt as usize])
                             .sum::<u32>();
@@ -350,8 +359,12 @@ impl<'a> Solver<'a> {
                 })
                 .collect();
 
-            println!("\n*** Root candidates after filter: {} / {} ***", root_candidates.len(), active_guesses.len() - 1);
-            
+            println!(
+                "\n*** Root candidates after filter: {} / {} ***",
+                root_candidates.len(),
+                active_guesses.len() - 1
+            );
+
             // Now evaluate the remaining guesses in parallel with the tight beta.
             // Each solver holds a reference to the shared beta so it can abort early
             // if another thread finds a better solution while this one is running.
@@ -366,7 +379,8 @@ impl<'a> Solver<'a> {
                     &global_cache,
                     &beta,
                 );
-                let val = local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1, max_k);
+                let val =
+                    local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1, max_k);
 
                 // atomic min
                 let mut current = beta.load(Ordering::Relaxed);
@@ -455,10 +469,10 @@ impl<'a> Solver<'a> {
             for i in 0..c_len {
                 let ci = set[i];
                 let gi = self.dict.candidate_to_guess[ci];
-                
+
                 let mut counts = [0u8; 243];
                 let mut num_distinct = 0;
-                
+
                 for j in 0..c_len {
                     if i != j {
                         let cj = set[j];
@@ -469,7 +483,7 @@ impl<'a> Solver<'a> {
                         counts[r] += 1;
                     }
                 }
-                
+
                 if num_distinct == c_len - 1 {
                     return (2 * c_len - 1) as u32;
                 }
@@ -585,7 +599,9 @@ impl<'a> Solver<'a> {
         // If local_max_k == 1, all useful guesses were pruned (the minimum lb_cost >= beta).
         if local_max_k <= 1 {
             self.scratch_tuples[depth] = active_tuples;
-            let val = heuristic::capacity_bound(c_len, local_max_k).max(cached_lower_bound).max(beta);
+            let val = heuristic::capacity_bound(c_len, local_max_k)
+                .max(cached_lower_bound)
+                .max(beta);
             self.cache.insert(hash, val, false);
             return val;
         }
@@ -610,7 +626,9 @@ impl<'a> Solver<'a> {
 
         for &(g, _, g_lb) in &active_tuples {
             if g_lb >= best_val {
-                self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
             let val = self.min_guess_val(set, g, &active_guesses, best_val, depth, local_max_k);
@@ -749,13 +767,15 @@ impl<'a> Solver<'a> {
 
             // Also respect the global beta from concurrent threads: if another thread
             // already found a solution cheaper than beta, tighten our local bound.
-            let effective_beta = new_beta.min(self.global_beta.load(Ordering::Relaxed).saturating_sub(b));
+            let effective_beta =
+                new_beta.min(self.global_beta.load(Ordering::Relaxed).saturating_sub(b));
             if effective_beta == 0 {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
             }
 
-            let val = self.min_state_val(p, allowed_guesses, effective_beta, depth + 1, parent_max_k);
+            let val =
+                self.min_state_val(p, allowed_guesses, effective_beta, depth + 1, parent_max_k);
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
@@ -792,7 +812,10 @@ mod tests {
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..100).collect();
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
-        assert_eq!(cost, 262, "N=100 golden cost changed - likely correctness bug");
+        assert_eq!(
+            cost, 262,
+            "N=100 golden cost changed - likely correctness bug"
+        );
     }
 
     #[test]
@@ -808,7 +831,10 @@ mod tests {
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..750).collect();
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
-        assert_eq!(cost, 2256, "N=750 golden cost changed - likely correctness bug");
+        assert_eq!(
+            cost, 2256,
+            "N=750 golden cost changed - likely correctness bug"
+        );
     }
 
     #[test]
@@ -818,7 +844,10 @@ mod tests {
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..250).collect();
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
-        assert_eq!(cost, 702, "N=250 golden cost changed - likely correctness bug");
+        assert_eq!(
+            cost, 702,
+            "N=250 golden cost changed - likely correctness bug"
+        );
     }
 
     #[test]
@@ -841,12 +870,12 @@ mod tests {
 #[cfg(test)]
 mod solver_cache_tests {
     use super::*;
-#[test]
-fn test_lower_bound_tightening() {
-    let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
-    let matrix = crate::matrix::ResponseMatrix::new(&dict);
-    let metrics = Metrics::new();
-    let cache = crate::cache::GlobalCache::new(1024);
-    assert_eq!(cache.get(0), None);
-}
+    #[test]
+    fn test_lower_bound_tightening() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let _matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let _metrics = Metrics::new();
+        let cache = crate::cache::GlobalCache::new(1024);
+        assert_eq!(cache.get(0), None);
+    }
 }

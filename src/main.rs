@@ -164,11 +164,21 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
                 );
             }
             last_cost = Some(cost);
-            last_states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
-            last_guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
-            last_bounds = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
-            last_equiv = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
-            last_chits = metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+            last_states = metrics
+                .states_evaluated
+                .load(std::sync::atomic::Ordering::Relaxed);
+            last_guesses = metrics
+                .guesses_evaluated
+                .load(std::sync::atomic::Ordering::Relaxed);
+            last_bounds = metrics
+                .pruned_by_bounds
+                .load(std::sync::atomic::Ordering::Relaxed);
+            last_equiv = metrics
+                .pruned_by_equivalence
+                .load(std::sync::atomic::Ordering::Relaxed);
+            last_chits = metrics
+                .cache_hits
+                .load(std::sync::atomic::Ordering::Relaxed);
             last_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -196,7 +206,16 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         writeln!(
             file,
             "| {} | {} | {:.2}/{:.2}/{:.2} | {} | {} | {} | {} | {} |",
-            size, last_cost, min_secs, avg_secs, max_secs, last_states, last_guesses, last_bounds, last_equiv, last_chits
+            size,
+            last_cost,
+            min_secs,
+            avg_secs,
+            max_secs,
+            last_states,
+            last_guesses,
+            last_bounds,
+            last_equiv,
+            last_chits
         )
         .unwrap();
     }
@@ -308,7 +327,11 @@ fn run_benchmark_random(
 
             costs.push(cost);
             times.push(secs);
-            states.push(metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed));
+            states.push(
+                metrics
+                    .states_evaluated
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            );
         }
 
         let cost_min = *costs.iter().min().unwrap();
@@ -413,7 +436,16 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
     println!(
         "{:<6} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
-        "Size", "MaxK", "Depth", "Cost", "Time(s)", "States", "Guesses", "CacheHit", "EquivPrn", "BndsPrn"
+        "Size",
+        "MaxK",
+        "Depth",
+        "Cost",
+        "Time(s)",
+        "States",
+        "Guesses",
+        "CacheHit",
+        "EquivPrn",
+        "BndsPrn"
     );
     println!(
         "{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
@@ -431,21 +463,49 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         let cost = Solver::solve(matrix, &subset, dict, &metrics);
         let secs = start.elapsed().as_secs_f64();
 
-        let states = metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed);
-        let guesses = metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed);
-        let cache_hits = metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-        let bounds_pruned = metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed);
-        let equiv_pruned = metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed);
+        let states = metrics
+            .states_evaluated
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let guesses = metrics
+            .guesses_evaluated
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let cache_hits = metrics
+            .cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let bounds_pruned = metrics
+            .pruned_by_bounds
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let equiv_pruned = metrics
+            .pruned_by_equivalence
+            .load(std::sync::atomic::Ordering::Relaxed);
         let max_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
 
         println!(
             "{:<6} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
-            size, max_k, max_depth, cost, secs, states, guesses, cache_hits, equiv_pruned, bounds_pruned
+            size,
+            max_k,
+            max_depth,
+            cost,
+            secs,
+            states,
+            guesses,
+            cache_hits,
+            equiv_pruned,
+            bounds_pruned
         );
         writeln!(
             file,
             "| {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} |",
-            size, max_k, max_depth, cost, secs, states, guesses, cache_hits, equiv_pruned, bounds_pruned
+            size,
+            max_k,
+            max_depth,
+            cost,
+            secs,
+            states,
+            guesses,
+            cache_hits,
+            equiv_pruned,
+            bounds_pruned
         )
         .unwrap();
     }
@@ -473,14 +533,20 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(60));
             let elapsed = start_clone.elapsed().as_secs_f64();
-            let done = metrics_clone.root_guesses_done.load(std::sync::atomic::Ordering::Relaxed);
+            let done = metrics_clone
+                .root_guesses_done
+                .load(std::sync::atomic::Ordering::Relaxed);
             // We don't have a direct count of total_active_guesses here, so just report done count.
             eprintln!(
                 "[progress] elapsed={:.0}s root_guesses_done={} states={} bounds_pruned={}",
                 elapsed,
                 done,
-                metrics_clone.states_evaluated.load(std::sync::atomic::Ordering::Relaxed),
-                metrics_clone.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed),
+                metrics_clone
+                    .states_evaluated
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                metrics_clone
+                    .pruned_by_bounds
+                    .load(std::sync::atomic::Ordering::Relaxed),
             );
         }
     });
@@ -494,13 +560,47 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     println!("Candidates: {}", n_candidates);
     println!("Optimal total cost: {}", cost);
     println!("Avg guesses: {:.6}", cost as f64 / n_candidates as f64);
-    println!("Wall time: {:.3}s ({:.2}h)", elapsed.as_secs_f64(), elapsed.as_secs_f64() / 3600.0);
-    println!("States evaluated: {}", metrics.states_evaluated.load(std::sync::atomic::Ordering::Relaxed));
-    println!("Guesses evaluated: {}", metrics.guesses_evaluated.load(std::sync::atomic::Ordering::Relaxed));
-    println!("Root guesses done: {}", metrics.root_guesses_done.load(std::sync::atomic::Ordering::Relaxed));
-    println!("Bounds pruned: {}", metrics.pruned_by_bounds.load(std::sync::atomic::Ordering::Relaxed));
-    println!("Equiv pruned: {}", metrics.pruned_by_equivalence.load(std::sync::atomic::Ordering::Relaxed));
-    println!("Cache hits: {}", metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed));
+    println!(
+        "Wall time: {:.3}s ({:.2}h)",
+        elapsed.as_secs_f64(),
+        elapsed.as_secs_f64() / 3600.0
+    );
+    println!(
+        "States evaluated: {}",
+        metrics
+            .states_evaluated
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    println!(
+        "Guesses evaluated: {}",
+        metrics
+            .guesses_evaluated
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    println!(
+        "Root guesses done: {}",
+        metrics
+            .root_guesses_done
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    println!(
+        "Bounds pruned: {}",
+        metrics
+            .pruned_by_bounds
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    println!(
+        "Equiv pruned: {}",
+        metrics
+            .pruned_by_equivalence
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    println!(
+        "Cache hits: {}",
+        metrics
+            .cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
 
     // Append to benchmark history
     let mut file = OpenOptions::new()
@@ -508,9 +608,22 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         .append(true)
         .open("benchmark_history.md")
         .expect("Cannot open benchmark_history.md");
-    writeln!(file, "## FULL RUN N=2340: {:?}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).unwrap();
+    writeln!(
+        file,
+        "## FULL RUN N=2340: {:?}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    )
+    .unwrap();
     writeln!(file, "- Optimal cost: {}", cost).unwrap();
-    writeln!(file, "- Avg guesses: {:.6}", cost as f64 / n_candidates as f64).unwrap();
+    writeln!(
+        file,
+        "- Avg guesses: {:.6}",
+        cost as f64 / n_candidates as f64
+    )
+    .unwrap();
     writeln!(file, "- Time: {:.3}s", elapsed.as_secs_f64()).unwrap();
     writeln!(file).unwrap();
 }
@@ -542,7 +655,9 @@ fn main() {
         }
 
         if !is_compute_host() && max_n > 500 {
-            eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
+            eprintln!(
+                "HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh"
+            );
             std::process::exit(1);
         }
 
@@ -572,7 +687,9 @@ fn main() {
         }
 
         if !is_compute_host() && max_n > 500 {
-            eprintln!("HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh");
+            eprintln!(
+                "HARD GUARD: Cannot run heavy benchmarks on local VM. Use deploy_and_bench.sh"
+            );
             std::process::exit(1);
         }
 
@@ -586,16 +703,15 @@ fn main() {
         let mut i = 2;
         while i + 1 < args.len() {
             if args[i] == "-n" {
-                sizes = args[i + 1]
-                    .split(',')
-                    .map(|s| s.parse().unwrap())
-                    .collect();
+                sizes = args[i + 1].split(',').map(|s| s.parse().unwrap()).collect();
             }
             i += 2;
         }
 
         if !is_compute_host() && sizes.iter().any(|&x| x > 500) {
-            eprintln!("HARD GUARD: Cannot run heavy diagnostics on local VM. Use deploy_and_bench.sh's host.");
+            eprintln!(
+                "HARD GUARD: Cannot run heavy diagnostics on local VM. Use deploy_and_bench.sh's host."
+            );
             std::process::exit(1);
         }
 
@@ -609,8 +725,9 @@ fn main() {
             std::process::exit(1);
         }
     } else {
-        println!("Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] | full | verify>");
+        println!(
+            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] | full | verify>"
+        );
     }
 }
 pub mod cache;
-

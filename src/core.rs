@@ -9,7 +9,6 @@ impl Word {
         bytes.copy_from_slice(s.as_bytes());
         Word(bytes)
     }
-
 }
 
 impl std::fmt::Display for Word {

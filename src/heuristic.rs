@@ -135,11 +135,7 @@ mod expected_remaining_tests {
         let dict = Dictionary {
             guesses: words.clone(),
             candidates: words.clone(),
-            guess_chars: vec![
-                [0, 1, 2, 3, 4],
-                [0, 1, 2, 3, 5],
-                [23, 24, 25, 0, 1],
-            ],
+            guess_chars: vec![[0, 1, 2, 3, 4], [0, 1, 2, 3, 5], [23, 24, 25, 0, 1]],
             candidate_to_guess: vec![0, 1, 2],
         };
         let matrix = ResponseMatrix::new(&dict);
@@ -148,7 +144,7 @@ mod expected_remaining_tests {
         // Guess 0 (abcde) against candidate 0 (abcde) is WIN
         // Guess 0 against candidate 1 (abcdf) is 4 greens, 1 black
         // Guess 0 against candidate 2 (xyzab) is 2 yellows (ab), 3 blacks
-        // So the 3 candidates fall into 3 distinct buckets. 
+        // So the 3 candidates fall into 3 distinct buckets.
         // sum(1^2 + 1^2 + 1^2) = 3
         let exp0 = compute_expected_remaining(&matrix, &set, 0);
         assert_eq!(exp0, 3);

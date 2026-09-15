@@ -18,8 +18,8 @@ pub struct GlobalCache {
 // Bit layout: [63..19] = hash45 (45 bits), [18] = is_exact, [17..0] = value (18 bits)
 const VALUE_BITS: u32 = 18;
 const VALUE_MASK: u64 = (1 << VALUE_BITS) - 1; // 0x3FFFF
-const EXACT_BIT: u64 = 1 << VALUE_BITS;         // bit 18
-const HASH_SHIFT: u32 = VALUE_BITS + 1;          // 19
+const EXACT_BIT: u64 = 1 << VALUE_BITS; // bit 18
+const HASH_SHIFT: u32 = VALUE_BITS + 1; // 19
 
 impl GlobalCache {
     pub fn new(size: usize) -> Self {
@@ -223,7 +223,11 @@ mod tests {
             assert!(val < 100, "value {} out of range for hash_a", val);
         }
         if let Some((val, _)) = b {
-            assert!((50..150).contains(&val), "value {} out of range for hash_b", val);
+            assert!(
+                (50..150).contains(&val),
+                "value {} out of range for hash_b",
+                val
+            );
         }
     }
 }
