@@ -69,6 +69,10 @@ pub struct Solver<'a> {
     /// Shared global upper bound across all parallel root-level tasks.
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
+    /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
+    /// Max depth is naturally bounded, but we provide 8 levels to be safe.
+    scratch_tuples: [Vec<(usize, u32, u32)>; 8],
+    scratch_guesses: [Vec<usize>; 8],
 }
 
 impl<'a> Solver<'a> {
@@ -189,6 +193,14 @@ impl<'a> Solver<'a> {
             capacity_bounds,
             cache,
             global_beta,
+            scratch_tuples: [
+                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+            ],
+            scratch_guesses: [
+                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+            ],
         }
     }
 
@@ -450,7 +462,11 @@ impl<'a> Solver<'a> {
         // 100s of KB per call when depth is 3+ and the set is tiny. A cap of c_len * 300
         // covers realistic non-equivalent-guess counts; if exceeded, the Vec grows normally.
         let cap = allowed_guesses.len().min(c_len * 300 + 64);
-        let mut active_tuples = Vec::with_capacity(cap);
+        let mut active_tuples = std::mem::take(&mut self.scratch_tuples[depth]);
+        active_tuples.clear();
+        if active_tuples.capacity() < cap {
+            active_tuples.reserve(cap - active_tuples.capacity());
+        }
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
@@ -530,11 +546,13 @@ impl<'a> Solver<'a> {
         // If local_max_k == 0, no guess can partition the set at all — return beta.
         // If local_max_k == 1, all useful guesses were pruned (the minimum lb_cost >= beta).
         if local_max_k <= 1 {
+            self.scratch_tuples[depth] = active_tuples;
             return beta;
         }
 
         let local_lb = heuristic::capacity_bound(c_len, local_max_k);
         if local_lb >= beta {
+            self.scratch_tuples[depth] = active_tuples;
             return beta;
         }
 
@@ -542,7 +560,9 @@ impl<'a> Solver<'a> {
         // We reuse the `active_tuples` allocation to avoid a separate Vec.
         // The ordering of allowed_guesses passed to children is irrelevant —
         // each child's min_state_val re-sorts by expected_rem for its own candidate set.
-        let active_guesses: Vec<usize> = active_tuples.iter().map(|&(g, _, _)| g).collect();
+        let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
+        active_guesses.clear();
+        active_guesses.extend(active_tuples.iter().map(|&(g, _, _)| g));
 
         for &(g, _, g_lb) in &active_tuples {
             if g_lb >= best_val {
@@ -557,6 +577,9 @@ impl<'a> Solver<'a> {
                 }
             }
         }
+
+        self.scratch_guesses[depth] = active_guesses;
+        self.scratch_tuples[depth] = active_tuples;
 
         if best_val < beta {
             self.cache.insert(hash, best_val, true);
