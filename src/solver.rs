@@ -421,15 +421,18 @@ impl<'a> Solver<'a> {
             hash ^= self.matrix.zobrist[c];
         }
 
-        if let Some((value, is_exact)) = self.cache.get(hash) {
+        let mut cached_lower_bound = 0;
+        if let Some((cached_val, is_exact)) = self.cache.get(hash) {
             self.metrics
                 .cache_hits
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if is_exact {
-                return value;
-            }
-            if value >= beta {
-                return beta;
+                return cached_val;
+            } else {
+                if cached_val >= beta {
+                    return beta;
+                }
+                cached_lower_bound = cached_val;
             }
         }
 
@@ -585,7 +588,10 @@ impl<'a> Solver<'a> {
             return beta;
         }
 
-        let local_lb = heuristic::capacity_bound(c_len, local_max_k);
+        let mut local_lb = heuristic::capacity_bound(c_len, local_max_k);
+        if cached_lower_bound > local_lb {
+            local_lb = cached_lower_bound;
+        }
         if local_lb >= beta {
             self.scratch_tuples[depth] = active_tuples;
             return beta;
