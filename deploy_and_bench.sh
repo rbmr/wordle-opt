@@ -29,4 +29,4 @@ echo "Running correctness tests on compute (catches a broken change before bench
 ssh "$HOST" "cd wordle-opt && timeout 600 ~/.cargo/bin/cargo test --release -- --test-threads=1"
 
 echo "Running benchmark suite on compute (bounded by timeout 36000)..."
-ssh "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark-random $*"
+ssh "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark-random $@"
