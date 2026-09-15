@@ -28,5 +28,10 @@ ssh "$HOST" "cd wordle-opt && ~/.cargo/bin/cargo build --release"
 echo "Running correctness tests on compute (catches a broken change before benchmarking it)..."
 ssh "$HOST" "cd wordle-opt && timeout 600 ~/.cargo/bin/cargo test --release -- --test-threads=1"
 
-echo "Running benchmark suite on compute (bounded by timeout 36000)..."
-ssh "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark-random $@"
+if [ "$1" = "full" ]; then
+    echo "Running FULL solve on compute (bounded by timeout 36000)..."
+    ssh -T "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- full"
+else
+    echo "Running randomized benchmark suite on compute (bounded by timeout 36000)..."
+    ssh -T "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark-random $@"
+fi
