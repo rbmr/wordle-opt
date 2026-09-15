@@ -110,6 +110,7 @@ mod tests {
                 .collect(),
             guesses,
             candidates,
+            candidate_to_guess: vec![0, 1],
         };
 
         let matrix = ResponseMatrix::new(&dict);

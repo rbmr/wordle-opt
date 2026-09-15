@@ -10,6 +10,7 @@ pub struct Dictionary {
     pub guesses: Vec<Word>,
     pub guess_chars: Vec<[u8; 5]>,
     pub candidates: Vec<Word>,
+    pub candidate_to_guess: Vec<usize>,
 }
 
 impl Dictionary {
@@ -40,10 +41,16 @@ impl Dictionary {
             guess_chars.push(chars);
         }
 
+        let mut candidate_to_guess = Vec::with_capacity(candidates.len());
+        for c in &candidates {
+            candidate_to_guess.push(guesses.binary_search(c).unwrap());
+        }
+
         Self {
             guesses,
             guess_chars,
             candidates,
+            candidate_to_guess,
         }
     }
 

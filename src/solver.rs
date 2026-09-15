@@ -442,21 +442,35 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
-        if c_len == 3 {
-            let c0 = set[0];
-            let c1 = set[1];
-            let c2 = set[2];
-            let w0 = &self.dict.candidates[c0];
-            let w1 = &self.dict.candidates[c1];
-            let w2 = &self.dict.candidates[c2];
-            
-            if crate::core::Response::compute(w1, w0) != crate::core::Response::compute(w2, w0)
-                || crate::core::Response::compute(w0, w1) != crate::core::Response::compute(w2, w1)
-                || crate::core::Response::compute(w0, w2) != crate::core::Response::compute(w1, w2)
-            {
-                return 5;
-            } else {
-                return 6;
+        if c_len <= 15 {
+            let mut best_inside = u32::MAX;
+            for i in 0..c_len {
+                let ci = set[i];
+                let gi = self.dict.candidate_to_guess[ci];
+                
+                let mut counts = [0u8; 243];
+                let mut num_distinct = 0;
+                
+                for j in 0..c_len {
+                    if i != j {
+                        let cj = set[j];
+                        let r = self.matrix.get(gi, cj).0 as usize;
+                        if counts[r] == 0 {
+                            num_distinct += 1;
+                        }
+                        counts[r] += 1;
+                    }
+                }
+                
+                if num_distinct == c_len - 1 {
+                    return (2 * c_len - 1) as u32;
+                }
+                if num_distinct == c_len - 2 {
+                    best_inside = best_inside.min((2 * c_len) as u32);
+                }
+            }
+            if best_inside == (2 * c_len) as u32 {
+                return best_inside;
             }
         }
 
