@@ -732,7 +732,7 @@ fn main() {
         let global_cache = crate::cache::GlobalCache::new(cache_size);
         let metrics = Metrics::new();
         
-        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::atomic::AtomicU32;
         let global_beta = AtomicU32::new(u32::MAX);
         
         let mut solver = Solver::new_with_global_beta(

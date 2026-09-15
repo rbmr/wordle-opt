@@ -589,7 +589,7 @@ impl<'a> Solver<'a> {
             // prune for "should I try this guess at this level" already happens safely
             // below via `g_lb >= best_val`, which only affects iteration order/early
             // exit, not what gets handed to children.
-            active_tuples.push((g, expected_rem, lb_cost, num_non_empty as usize));
+            active_tuples.push((g, expected_rem, lb_cost, num_non_empty));
         }
         self.metrics
             .pruned_by_equivalence

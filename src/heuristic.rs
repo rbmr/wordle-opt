@@ -187,3 +187,23 @@ pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     }
     cost
 }
+
+#[cfg(test)]
+mod tight_capacity_bounds_tests {
+    use super::*;
+
+    #[test]
+    fn test_tight_capacity_bound_is_tighter() {
+        // If max_k is large but valid_max_k is small, tight_capacity_bound should give a higher cost.
+        let n = 20;
+        let global_max_k = 10;
+        let valid_max_k = 3;
+        
+        let loose_cost = capacity_bound(n, global_max_k);
+        let tight_cost = tight_capacity_bound(n, valid_max_k, global_max_k);
+        
+        // Because the root is restricted to only 3 branches instead of 10,
+        // it must push more nodes to deeper levels, resulting in a higher total cost.
+        assert!(tight_cost > loose_cost, "Tight cost {} should be > loose cost {}", tight_cost, loose_cost);
+    }
+}
