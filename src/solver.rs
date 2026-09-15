@@ -450,7 +450,7 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
-        if c_len <= 5 {
+        if c_len <= 15 {
             let mut best_inside = u32::MAX;
             for i in 0..c_len {
                 let ci = set[i];
@@ -484,12 +484,12 @@ impl<'a> Solver<'a> {
 
         let global_lb = self.capacity_bounds[c_len];
         if global_lb >= beta {
-            return beta;
+            return global_lb;
         }
 
         let parent_lb = heuristic::capacity_bound(c_len, parent_max_k);
         if parent_lb >= beta {
-            return beta;
+            return parent_lb.max(global_lb);
         }
 
         let mut best_val = beta;
@@ -585,7 +585,9 @@ impl<'a> Solver<'a> {
         // If local_max_k == 1, all useful guesses were pruned (the minimum lb_cost >= beta).
         if local_max_k <= 1 {
             self.scratch_tuples[depth] = active_tuples;
-            return beta;
+            let val = heuristic::capacity_bound(c_len, local_max_k).max(cached_lower_bound).max(beta);
+            self.cache.insert(hash, val, false);
+            return val;
         }
 
         let mut local_lb = heuristic::capacity_bound(c_len, local_max_k);
@@ -594,7 +596,8 @@ impl<'a> Solver<'a> {
         }
         if local_lb >= beta {
             self.scratch_tuples[depth] = active_tuples;
-            return beta;
+            self.cache.insert(hash, local_lb, false);
+            return local_lb;
         }
 
         // Build a flat guess-index slice from active_tuples for child calls.
