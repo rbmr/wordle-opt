@@ -63,7 +63,7 @@ pub struct Solver<'a> {
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
-    capacity_bounds: &'a [u32],
+    capacity_bounds_2d: &'a [Vec<u32>],
     pub seen_projections: [rustc_hash::FxHashSet<u32>; 32],
     pub cache: &'a crate::cache::GlobalCache,
     /// Shared global upper bound across all parallel root-level tasks.
@@ -169,7 +169,7 @@ impl<'a> Solver<'a> {
         max_k: usize,
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
-        capacity_bounds: &'a [u32],
+        capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
     ) -> Self {
         Self::new_with_global_beta(
@@ -177,7 +177,7 @@ impl<'a> Solver<'a> {
             max_k,
             dict,
             metrics,
-            capacity_bounds,
+            capacity_bounds_2d,
             cache,
             &SENTINEL_BETA,
         )
@@ -188,7 +188,7 @@ impl<'a> Solver<'a> {
         max_k: usize,
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
-        capacity_bounds: &'a [u32],
+        capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
         global_beta: &'a AtomicU32,
     ) -> Self {
@@ -198,7 +198,7 @@ impl<'a> Solver<'a> {
             dict,
             metrics,
             seen_projections: std::array::from_fn(|_| rustc_hash::FxHashSet::default()),
-            capacity_bounds,
+            capacity_bounds_2d,
             cache,
             global_beta,
             scratch_tuples: std::array::from_fn(|_| Vec::new()),
@@ -254,9 +254,11 @@ impl<'a> Solver<'a> {
 
         heuristic::sort_guesses_by_expected_remaining(matrix, set, &mut active_guesses);
 
-        let mut capacity_bounds = Vec::with_capacity(dict.candidates.len() + 1);
-        for i in 0..=dict.candidates.len() {
-            capacity_bounds.push(heuristic::capacity_bound(i, max_k));
+        let mut capacity_bounds_2d = vec![vec![0; dict.candidates.len() + 1]; max_k + 1];
+        for k in 2..=max_k {
+            for i in 0..=dict.candidates.len() {
+                capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
+            }
         }
 
         if !active_guesses.is_empty() {
@@ -301,7 +303,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 if p_len <= 2 {
-                    base_cost += capacity_bounds[p_len];
+                    base_cost += capacity_bounds_2d[max_k][p_len];
                     continue;
                 }
                 let start = offsets[r_idx];
@@ -319,7 +321,7 @@ impl<'a> Solver<'a> {
                         max_k,
                         dict,
                         metrics,
-                        &capacity_bounds,
+                        &capacity_bounds_2d,
                         &global_cache,
                     );
                     // For a bucket, the cost is evaluated via min_state_val.
@@ -353,7 +355,7 @@ impl<'a> Solver<'a> {
                             .filter(|&(r_idx, &cnt)| {
                                 cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize
                             })
-                            .map(|(_, &cnt)| capacity_bounds[cnt as usize])
+                            .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
                             .sum::<u32>();
                     lb < beta_after_first
                 })
@@ -375,7 +377,7 @@ impl<'a> Solver<'a> {
                     max_k,
                     dict,
                     metrics,
-                    &capacity_bounds,
+                    &capacity_bounds_2d,
                     &global_cache,
                     &beta,
                 );
@@ -496,7 +498,7 @@ impl<'a> Solver<'a> {
             }
         }
 
-        let global_lb = self.capacity_bounds[c_len];
+        let global_lb = self.capacity_bounds_2d[self.max_k][c_len];
         if global_lb >= beta {
             return global_lb;
         }
@@ -574,7 +576,7 @@ impl<'a> Solver<'a> {
                 let count = counts[r_idx];
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != crate::core::Response::WIN.0 as usize {
-                    lb_cost += self.capacity_bounds[count as usize];
+                    lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
                 }
             }
 
@@ -734,7 +736,7 @@ impl<'a> Solver<'a> {
             // construction and never changes across recursion, so this is always exactly
             // the same value capacity_bound() would compute, just without redoing the
             // O(log n) loop on every one of this hot function's calls.
-            let lb = self.capacity_bounds[p_len as usize];
+            let lb = self.capacity_bounds_2d[parent_max_k][p_len as usize];
             cost += lb;
             p_lbs[r_idx] = lb;
         }

@@ -721,9 +721,11 @@ fn main() {
         
         let initial_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
         let max_k = heuristic::compute_max_branching_factor(&matrix, &initial_candidates);
-        let mut capacity_bounds = vec![0; initial_candidates.len() + 1];
-        for i in 0..=initial_candidates.len() {
-            capacity_bounds[i] = heuristic::capacity_bound(i, max_k);
+        let mut capacity_bounds_2d = vec![vec![0; initial_candidates.len() + 1]; max_k + 1];
+        for k in 2..=max_k {
+            for i in 0..=initial_candidates.len() {
+                capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
+            }
         }
         
         let cache_size = if crate::is_compute_host() { 512 * 1024 * 1024 } else { 64 * 1024 * 1024 };
@@ -738,7 +740,7 @@ fn main() {
             max_k,
             &dict,
             &metrics,
-            &capacity_bounds,
+            &capacity_bounds_2d,
             &global_cache,
             &global_beta,
         );
