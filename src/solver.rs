@@ -453,6 +453,23 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
+        if c_len == 3 {
+            let c0 = set[0];
+            let c1 = set[1];
+            let c2 = set[2];
+            let w0 = &self.dict.candidates[c0];
+            let w1 = &self.dict.candidates[c1];
+            let w2 = &self.dict.candidates[c2];
+            
+            if crate::core::Response::compute(w1, w0) != crate::core::Response::compute(w2, w0)
+                || crate::core::Response::compute(w0, w1) != crate::core::Response::compute(w2, w1)
+                || crate::core::Response::compute(w0, w2) != crate::core::Response::compute(w1, w2)
+            {
+                return 5;
+            } else {
+                return 6;
+            }
+        }
 
         let global_lb = self.capacity_bounds[c_len];
         if global_lb >= beta {
@@ -591,6 +608,7 @@ impl<'a> Solver<'a> {
         } else {
             self.cache.insert(hash, beta, false);
         }
+
         best_val
     }
 
