@@ -150,3 +150,40 @@ mod expected_remaining_tests {
         assert_eq!(exp0, 3);
     }
 }
+
+pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    if n == 2 {
+        return 3;
+    }
+
+    let mut remaining = n as u32;
+    let mut cost = 0;
+    let mut depth = 1;
+    if root_k <= 1 || max_k <= 1 {
+        // If max_k <= 1 or root_k <= 1 and we have n > 2, it's impossible to solve
+        // but we return a large finite cost to let alpha-beta prune it.
+        return capacity_bound(n, max_k);
+    }
+
+    let take = remaining.min(1);
+    cost += take * depth;
+    remaining -= take;
+    depth += 1;
+
+    let mut capacity_at_depth = (root_k as u32).saturating_sub(1);
+
+    while remaining > 0 {
+        let take = remaining.min(capacity_at_depth);
+        cost += take * depth;
+        remaining -= take;
+        depth += 1;
+        capacity_at_depth = capacity_at_depth.saturating_mul(max_k as u32 - 1);
+    }
+    cost
+}

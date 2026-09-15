@@ -71,7 +71,7 @@ pub struct Solver<'a> {
     global_beta: &'a AtomicU32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
     /// Max depth is naturally bounded, but we provide 32 levels to be safe against deep suboptimal branches.
-    scratch_tuples: [Vec<(usize, u32, u32)>; 32],
+    scratch_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
 }
@@ -587,13 +587,13 @@ impl<'a> Solver<'a> {
             // prune for "should I try this guess at this level" already happens safely
             // below via `g_lb >= best_val`, which only affects iteration order/early
             // exit, not what gets handed to children.
-            active_tuples.push((g, expected_rem, lb_cost));
+            active_tuples.push((g, expected_rem, lb_cost, num_non_empty as usize));
         }
         self.metrics
             .pruned_by_equivalence
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
 
-        active_tuples.sort_unstable_by_key(|&(_, exp, _)| exp);
+        active_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
 
         // If local_max_k == 0, no guess can partition the set at all — return beta.
         // If local_max_k == 1, all useful guesses were pruned (the minimum lb_cost >= beta).
@@ -620,11 +620,30 @@ impl<'a> Solver<'a> {
         // We reuse the `active_tuples` allocation to avoid a separate Vec.
         // The ordering of allowed_guesses passed to children is irrelevant —
         // each child's min_state_val re-sorts by expected_rem for its own candidate set.
+        
+        let mut valid_max_k = 0;
+        for &(_, _, g_lb, non_empty) in &active_tuples {
+            if g_lb < beta && non_empty > valid_max_k {
+                valid_max_k = non_empty;
+            }
+        }
+        
+        let tight_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
+        if tight_lb > local_lb {
+            local_lb = tight_lb;
+        }
+        if local_lb >= beta {
+            self.scratch_tuples[depth] = active_tuples;
+            let return_val = local_lb.max(cached_lower_bound).max(beta);
+            self.cache.insert(hash, return_val, false);
+            return return_val;
+        }
+
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
         active_guesses.clear();
-        active_guesses.extend(active_tuples.iter().map(|&(g, _, _)| g));
+        active_guesses.extend(active_tuples.iter().map(|&(g, _, _, _)| g));
 
-        for &(g, _, g_lb) in &active_tuples {
+        for &(g, _, g_lb, _) in &active_tuples {
             if g_lb >= best_val {
                 self.metrics
                     .pruned_by_bounds
