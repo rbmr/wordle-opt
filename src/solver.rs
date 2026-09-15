@@ -313,7 +313,7 @@ impl<'a> Solver<'a> {
                     );
                     // For a bucket, the cost is evaluated via min_state_val.
                     // We use a very loose beta since we evaluate in parallel.
-                    solver.min_state_val(&bucket, &active_guesses, initial_greedy_cost, 2)
+                    solver.min_state_val(&bucket, &active_guesses, initial_greedy_cost, 2, max_k)
                 })
                 .sum();
 
@@ -350,6 +350,8 @@ impl<'a> Solver<'a> {
                 })
                 .collect();
 
+            println!("\n*** Root candidates after filter: {} / {} ***", root_candidates.len(), active_guesses.len() - 1);
+            
             // Now evaluate the remaining guesses in parallel with the tight beta.
             // Each solver holds a reference to the shared beta so it can abort early
             // if another thread finds a better solution while this one is running.
@@ -364,7 +366,7 @@ impl<'a> Solver<'a> {
                     &global_cache,
                     &beta,
                 );
-                let val = local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1);
+                let val = local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1, max_k);
 
                 // atomic min
                 let mut current = beta.load(Ordering::Relaxed);
@@ -408,6 +410,7 @@ impl<'a> Solver<'a> {
         allowed_guesses: &[usize],
         beta: u32,
         depth: usize,
+        parent_max_k: usize,
     ) -> u32 {
         self.metrics
             .max_depth
@@ -478,6 +481,11 @@ impl<'a> Solver<'a> {
 
         let global_lb = self.capacity_bounds[c_len];
         if global_lb >= beta {
+            return beta;
+        }
+
+        let parent_lb = heuristic::capacity_bound(c_len, parent_max_k);
+        if parent_lb >= beta {
             return beta;
         }
 
@@ -596,7 +604,7 @@ impl<'a> Solver<'a> {
                 self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
-            let val = self.min_guess_val(set, g, &active_guesses, best_val, depth);
+            let val = self.min_guess_val(set, g, &active_guesses, best_val, depth, local_max_k);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -631,6 +639,7 @@ impl<'a> Solver<'a> {
         allowed_guesses: &[usize],
         beta: u32,
         depth: usize,
+        parent_max_k: usize,
     ) -> u32 {
         // Tighten local beta using the shared global bound from concurrent threads.
         // min_state_val caches against the tightened beta; alpha-beta semantics guarantee
@@ -737,7 +746,7 @@ impl<'a> Solver<'a> {
                 return beta;
             }
 
-            let val = self.min_state_val(p, allowed_guesses, effective_beta, depth + 1);
+            let val = self.min_state_val(p, allowed_guesses, effective_beta, depth + 1, parent_max_k);
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
