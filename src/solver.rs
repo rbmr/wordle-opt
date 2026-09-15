@@ -503,7 +503,7 @@ impl<'a> Solver<'a> {
             return global_lb;
         }
 
-        let parent_lb = heuristic::capacity_bound(c_len, parent_max_k);
+        let parent_lb = self.capacity_bounds_2d[parent_max_k][c_len];
         if parent_lb >= beta {
             return parent_lb.max(global_lb);
         }
@@ -601,14 +601,14 @@ impl<'a> Solver<'a> {
         // If local_max_k == 1, all useful guesses were pruned (the minimum lb_cost >= beta).
         if local_max_k <= 1 {
             self.scratch_tuples[depth] = active_tuples;
-            let val = heuristic::capacity_bound(c_len, local_max_k)
+            let val = self.capacity_bounds_2d[local_max_k][c_len]
                 .max(cached_lower_bound)
                 .max(beta);
             self.cache.insert(hash, val, false);
             return val;
         }
 
-        let mut local_lb = heuristic::capacity_bound(c_len, local_max_k);
+        let mut local_lb = self.capacity_bounds_2d[local_max_k][c_len];
         if cached_lower_bound > local_lb {
             local_lb = cached_lower_bound;
         }
