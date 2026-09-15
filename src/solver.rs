@@ -756,9 +756,12 @@ impl<'a> Solver<'a> {
         }
         sorted_set.resize(set.len(), 0);
 
-        let mut offsets = [0usize; 244];
-        for r_idx in 0..243 {
-            offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+        let mut offsets = [0usize; 243];
+        let mut curr = 0;
+        for i in 0..num_non_empty {
+            let r = non_empty_indices[i] as usize;
+            offsets[r] = curr;
+            curr += counts[r] as usize;
         }
 
         let mut current_offsets = offsets;

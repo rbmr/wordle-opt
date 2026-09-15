@@ -108,3 +108,11 @@ Each size draws 1 independent random subsets (no replacement within a subset) fr
 | 250 | 1 | 685/685.0/685 | 1.69/1.69/1.69 | 404/404.0/404 |
 | 500 | 1 | 1455/1455.0/1455 | 56.76/56.76/56.76 | 17222/17222.0/17222 |
 
+## Randomized Benchmark Run: commit=8ebae1f host=assistant cpus=2 seed=20260906 samples_per_size=1 unix_time=1789504016
+Each size draws 1 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |
+|------|---------|---------------------|------------------------|----------------------|
+| 100 | 1 | 248/248.0/248 | 0.09/0.09/0.09 | 10/10.0/10 |
+| 250 | 1 | 685/685.0/685 | 1.64/1.64/1.64 | 407/407.0/407 |
+| 500 | 1 | 1455/1455.0/1455 | 57.85/57.85/57.85 | 17215/17215.0/17215 |
+
