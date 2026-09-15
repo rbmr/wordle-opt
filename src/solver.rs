@@ -64,7 +64,7 @@ pub struct Solver<'a> {
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     capacity_bounds: &'a [u32],
-    pub seen_projections: rustc_hash::FxHashSet<u32>,
+    pub seen_projections: [rustc_hash::FxHashSet<u32>; 8],
     pub cache: &'a crate::cache::GlobalCache,
     /// Shared global upper bound across all parallel root-level tasks.
     /// When a thread improves beta, others see it immediately and can abort early.
@@ -189,7 +189,12 @@ impl<'a> Solver<'a> {
             max_k,
             dict,
             metrics,
-            seen_projections: rustc_hash::FxHashSet::default(),
+            seen_projections: [
+                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
+                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
+                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
+                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
+            ],
             capacity_bounds,
             cache,
             global_beta,
@@ -472,7 +477,7 @@ impl<'a> Solver<'a> {
             c_mask |= self.matrix.candidate_masks[c];
         }
 
-        self.seen_projections.clear();
+        self.seen_projections[depth].clear();
         let mut local_max_k = 0;
         let mut equiv_pruned = 0;
 
@@ -490,7 +495,7 @@ impl<'a> Solver<'a> {
             let l4 = chars[4] as u32;
             proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
 
-            if !self.seen_projections.insert(proj) {
+            if !self.seen_projections[depth].insert(proj) {
                 equiv_pruned += 1;
                 continue;
             }
