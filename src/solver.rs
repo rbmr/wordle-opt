@@ -64,15 +64,15 @@ pub struct Solver<'a> {
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     capacity_bounds: &'a [u32],
-    pub seen_projections: [rustc_hash::FxHashSet<u32>; 8],
+    pub seen_projections: [rustc_hash::FxHashSet<u32>; 32],
     pub cache: &'a crate::cache::GlobalCache,
     /// Shared global upper bound across all parallel root-level tasks.
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    /// Max depth is naturally bounded, but we provide 8 levels to be safe.
-    scratch_tuples: [Vec<(usize, u32, u32)>; 8],
-    scratch_guesses: [Vec<usize>; 8],
+    /// Max depth is naturally bounded, but we provide 32 levels to be safe against deep suboptimal branches.
+    scratch_tuples: [Vec<(usize, u32, u32)>; 32],
+    scratch_guesses: [Vec<usize>; 32],
 }
 
 impl<'a> Solver<'a> {
@@ -189,23 +189,12 @@ impl<'a> Solver<'a> {
             max_k,
             dict,
             metrics,
-            seen_projections: [
-                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
-                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
-                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
-                rustc_hash::FxHashSet::default(), rustc_hash::FxHashSet::default(),
-            ],
+            seen_projections: std::array::from_fn(|_| rustc_hash::FxHashSet::default()),
             capacity_bounds,
             cache,
             global_beta,
-            scratch_tuples: [
-                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-            ],
-            scratch_guesses: [
-                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-                Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-            ],
+            scratch_tuples: std::array::from_fn(|_| Vec::new()),
+            scratch_guesses: std::array::from_fn(|_| Vec::new()),
         }
     }
 
