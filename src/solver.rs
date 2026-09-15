@@ -442,7 +442,7 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
-        if c_len <= 15 {
+        if c_len <= 5 {
             let mut best_inside = u32::MAX;
             for i in 0..c_len {
                 let ci = set[i];
