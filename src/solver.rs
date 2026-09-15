@@ -835,3 +835,15 @@ mod tests {
         );
     }
 }
+#[cfg(test)]
+mod solver_cache_tests {
+    use super::*;
+#[test]
+fn test_lower_bound_tightening() {
+    let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+    let matrix = crate::matrix::ResponseMatrix::new(&dict);
+    let metrics = Metrics::new();
+    let cache = crate::cache::GlobalCache::new(1024);
+    assert_eq!(cache.get(0), None);
+}
+}

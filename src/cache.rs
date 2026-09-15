@@ -75,9 +75,13 @@ impl GlobalCache {
                     return;
                 }
             } else {
-                // Same state: keep exact bound over lower bound
+                // Same state: keep exact bound over lower bound, and tighter lower bound over looser
                 let old_exact = (old & EXACT_BIT) != 0;
+                let old_value = (old & VALUE_MASK) as u32;
                 if old_exact && !is_exact {
+                    return;
+                }
+                if !old_exact && !is_exact && value < old_value {
                     return;
                 }
             }
