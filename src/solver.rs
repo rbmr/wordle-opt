@@ -526,16 +526,15 @@ impl<'a> Solver<'a> {
             c_mask |= self.matrix.candidate_masks[c];
         }
 
-        unsafe { self.seen_projections.get_unchecked_mut(depth).clear() };
+        self.seen_projections[depth].clear();
         let mut local_max_k = 0;
         let mut equiv_pruned = 0;
 
         let mut counts = [0u16; 243];
         let mut non_empty = [0u8; 243];
 
-        let bounds_row = unsafe { self.capacity_bounds_2d.get_unchecked(self.max_k) };
         for &g in allowed_guesses {
-            let chars = unsafe { self.dict.guess_chars.get_unchecked(g) };
+            let chars = &self.dict.guess_chars[g];
             let mut proj = 0u32;
             let l0 = chars[0] as u32;
             proj |= (l0 + 1) * ((c_mask >> l0) & 1);
@@ -548,7 +547,7 @@ impl<'a> Solver<'a> {
             let l4 = chars[4] as u32;
             proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
 
-            if unsafe { !self.seen_projections.get_unchecked_mut(depth).insert(proj) } {
+            if !self.seen_projections[depth].insert(proj) {
                 equiv_pruned += 1;
                 continue;
             }
@@ -578,14 +577,12 @@ impl<'a> Solver<'a> {
             let mut expected_rem = 0u32;
             let mut lb_cost = set.len() as u32;
             for i in 0..num_non_empty {
-                unsafe {
-                    let r_idx = *non_empty.get_unchecked(i) as usize;
-                    let count = *counts.get_unchecked(r_idx);
-                    *counts.get_unchecked_mut(r_idx) = 0; // Clear for next iteration
-                    expected_rem += (count as u32) * (count as u32);
-                    if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += *bounds_row.get_unchecked(count as usize);
-                    }
+                let r_idx = non_empty[i] as usize;
+                let count = counts[r_idx];
+                counts[r_idx] = 0; // Clear for next iteration
+                expected_rem += (count as u32) * (count as u32);
+                if r_idx != crate::core::Response::WIN.0 as usize {
+                    lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
                 }
             }
 
