@@ -93,6 +93,19 @@ it ran on. This means entries are actually comparable to each other: same N
 and same host implies same input and same hardware, so a timing or
 state-count change reflects a real code change, not benchmark noise.
 
+The commit hash comes from the `WORDLE_OPT_COMMIT` environment variable if
+set, falling back to `git rev-parse` in the working directory otherwise
+(see `git_commit_hash()` in `src/main.rs`). This matters because compute's
+build directory is populated by `rsync --exclude '.git'` (see below) - it
+has no git repo of its own to ask, and running `git rev-parse` there would
+either fail or, worse, silently answer with whatever unrelated git checkout
+happens to be sitting in that directory, mislabeling a run with a commit
+that isn't what actually produced it. `deploy_and_bench.sh` and
+`run_full.sh` both compute the commit from the *local* repo (the one
+actually being synced) and pass it through via this variable - always use
+one of those two scripts rather than invoking `cargo run` on compute
+directly, or the commit stamp will silently read "unknown".
+
 Earlier benchmarking used randomly sampled candidates and untracked commits,
 which made results non-reproducible and non-comparable; that history is
 preserved for reference in `benchmark_history_legacy.md` but should not be
@@ -128,3 +141,36 @@ arguments to `benchmark-random`, e.g. `./deploy_and_bench.sh -n 500 -k 3`
 for a fast check while iterating. Never run it (or any other compute job)
 while another one is already running there - concurrent jobs contend for
 the same cores and cache, which silently invalidates both jobs' timings.
+
+## Running the actual full N=2340 solve
+
+The project's goal is the optimizations that get the algorithm under 10
+hours, not the answer a full run produces - the optimal cost doesn't
+change between commits, only how fast it's reached does. A `full` run is
+therefore a **rare, deliberate milestone check**, not a routine step: it
+occupies compute's one shared CPU for potentially hours, which blocks the
+benchmark iteration that's the actual day-to-day work. Don't run it after
+every change, and don't run it "to get to done" - only run it when
+diagnose/benchmark data at large N gives a specific, verified reason to
+expect it will finish in a bounded time (see ARCHITECTURE.md's "Known
+Scaling Behavior" for why small-N extrapolation alone is not that reason).
+
+When it is actually warranted:
+
+```bash
+./run_full.sh    # syncs, builds, tests, then launches `full` detached and
+                  # returns immediately - it does not wait for it to finish.
+                  # Bounded by `timeout` at 36000s (the 10h milestone itself
+                  # - a run that hasn't finished by then has already
+                  # answered "under 10 hours?" with "no").
+./check_full.sh  # cheap, near-instant status check: still running? crashed?
+                  # done? Poll this on your own schedule instead of blocking
+                  # on the run.
+```
+
+`run_full.sh` refuses to start if a wordle-opt process is already running
+on compute (same one-job-at-a-time rule as `deploy_and_bench.sh`, now
+actually enforced instead of just documented). Every `full` run's output is
+stamped with the exact commit that produced it (see the note on
+`WORDLE_OPT_COMMIT` below) so a result in `benchmark_history.md` or an
+issue comment can always be traced back to the code that generated it.
