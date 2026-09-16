@@ -28,6 +28,31 @@ below.
 not a heuristic. It must always return the true optimal cost. Never trade
 away exactness for speed, and never treat a speedup that changes a golden
 test's expected answer as a win to keep - it's a correctness bug to fix.
+
+**Compute is fixed at one machine.** `compute` - its CPU cores, RAM, and
+its GPU (an RTX 2060, passed through but with no driver installed as of
+2026-09-16 - nothing has actually tried using it yet) - is the entire
+compute budget for this project, permanently. No additional or distributed
+compute will ever be provisioned; don't propose or design for a cluster,
+multiple nodes, or offloading to any other machine. If parallelism or
+throughput is the bottleneck, the lever is using more of *this one
+machine's* resources better (more of its cores, its GPU, a
+faster-per-core approach), not more machines.
+
+**You do not get to unilaterally decide the 10-hour goal is unattainable.**
+That determination is made jointly by the maintainer and their own Claude
+Code session, in conversation - not declared by you in an issue or a
+commit message. Before it's even worth raising as a question, the obvious
+single-machine avenues need to have actually been tried, not just reasoned
+about: GPU acceleration (the hardware is sitting there unused), and,
+seriously, whether the current architecture/language is even the right
+one for the ceiling you're hitting (a from-scratch rewrite in a different
+language or with a fundamentally different data layout is a legitimate
+thing to actually attempt, not just muse about). If you've genuinely
+exhausted concrete attempts along those lines and still believe the goal
+is unreachable, open an issue laying out *specifically what you tried and
+what the evidence shows* and frame it as a question for the maintainer -
+never as a conclusion you've reached on your own.
 If you're not certain a change preserves exactness, it isn't safe to ship.
 
 ## Reporting discipline (read this one twice too)
