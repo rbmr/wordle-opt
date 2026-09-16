@@ -63,6 +63,23 @@ overshot). Concretely, from here on:
   numbers (see "One job at a time" below) and then report the result as if
   it were clean.
 
+## What runs where
+
+The machine you're reading this on (`assistant`) is small (2 cores) and
+needs to stay responsive for communication - it is not for heavy
+computation. But it does have its own dedicated cores, separate from
+compute's, so quick local iteration doesn't slow compute down:
+
+- **Fine to run locally, directly:** `cargo test --release` (the fast unit
+  suite), `cargo build`, `cargo clippy`, small/quick checks, anything on
+  the order of a few tens of seconds.
+- **Must go to `compute` via the scripts below:** anything exhaustive,
+  full-scale, or open-ended in runtime - `benchmark`, `benchmark-random`,
+  `diagnose`, and especially `full`.
+
+If you're not sure which side of that line something falls on, wrap it in
+a short `timeout` locally rather than guessing.
+
 ## Workflow on compute
 
 - **Never hand-roll rsync/ssh/cargo commands against `compute`.** Use
