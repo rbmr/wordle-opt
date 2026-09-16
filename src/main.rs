@@ -16,12 +16,26 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::Instant;
 
-/// Short git commit hash of the working tree, or "unknown" if git isn't
-/// available. Every benchmark run is stamped with this so a number in
+/// Short git commit hash of the working tree, or "unknown" if it can't be
+/// determined. Every benchmark run is stamped with this so a number in
 /// `benchmark_history.md` can always be traced back to the exact code that
 /// produced it - a claim about performance is only as good as being able to
 /// check it against the commit it came from.
+///
+/// Prefers `WORDLE_OPT_COMMIT` (set by `deploy_and_bench.sh` from the
+/// *local* repo before rsyncing) over running `git rev-parse` here: the
+/// remote build directory deliberately has no `.git` (rsync excludes it), so
+/// `git rev-parse` there either fails or - worse - silently reports the HEAD
+/// of some unrelated, stale git checkout that happens to sit in the same
+/// directory, mislabeling a run with a commit hash that isn't what actually
+/// ran. Only a git repo that is *actually the source of the code running
+/// right now* can answer this correctly, which on the remote is never true.
 fn git_commit_hash() -> String {
+    if let Ok(commit) = std::env::var("WORDLE_OPT_COMMIT")
+        && !commit.trim().is_empty()
+    {
+        return commit.trim().to_string();
+    }
     std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
@@ -513,14 +527,27 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 }
 
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
-    // if !is_compute_host() {
-    //     eprintln!("HARD GUARD...");
-    //     std::process::exit(1);
-    // }
+    // Restored 2026-09-16: this guard was silently commented out in commit
+    // ffb81d2 ("Perf: Prune branches using parent's max_k before full
+    // capacity check") - a commit whose message describes an unrelated
+    // pruning optimization and says nothing about disabling this check.
+    // Without it, nothing stops `full` (an exhaustive N=2340 solve) from
+    // being launched on the tiny 2-core/4GB `assistant` VM, which is
+    // supposed to stay lightweight and available - see AGENTS.md and the
+    // task guidance on why that machine must never run heavy computation.
+    if !is_compute_host() {
+        eprintln!("HARD GUARD: full run must execute on the compute host (hostname 'ubuntu-main' or 'compute'). Use rsync + ssh, or deploy_and_bench.sh.");
+        std::process::exit(1);
+    }
 
     let all_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
     let n_candidates = all_candidates.len();
-    println!("Running full N={} optimal solve...", n_candidates);
+    let commit = git_commit_hash();
+    let host = hostname();
+    println!(
+        "Running full N={} optimal solve... commit={} host={}",
+        n_candidates, commit, host
+    );
     let _ = std::io::Write::flush(&mut std::io::stdout());
 
     let metrics = std::sync::Arc::new(Metrics::new());
@@ -610,7 +637,9 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         .expect("Cannot open benchmark_history.md");
     writeln!(
         file,
-        "## FULL RUN N=2340: {:?}",
+        "## FULL RUN N=2340: commit={} host={} unix_time={}",
+        commit,
+        host,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
