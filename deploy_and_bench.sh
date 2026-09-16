@@ -23,10 +23,10 @@ echo "Syncing to $HOST..."
 rsync -aP --exclude 'target' --exclude '.git' . "$HOST:~/wordle-opt/"
 
 echo "Building on compute..."
-ssh "$HOST" "cd wordle-opt && RUSTFLAGS="-C target-cpu=native" ~/.cargo/bin/cargo build --release"
+ssh "$HOST" "cd wordle-opt && RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release"
 
 echo "Running correctness tests on compute (catches a broken change before benchmarking it)..."
-ssh "$HOST" "cd wordle-opt && timeout 600 RUSTFLAGS="-C target-cpu=native" ~/.cargo/bin/cargo test --release -- --test-threads=1"
+ssh "$HOST" "cd wordle-opt && timeout 600 RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
 
 if [ "$1" = "full" ]; then
     echo "Running FULL solve on compute (bounded by timeout 36000)..."
