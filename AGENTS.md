@@ -40,10 +40,10 @@ machine's* resources better (more of its cores, its GPU, a
 faster-per-core approach), not more machines.
 
 **You do not get to unilaterally decide the 10-hour goal is unattainable.**
-That determination is made jointly by the maintainer and their own Claude
-Code session, in conversation - not declared by you in an issue or a
-commit message. Before it's even worth raising as a question, the obvious
-single-machine avenues need to have actually been tried, not just reasoned
+That determination is the maintainer's call, not something you declare in
+an issue or a commit message. Before it's even worth raising as a
+question, the obvious single-machine avenues need to have actually been
+tried, not just reasoned
 about: GPU acceleration (the hardware is sitting there unused), and,
 seriously, whether the current architecture/language is even the right
 one for the ceiling you're hitting (a from-scratch rewrite in a different
