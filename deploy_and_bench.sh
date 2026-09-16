@@ -30,8 +30,8 @@ ssh "$HOST" "cd wordle-opt && timeout 600 env RUSTFLAGS=\"-C target-cpu=native\"
 
 if [ "$1" = "full" ]; then
     echo "Running FULL solve on compute (bounded by timeout 36000)..."
-    ssh -T "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- full"
+    ssh -T "$HOST" "cd wordle-opt && timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- full"
 else
     echo "Running randomized benchmark suite on compute (bounded by timeout 36000)..."
-    ssh -T "$HOST" "cd wordle-opt && timeout 36000 ~/.cargo/bin/cargo run --release -- benchmark-random $@"
+    ssh -T "$HOST" "cd wordle-opt && timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- benchmark-random $@"
 fi
