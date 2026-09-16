@@ -13,7 +13,7 @@ pub struct ResponseMatrix {
     pub guess_masks: Vec<u32>,
     pub candidate_masks: Vec<u32>,
     pub zobrist: Vec<u64>,
-    data: Vec<Response>,
+    pub data: Vec<Response>,
 }
 
 impl ResponseMatrix {

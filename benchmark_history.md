@@ -116,3 +116,38 @@ Each size draws 1 independent random subsets (no replacement within a subset) fr
 | 250 | 1 | 685/685.0/685 | 1.64/1.64/1.64 | 407/407.0/407 |
 | 500 | 1 | 1455/1455.0/1455 | 57.85/57.85/57.85 | 17215/17215.0/17215 |
 
+## Benchmark Run: commit=d90d850 host=assistant cpus=2 unix_time=1789538433
+Candidates are deterministic: the first N entries of the dictionary, sorted (same convention as the golden tests in `solver.rs`).
+| Size | Cost | Time(s) [Min/Avg/Max] | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
+|------|------|------------------------|--------|---------|----------|----------|------------|
+| 100 | 262 | 0.10/0.10/0.11 | 52 | 471 | 71770 | 79228 | 2 |
+| 250 | 702 | 3.15/3.77/4.61 | 1374 | 2328 | 3782399 | 3700587 | 296 |
+
+## Benchmark Run: commit=d90d850 host=assistant cpus=2 unix_time=1789538454
+Candidates are deterministic: the first N entries of the dictionary, sorted (same convention as the golden tests in `solver.rs`).
+| Size | Cost | Time(s) [Min/Avg/Max] | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
+|------|------|------------------------|--------|---------|----------|----------|------------|
+| 100 | 262 | 0.11/0.14/0.17 | 52 | 471 | 71770 | 79228 | 2 |
+| 250 | 702 | 3.19/3.55/3.90 | 1386 | 3114 | 3783176 | 3723379 | 295 |
+
+## Benchmark Run: commit=d90d850 host=assistant cpus=2 unix_time=1789538579
+Candidates are deterministic: the first N entries of the dictionary, sorted (same convention as the golden tests in `solver.rs`).
+| Size | Cost | Time(s) [Min/Avg/Max] | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
+|------|------|------------------------|--------|---------|----------|----------|------------|
+| 100 | 262 | 0.09/0.10/0.11 | 52 | 471 | 71770 | 79228 | 2 |
+| 250 | 702 | 3.09/3.29/3.41 | 1394 | 3115 | 3795074 | 3740379 | 296 |
+
+## Benchmark Run: commit=d90d850 host=assistant cpus=2 unix_time=1789538681
+Candidates are deterministic: the first N entries of the dictionary, sorted (same convention as the golden tests in `solver.rs`).
+| Size | Cost | Time(s) [Min/Avg/Max] | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
+|------|------|------------------------|--------|---------|----------|----------|------------|
+| 100 | 262 | 0.08/0.12/0.18 | 52 | 471 | 71770 | 79228 | 2 |
+| 250 | 702 | 2.96/3.10/3.30 | 1381 | 3114 | 3783181 | 3713169 | 295 |
+
+## Benchmark Run: commit=d90d850 host=assistant cpus=2 unix_time=1789538744
+Candidates are deterministic: the first N entries of the dictionary, sorted (same convention as the golden tests in `solver.rs`).
+| Size | Cost | Time(s) [Min/Avg/Max] | States | Guesses | B-Pruned | E-Pruned | Cache Hits |
+|------|------|------------------------|--------|---------|----------|----------|------------|
+| 100 | 262 | 0.44/0.53/0.58 | 54 | 472 | 81173 | 89242 | 2 |
+| 250 | 702 | 5.53/5.77/6.21 | 1393 | 3115 | 3795076 | 3736784 | 295 |
+

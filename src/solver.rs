@@ -530,6 +530,9 @@ impl<'a> Solver<'a> {
         let mut local_max_k = 0;
         let mut equiv_pruned = 0;
 
+        let mut counts = [0u16; 243];
+        let mut non_empty = [0u8; 243];
+
         for &g in allowed_guesses {
             let chars = &self.dict.guess_chars[g];
             let mut proj = 0u32;
@@ -549,19 +552,21 @@ impl<'a> Solver<'a> {
                 continue;
             }
 
-            let mut counts = [0u16; 243];
-            let mut non_empty = [0u8; 243];
             let mut num_non_empty = 0;
+            let g_offset = g * self.matrix.num_candidates;
             for &c in set {
-                let r = self.matrix.get(g, c).0 as usize;
-                if counts[r] == 0 {
-                    non_empty[num_non_empty] = r as u8;
-                    num_non_empty += 1;
+                let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                unsafe {
+                    if *counts.get_unchecked(r) == 0 {
+                        *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                        num_non_empty += 1;
+                    }
+                    *counts.get_unchecked_mut(r) += 1;
                 }
-                counts[r] += 1;
             }
 
             if num_non_empty == 1 {
+                counts[non_empty[0] as usize] = 0;
                 continue;
             }
 
@@ -574,21 +579,13 @@ impl<'a> Solver<'a> {
             for i in 0..num_non_empty {
                 let r_idx = non_empty[i] as usize;
                 let count = counts[r_idx];
+                counts[r_idx] = 0; // Clear for next iteration
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != crate::core::Response::WIN.0 as usize {
                     lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
                 }
             }
 
-            // Deliberately NOT pruning by `lb_cost >= beta` here: active_tuples also
-            // seeds `active_guesses`, which is passed down as `allowed_guesses` to
-            // every child call. A guess that can't beat *this* level's beta may still
-            // be exactly what a child needs, since children search against their own
-            // (looser) sub-beta. Filtering here silently narrows the guess pool
-            // available to descendants, producing suboptimal results. The equivalent
-            // prune for "should I try this guess at this level" already happens safely
-            // below via `g_lb >= best_val`, which only affects iteration order/early
-            // exit, not what gets handed to children.
             active_tuples.push((g, expected_rem, lb_cost, num_non_empty));
         }
         self.metrics
@@ -701,13 +698,16 @@ impl<'a> Solver<'a> {
         let mut non_empty_indices = [0u8; 243];
         let mut num_non_empty = 0;
 
+        let g_offset = guess * self.matrix.num_candidates;
         for &c in set {
-            let r = self.matrix.get(guess, c).0 as usize;
-            if counts[r] == 0 {
-                non_empty_indices[num_non_empty] = r as u8;
-                num_non_empty += 1;
+            let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+            unsafe {
+                if *counts.get_unchecked(r) == 0 {
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                    num_non_empty += 1;
+                }
+                *counts.get_unchecked_mut(r) += 1;
             }
-            counts[r] += 1;
         }
 
         if num_non_empty == 1 {
