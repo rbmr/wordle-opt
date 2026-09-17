@@ -869,7 +869,7 @@ impl<'a> Solver<'a> {
 
             // Also respect the global beta from concurrent threads: if another thread
             // already found a solution cheaper than beta, tighten our local bound.
-            let effective_beta = if depth == 2 {
+            let effective_beta = if depth == 1 {
                 new_beta.min(
                     self.global_beta
                         .load(std::sync::atomic::Ordering::Relaxed)
@@ -891,7 +891,7 @@ impl<'a> Solver<'a> {
                 return beta;
             }
             // Propagate any tightening from the global beta.
-            if depth == 2 {
+            if depth == 1 {
                 let global_now = self.global_beta.load(std::sync::atomic::Ordering::Relaxed);
                 if b + val >= global_now {
                     self.scratch_sorted_sets[depth] = sorted_set;
