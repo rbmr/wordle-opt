@@ -591,6 +591,8 @@ impl<'a> Solver<'a> {
         
         proj_tuples.sort_unstable();
         
+        set_projs.sort_unstable();
+
         let mut last_proj = u64::MAX;
         for &packed in &proj_tuples {
             let proj = packed >> 32;
@@ -603,14 +605,20 @@ impl<'a> Solver<'a> {
             last_proj = proj;
             
             active_guesses.push(g);
-            let mut in_set = false;
             let proj32 = proj as u32;
-            for i in 0..c_len {
-                if proj32 == set_projs[i] {
-                    in_set = true;
-                    break;
+            let in_set = if c_len <= 16 {
+                let mut found = false;
+                for i in 0..c_len {
+                    if proj32 == set_projs[i] {
+                        found = true;
+                        break;
+                    }
                 }
-            }
+                found
+            } else {
+                set_projs.binary_search(&proj32).is_ok()
+            };
+
             if in_set {
                 phase1_guesses.push(g);
             } else {
@@ -625,13 +633,16 @@ impl<'a> Solver<'a> {
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
 
         let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
-        let mut counts = [0u16; 243];
+        let mut counts = [0u16; 1024];
         let mut non_empty = [0u8; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
         phase1_tuples.clear();
         let mut phase2_tuples = std::mem::take(&mut self.scratch_phase2_tuples[depth]);
         phase2_tuples.clear();
+
+        let mut local_max_k = 0;
+        let mut valid_max_k = 0;
 
         if set.len() <= 16 {
             for &g in &phase1_guesses {
@@ -662,12 +673,75 @@ impl<'a> Solver<'a> {
                         lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
                     }
                 }
+                if num_non_empty > local_max_k {
+                    local_max_k = num_non_empty;
+                }
                 if lb_cost < beta {
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
             }
         } else {
-            for &g in &phase1_guesses {
+            let mut chunks = phase1_guesses.chunks_exact(4);
+            for chunk in chunks.by_ref() {
+                let g0 = chunk[0];
+                let g1 = chunk[1];
+                let g2 = chunk[2];
+                let g3 = chunk[3];
+                let g0_off = g0 * self.matrix.num_candidates;
+                let g1_off = g1 * self.matrix.num_candidates;
+                let g2_off = g2 * self.matrix.num_candidates;
+                let g3_off = g3 * self.matrix.num_candidates;
+                for &c in set {
+                    let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
+                    let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
+                    let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
+                    let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
+                    unsafe {
+                        *counts.get_unchecked_mut(r0) += 1;
+                        *counts.get_unchecked_mut(256 + r1) += 1;
+                        *counts.get_unchecked_mut(512 + r2) += 1;
+                        *counts.get_unchecked_mut(768 + r3) += 1;
+                    }
+                }
+                for (idx, &g) in chunk.iter().enumerate() {
+                    let offset = idx * 256;
+                    let mut num_non_empty = 0;
+                    for r in 0..243 {
+                        if counts[offset + r] > 0 {
+                            non_empty[num_non_empty] = r as u8;
+                            num_non_empty += 1;
+                        }
+                    }
+                    if num_non_empty == 1 {
+                        counts[offset + non_empty[0] as usize] = 0;
+                        continue;
+                    }
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[offset + r_idx];
+                        counts[offset + r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta {
+                        if num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                        phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    }
+                }
+            }
+            for &g in chunks.remainder() {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
                 let g_offset = g * self.matrix.num_candidates;
@@ -695,7 +769,13 @@ impl<'a> Solver<'a> {
                         lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
                     }
                 }
+                if num_non_empty > local_max_k {
+                    local_max_k = num_non_empty;
+                }
                 if lb_cost < beta {
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
             }
@@ -719,49 +799,149 @@ impl<'a> Solver<'a> {
         }
 
         if best_val > local_lb {
-            for &g in &phase2_guesses {
-                let mut expected_rem = 0u32;
-                let mut lb_cost = c_len as u32;
-                let mut num_non_empty = 0;
-                let g_offset = g * self.matrix.num_candidates;
-                for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                    unsafe {
-                        if *counts.get_unchecked(r) == 0 {
-                            *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+            if set.len() <= 16 {
+                for &g in &phase2_guesses {
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    let mut num_non_empty = 0;
+                    let g_offset = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        unsafe {
+                            if *counts.get_unchecked(r) == 0 {
+                                *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                                num_non_empty += 1;
+                            }
+                            *counts.get_unchecked_mut(r) += 1;
+                        }
+                    }
+                    if num_non_empty == 1 {
+                        counts[non_empty[0] as usize] = 0;
+                        continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[r_idx];
+                        counts[r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta {
+                        if num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    }
+                }
+            } else {
+                let mut chunks = phase2_guesses.chunks_exact(4);
+                for chunk in chunks.by_ref() {
+                    let g0 = chunk[0];
+                    let g1 = chunk[1];
+                    let g2 = chunk[2];
+                    let g3 = chunk[3];
+                    let g0_off = g0 * self.matrix.num_candidates;
+                    let g1_off = g1 * self.matrix.num_candidates;
+                    let g2_off = g2 * self.matrix.num_candidates;
+                    let g3_off = g3 * self.matrix.num_candidates;
+                    for &c in set {
+                        let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
+                        let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
+                        let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
+                        let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
+                        unsafe {
+                            *counts.get_unchecked_mut(r0) += 1;
+                            *counts.get_unchecked_mut(256 + r1) += 1;
+                            *counts.get_unchecked_mut(512 + r2) += 1;
+                            *counts.get_unchecked_mut(768 + r3) += 1;
+                        }
+                    }
+                    for (idx, &g) in chunk.iter().enumerate() {
+                        let offset = idx * 256;
+                        let mut num_non_empty = 0;
+                        for r in 0..243 {
+                            if counts[offset + r] > 0 {
+                                non_empty[num_non_empty] = r as u8;
+                                num_non_empty += 1;
+                            }
+                        }
+                        if num_non_empty == 1 {
+                            counts[offset + non_empty[0] as usize] = 0;
+                            continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut lb_cost = c_len as u32;
+                        for i in 0..num_non_empty {
+                            let r_idx = non_empty[i] as usize;
+                            let count = counts[offset + r_idx];
+                            counts[offset + r_idx] = 0;
+                            expected_rem += (count as u32) * (count as u32);
+                            if r_idx != crate::core::Response::WIN.0 as usize {
+                                lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                            }
+                        }
+                        if num_non_empty > local_max_k {
+                            local_max_k = num_non_empty;
+                        }
+                        if lb_cost < beta {
+                            if num_non_empty > valid_max_k {
+                                valid_max_k = num_non_empty;
+                            }
+                        }
+                        if lb_cost < best_val {
+                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        }
+                    }
+                }
+                for &g in chunks.remainder() {
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    let g_offset = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        unsafe { *counts.get_unchecked_mut(r) += 1; }
+                    }
+                    let mut num_non_empty = 0;
+                    for r in 0..243 {
+                        if counts[r] > 0 {
+                            non_empty[num_non_empty] = r as u8;
                             num_non_empty += 1;
                         }
-                        *counts.get_unchecked_mut(r) += 1;
+                    }
+                    if num_non_empty == 1 {
+                        counts[non_empty[0] as usize] = 0;
+                        continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[r_idx];
+                        counts[r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta {
+                        if num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     }
                 }
-                if num_non_empty == 1 {
-                    counts[non_empty[0] as usize] = 0;
-                    continue;
-                }
-                for i in 0..num_non_empty {
-                    let r_idx = non_empty[i] as usize;
-                    let count = counts[r_idx];
-                    counts[r_idx] = 0;
-                    expected_rem += (count as u32) * (count as u32);
-                    if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
-                    }
-                }
-                phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
             }
             phase2_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
-
-            let mut local_max_k = 0;
-            let mut valid_max_k = 0;
-
-            for &(_, _, g_lb, non_empty) in phase1_tuples.iter().chain(phase2_tuples.iter()) {
-                if non_empty > local_max_k {
-                    local_max_k = non_empty;
-                }
-                if g_lb < beta && non_empty > valid_max_k {
-                    valid_max_k = non_empty;
-                }
-            }
 
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
             if base_lb > local_lb {
@@ -892,23 +1072,23 @@ impl<'a> Solver<'a> {
         // Fast slice partition using counting sort
         let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
         sorted_set.clear();
-        if sorted_set.capacity() < set.len() {
-            sorted_set.reserve(set.len() - sorted_set.capacity());
+        sorted_set.reserve(set.len());
+        unsafe {
+            sorted_set.set_len(set.len());
         }
-        sorted_set.resize(set.len(), 0);
 
-        let mut offsets = [0usize; 243];
+        let mut offsets = [0u16; 243];
         let mut curr = 0;
         for i in 0..num_non_empty {
             let r = non_empty_indices[i] as usize;
             offsets[r] = curr;
-            curr += counts[r] as usize;
+            curr += counts[r];
         }
 
         let mut current_offsets = offsets;
         for &c in set {
-            let r_idx = self.matrix.get(guess, c).0 as usize;
-            let pos = current_offsets[r_idx];
+            let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+            let pos = current_offsets[r_idx] as usize;
             sorted_set[pos] = c;
             current_offsets[r_idx] += 1;
         }
@@ -923,7 +1103,7 @@ impl<'a> Solver<'a> {
                 continue;
             }
 
-            let start = offsets[r_idx];
+            let start = offsets[r_idx] as usize;
             let end = start + p_len;
             let p = &sorted_set[start..end];
 
