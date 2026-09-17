@@ -536,7 +536,9 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     // supposed to stay lightweight and available - see AGENTS.md and the
     // task guidance on why that machine must never run heavy computation.
     if !is_compute_host() {
-        eprintln!("HARD GUARD: full run must execute on the compute host (hostname 'ubuntu-main' or 'compute'). Use rsync + ssh, or deploy_and_bench.sh.");
+        eprintln!(
+            "HARD GUARD: full run must execute on the compute host (hostname 'ubuntu-main' or 'compute'). Use rsync + ssh, or deploy_and_bench.sh."
+        );
         std::process::exit(1);
     }
 
@@ -747,7 +749,7 @@ fn main() {
         run_diagnose(&matrix, &dict, &sizes);
     } else if args.len() > 1 && args[1] == "evaluate-root" {
         let root_guess = args[2].parse::<usize>().unwrap();
-        
+
         let initial_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
         let max_k = heuristic::compute_max_branching_factor(&matrix, &initial_candidates);
         let mut capacity_bounds_2d = vec![vec![0; initial_candidates.len() + 1]; max_k + 1];
@@ -756,14 +758,18 @@ fn main() {
                 capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
             }
         }
-        
-        let cache_size = if crate::is_compute_host() { 512 * 1024 * 1024 } else { 64 * 1024 * 1024 };
+
+        let cache_size = if crate::is_compute_host() {
+            512 * 1024 * 1024
+        } else {
+            64 * 1024 * 1024
+        };
         let global_cache = crate::cache::GlobalCache::new(cache_size);
         let metrics = Metrics::new();
-        
+
         use std::sync::atomic::AtomicU32;
         let global_beta = AtomicU32::new(u32::MAX);
-        
+
         let mut solver = Solver::new_with_global_beta(
             &matrix,
             max_k,
@@ -773,14 +779,30 @@ fn main() {
             &global_cache,
             &global_beta,
         );
-        
+
         let mut allowed_guesses: Vec<usize> = (0..matrix.num_guesses).collect();
         // Compute expected remaining for all allowed guesses
-        heuristic::sort_guesses_by_expected_remaining(&matrix, &initial_candidates, &mut allowed_guesses);
-        
+        heuristic::sort_guesses_by_expected_remaining(
+            &matrix,
+            &initial_candidates,
+            &mut allowed_guesses,
+        );
+
         let start = Instant::now();
-        let val = solver.min_guess_val(&initial_candidates, root_guess, &allowed_guesses, u32::MAX, 1, max_k);
-        println!("Root Guess: {} ({}) -> Cost: {}", root_guess, std::str::from_utf8(&dict.guesses[root_guess].0).unwrap(), val);
+        let val = solver.min_guess_val(
+            &initial_candidates,
+            root_guess,
+            &allowed_guesses,
+            u32::MAX,
+            1,
+            max_k,
+        );
+        println!(
+            "Root Guess: {} ({}) -> Cost: {}",
+            root_guess,
+            std::str::from_utf8(&dict.guesses[root_guess].0).unwrap(),
+            val
+        );
         println!("Time: {:?}", start.elapsed());
     } else if args.len() > 1 && args[1] == "full" {
         run_full(&matrix, &dict);
