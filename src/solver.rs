@@ -75,6 +75,10 @@ pub struct Solver<'a> {
     pub scratch_set_projs: [Vec<u32>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
+    scratch_phase1_guesses: [Vec<usize>; 32],
+    scratch_phase2_guesses: [Vec<usize>; 32],
+    scratch_phase1_tuples: [Vec<(usize, u32, u32, usize)>; 32],
+    scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
 }
 
 impl<'a> Solver<'a> {
@@ -206,6 +210,10 @@ impl<'a> Solver<'a> {
             scratch_set_projs: std::array::from_fn(|_| Vec::new()),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
+            scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
+            scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
+            scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
+            scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
         }
     }
 
@@ -553,8 +561,10 @@ impl<'a> Solver<'a> {
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
         active_guesses.clear();
 
-        let mut phase1_guesses = Vec::new();
-        let mut phase2_guesses = Vec::new();
+        let mut phase1_guesses = std::mem::take(&mut self.scratch_phase1_guesses[depth]);
+        phase1_guesses.clear();
+        let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
+        phase2_guesses.clear();
 
         for &g in allowed_guesses {
             let chars = &self.dict.guess_chars[g];
@@ -600,7 +610,10 @@ impl<'a> Solver<'a> {
         let mut counts = [0u16; 243];
         let mut non_empty = [0u8; 243];
 
-        let mut phase1_tuples = Vec::with_capacity(phase1_guesses.len());
+        let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
+        phase1_tuples.clear();
+        let mut phase2_tuples = std::mem::take(&mut self.scratch_phase2_tuples[depth]);
+        phase2_tuples.clear();
 
         if set.len() <= 16 {
             for &g in &phase1_guesses {
@@ -688,7 +701,6 @@ impl<'a> Solver<'a> {
         }
 
         if best_val > local_lb {
-            let mut phase2_tuples = Vec::with_capacity(phase2_guesses.len());
             for &g in &phase2_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
@@ -766,6 +778,10 @@ impl<'a> Solver<'a> {
         }
 
         self.scratch_guesses[depth] = active_guesses;
+        self.scratch_phase1_guesses[depth] = phase1_guesses;
+        self.scratch_phase2_guesses[depth] = phase2_guesses;
+        self.scratch_phase1_tuples[depth] = phase1_tuples;
+        self.scratch_phase2_tuples[depth] = phase2_tuples;
 
         let is_exact = best_val < beta;
         if is_exact {
