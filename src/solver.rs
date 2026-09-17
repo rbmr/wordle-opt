@@ -909,6 +909,20 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn test_golden_n500_exact_cost() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates: Vec<usize> = (0..500).collect();
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        assert_eq!(
+            cost, 1469,
+            "N=500 golden cost changed - likely correctness bug"
+        );
+    }
+
     #[test]
     fn test_golden_n750_exact_cost() {
         // Deliberately larger than the other golden tests: catches a real
