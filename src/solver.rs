@@ -602,7 +602,7 @@ impl<'a> Solver<'a> {
 
         let mut phase1_tuples = Vec::with_capacity(phase1_guesses.len());
 
-        if set.len() <= 64 {
+        if set.len() <= 16 {
             for &g in &phase1_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
