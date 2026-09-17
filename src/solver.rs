@@ -73,6 +73,7 @@ pub struct Solver<'a> {
     /// Max depth is naturally bounded, but we provide 32 levels to be safe against deep suboptimal branches.
     scratch_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     pub scratch_set_projs: [Vec<u32>; 32],
+    scratch_proj_tuples: [Vec<u64>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
@@ -208,6 +209,7 @@ impl<'a> Solver<'a> {
             global_beta,
             scratch_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_set_projs: std::array::from_fn(|_| Vec::new()),
+            scratch_proj_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
             scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
@@ -555,7 +557,6 @@ impl<'a> Solver<'a> {
             set_projs.push(proj);
         }
 
-        self.seen_projections[depth].clear();
         let mut equiv_pruned = 0;
 
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
@@ -565,30 +566,47 @@ impl<'a> Solver<'a> {
         phase1_guesses.clear();
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
+        
+        let mut proj_tuples = std::mem::take(&mut self.scratch_proj_tuples[depth]);
+        proj_tuples.clear();
 
         for &g in allowed_guesses {
             let chars = &self.dict.guess_chars[g];
-            let mut proj = 0u32;
-            let l0 = chars[0] as u32;
-            proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-            let l1 = chars[1] as u32;
-            proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-            let l2 = chars[2] as u32;
-            proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-            let l3 = chars[3] as u32;
-            proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-            let l4 = chars[4] as u32;
-            proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-
-            if !self.seen_projections[depth].insert(proj) {
+            let mut proj = 0u64;
+            let l0 = chars[0] as u64;
+            proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
+            let l1 = chars[1] as u64;
+            proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
+            let l2 = chars[2] as u64;
+            proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
+            let l3 = chars[3] as u64;
+            proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
+            let l4 = chars[4] as u64;
+            proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
+            
+            // pack proj (25 bits) and g (16 bits) into u64. We put proj in the high bits so sorting by u64 sorts by proj!
+            let packed = (proj << 32) | (g as u64);
+            proj_tuples.push(packed);
+        }
+        
+        proj_tuples.sort_unstable();
+        
+        let mut last_proj = u64::MAX;
+        for &packed in &proj_tuples {
+            let proj = packed >> 32;
+            let g = (packed & 0xFFFFFFFF) as usize;
+            
+            if proj == last_proj {
                 equiv_pruned += 1;
                 continue;
             }
+            last_proj = proj;
+            
             active_guesses.push(g);
-
             let mut in_set = false;
+            let proj32 = proj as u32;
             for i in 0..c_len {
-                if proj == set_projs[i] {
+                if proj32 == set_projs[i] {
                     in_set = true;
                     break;
                 }
@@ -778,6 +796,7 @@ impl<'a> Solver<'a> {
         }
 
         self.scratch_guesses[depth] = active_guesses;
+        self.scratch_proj_tuples[depth] = proj_tuples;
         self.scratch_phase1_guesses[depth] = phase1_guesses;
         self.scratch_phase2_guesses[depth] = phase2_guesses;
         self.scratch_phase1_tuples[depth] = phase1_tuples;
