@@ -218,3 +218,18 @@ Candidates are deterministic: the first N entries of the dictionary, sorted (sam
 | 100 | 262 | 0.11/0.13/0.17 | 51 | 470 | 61886 | 74275 | 2 |
 | 250 | 702 | 2.80/2.94/3.09 | 1384 | 3114 | 3783178 | 3720336 | 295 |
 
+## Randomized Benchmark Run: commit=8aa908e host=assistant cpus=2 seed=20260906 samples_per_size=1 unix_time=1789591190
+Each size draws 1 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |
+|------|---------|---------------------|------------------------|----------------------|
+| 100 | 1 | 248/248.0/248 | 0.09/0.09/0.09 | 10/10.0/10 |
+| 250 | 1 | 685/685.0/685 | 0.96/0.96/0.96 | 402/402.0/402 |
+| 500 | 1 | 1455/1455.0/1455 | 41.92/41.92/41.92 | 17202/17202.0/17202 |
+
+## Randomized Benchmark Run: commit=8aa908e host=assistant cpus=2 seed=20260906 samples_per_size=1 unix_time=1789591560
+Each size draws 1 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |
+|------|---------|---------------------|------------------------|----------------------|
+| 100 | 1 | 248/248.0/248 | 0.07/0.07/0.07 | 10/10.0/10 |
+| 250 | 1 | 685/685.0/685 | 1.04/1.04/1.04 | 400/400.0/400 |
+
