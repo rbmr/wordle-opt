@@ -552,7 +552,7 @@ impl<'a> Solver<'a> {
 
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
         active_guesses.clear();
-        
+
         let mut phase1_guesses = Vec::new();
         let mut phase2_guesses = Vec::new();
 
@@ -575,7 +575,7 @@ impl<'a> Solver<'a> {
                 continue;
             }
             active_guesses.push(g);
-            
+
             let mut in_set = false;
             for i in 0..c_len {
                 if proj == set_projs[i] {
@@ -589,7 +589,7 @@ impl<'a> Solver<'a> {
                 phase2_guesses.push(g);
             }
         }
-        
+
         self.scratch_set_projs[depth] = set_projs;
 
         self.metrics
@@ -617,7 +617,7 @@ impl<'a> Solver<'a> {
                     *counts.get_unchecked_mut(r) += 1;
                 }
             }
-            
+
             let mut num_non_empty = 0;
             for r in 0..243 {
                 if counts[r] > 0 {
@@ -632,7 +632,7 @@ impl<'a> Solver<'a> {
             for i in 0..num_non_empty {
                 let r_idx = non_empty[i] as usize;
                 let count = counts[r_idx];
-                counts[r_idx] = 0; 
+                counts[r_idx] = 0;
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != crate::core::Response::WIN.0 as usize {
                     lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
@@ -640,21 +640,25 @@ impl<'a> Solver<'a> {
             }
             phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
         }
-        
+
         phase1_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
-        
+
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
             if g_lb >= best_val {
-                self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
             let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, self.max_k);
             if val < best_val {
                 best_val = val;
-                if best_val <= local_lb { break; }
+                if best_val <= local_lb {
+                    break;
+                }
             }
         }
-        
+
         if best_val > local_lb {
             let mut phase2_tuples = Vec::with_capacity(phase2_guesses.len());
             for &g in &phase2_guesses {
@@ -679,7 +683,7 @@ impl<'a> Solver<'a> {
                 for i in 0..num_non_empty {
                     let r_idx = non_empty[i] as usize;
                     let count = counts[r_idx];
-                    counts[r_idx] = 0; 
+                    counts[r_idx] = 0;
                     expected_rem += (count as u32) * (count as u32);
                     if r_idx != crate::core::Response::WIN.0 as usize {
                         lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
@@ -688,47 +692,60 @@ impl<'a> Solver<'a> {
                 phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
             }
             phase2_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
-            
+
             let mut local_max_k = 0;
             let mut valid_max_k = 0;
-            
+
             for &(_, _, g_lb, non_empty) in phase1_tuples.iter().chain(phase2_tuples.iter()) {
-                if non_empty > local_max_k { local_max_k = non_empty; }
-                if g_lb < beta && non_empty > valid_max_k { valid_max_k = non_empty; }
+                if non_empty > local_max_k {
+                    local_max_k = non_empty;
+                }
+                if g_lb < beta && non_empty > valid_max_k {
+                    valid_max_k = non_empty;
+                }
             }
-            
+
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
-            if base_lb > local_lb { local_lb = base_lb; }
-            
+            if base_lb > local_lb {
+                local_lb = base_lb;
+            }
+
             let tight_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
-            if tight_lb > local_lb { local_lb = tight_lb; }
-            
+            if tight_lb > local_lb {
+                local_lb = tight_lb;
+            }
+
             if local_lb >= best_val {
                 // Done!
             } else {
                 for &(_g, _, g_lb, _non_empty) in &phase2_tuples {
                     if g_lb >= best_val {
-                        self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
-                    let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, local_max_k);
+                    let val =
+                        self.min_guess_val(set, _g, &active_guesses, best_val, depth, local_max_k);
                     if val < best_val {
                         best_val = val;
-                        if best_val <= local_lb { break; }
+                        if best_val <= local_lb {
+                            break;
+                        }
                     }
                 }
             }
         }
 
         self.scratch_guesses[depth] = active_guesses;
-        
+
         let is_exact = best_val < beta;
         if is_exact {
             self.cache.insert(hash, best_val, true);
         } else {
             self.cache.insert(hash, beta, false);
         }
-        
+
         best_val
     }
     /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
@@ -853,11 +870,15 @@ impl<'a> Solver<'a> {
             // Also respect the global beta from concurrent threads: if another thread
             // already found a solution cheaper than beta, tighten our local bound.
             let effective_beta = if depth == 2 {
-                new_beta.min(self.global_beta.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(b))
+                new_beta.min(
+                    self.global_beta
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                        .saturating_sub(b),
+                )
             } else {
                 new_beta
             };
-            
+
             if effective_beta == 0 {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
@@ -908,7 +929,6 @@ mod tests {
             "N=100 golden cost changed - likely correctness bug"
         );
     }
-
 
     #[test]
     fn test_golden_n500_exact_cost() {
