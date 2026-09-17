@@ -33,7 +33,7 @@ LOG="wordle-opt/full_run.log"
 PIDFILE="wordle-opt/full_run.pid"
 TIMEOUT_SECS="${WORDLE_OPT_FULL_TIMEOUT:-36000}" # 10h, the milestone threshold
 
-if ssh "$HOST" "pgrep -f 'target/release/wordle-opt' >/dev/null 2>&1"; then
+if ssh "$HOST" "pgrep -f '[t]arget/release/wordle-opt' >/dev/null 2>&1"; then
 	echo "REFUSING TO START: a wordle-opt process is already running on $HOST." >&2
 	echo "Check its status with ./check_full.sh before starting another." >&2
 	exit 1
