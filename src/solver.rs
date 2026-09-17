@@ -601,37 +601,74 @@ impl<'a> Solver<'a> {
         let mut non_empty = [0u8; 243];
 
         let mut phase1_tuples = Vec::with_capacity(phase1_guesses.len());
-        for &g in &phase1_guesses {
-            let mut expected_rem = 0u32;
-            let mut lb_cost = c_len as u32;
-            let mut num_non_empty = 0;
-            let g_offset = g * self.matrix.num_candidates;
-            for &c in set {
-                let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                unsafe {
-                    if *counts.get_unchecked(r) == 0 {
-                        *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+
+        if set.len() <= 64 {
+            for &g in &phase1_guesses {
+                let mut expected_rem = 0u32;
+                let mut lb_cost = c_len as u32;
+                let mut num_non_empty = 0;
+                let g_offset = g * self.matrix.num_candidates;
+                for &c in set {
+                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    unsafe {
+                        if *counts.get_unchecked(r) == 0 {
+                            *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                            num_non_empty += 1;
+                        }
+                        *counts.get_unchecked_mut(r) += 1;
+                    }
+                }
+                if num_non_empty == 1 {
+                    counts[non_empty[0] as usize] = 0;
+                    continue;
+                }
+                for i in 0..num_non_empty {
+                    let r_idx = non_empty[i] as usize;
+                    let count = counts[r_idx];
+                    counts[r_idx] = 0;
+                    expected_rem += (count as u32) * (count as u32);
+                    if r_idx != crate::core::Response::WIN.0 as usize {
+                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                    }
+                }
+                if lb_cost < beta {
+                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                }
+            }
+        } else {
+            for &g in &phase1_guesses {
+                let mut expected_rem = 0u32;
+                let mut lb_cost = c_len as u32;
+                let g_offset = g * self.matrix.num_candidates;
+                for &c in set {
+                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    unsafe { *counts.get_unchecked_mut(r) += 1; }
+                }
+                let mut num_non_empty = 0;
+                for r in 0..243 {
+                    if counts[r] > 0 {
+                        non_empty[num_non_empty] = r as u8;
                         num_non_empty += 1;
                     }
-                    *counts.get_unchecked_mut(r) += 1;
+                }
+                if num_non_empty == 1 {
+                    counts[non_empty[0] as usize] = 0;
+                    continue;
+                }
+                for i in 0..num_non_empty {
+                    let r_idx = non_empty[i] as usize;
+                    let count = counts[r_idx];
+                    counts[r_idx] = 0;
+                    expected_rem += (count as u32) * (count as u32);
+                    if r_idx != crate::core::Response::WIN.0 as usize {
+                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                    }
+                }
+                if lb_cost < beta {
+                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
             }
-            if num_non_empty == 1 {
-                counts[non_empty[0] as usize] = 0;
-                continue;
-            }
-            for i in 0..num_non_empty {
-                let r_idx = non_empty[i] as usize;
-                let count = counts[r_idx];
-                counts[r_idx] = 0;
-                expected_rem += (count as u32) * (count as u32);
-                if r_idx != crate::core::Response::WIN.0 as usize {
-                    lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
-                }
-            }
-            phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
         }
-
         phase1_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
 
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
