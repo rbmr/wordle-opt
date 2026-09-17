@@ -8,7 +8,7 @@ set -e
 # on it synchronously.
 HOST="${WORDLE_OPT_COMPUTE_HOST:-robert@compute}"
 LOG="wordle-opt/full_run.log"
-PIDFILE="wordle-opt/full_run.pid"
+PIDFILE="full_run.pid"
 
 ssh "$HOST" "
 	if [ ! -f $PIDFILE ]; then
