@@ -639,7 +639,7 @@ impl<'a> Solver<'a> {
                 self.metrics.pruned_by_bounds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
-            let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, c_len);
+            let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, self.max_k);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb { break; }
