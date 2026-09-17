@@ -604,25 +604,16 @@ impl<'a> Solver<'a> {
         for &g in &phase1_guesses {
             let mut expected_rem = 0u32;
             let mut lb_cost = c_len as u32;
+            let mut num_non_empty = 0;
             let g_offset = g * self.matrix.num_candidates;
-            // OPTIMIZATION: Pure branchless memory-increment loop for histogram building.
-            // Previous code combined this with the `non_empty` collection using an
-            // `if *counts == 0` branch, but profiling showed branch unpredictability
-            // caused significant CPU pipelining stalls. By separating the histogram build
-            // (2 instructions per element) from the bucket scan (fixed 243 iterations),
-            // this inner loop executes significantly faster.
             for &c in set {
                 let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
                 unsafe {
+                    if *counts.get_unchecked(r) == 0 {
+                        *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                        num_non_empty += 1;
+                    }
                     *counts.get_unchecked_mut(r) += 1;
-                }
-            }
-
-            let mut num_non_empty = 0;
-            for r in 0..243 {
-                if counts[r] > 0 {
-                    non_empty[num_non_empty] = r as u8;
-                    num_non_empty += 1;
                 }
             }
             if num_non_empty == 1 {
