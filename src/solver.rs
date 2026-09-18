@@ -670,7 +670,7 @@ impl<'a> Solver<'a> {
                     counts[r_idx] = 0;
                     expected_rem += (count as u32) * (count as u32);
                     if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                     }
                 }
                 if num_non_empty > local_max_k {
@@ -727,7 +727,7 @@ impl<'a> Solver<'a> {
                         counts[offset + r_idx] = 0;
                         expected_rem += (count as u32) * (count as u32);
                         if r_idx != crate::core::Response::WIN.0 as usize {
-                            lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
                     }
                     if num_non_empty > local_max_k {
@@ -789,7 +789,7 @@ impl<'a> Solver<'a> {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
-            let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, self.max_k);
+            let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, parent_max_k);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -825,7 +825,7 @@ impl<'a> Solver<'a> {
                         counts[r_idx] = 0;
                         expected_rem += (count as u32) * (count as u32);
                         if r_idx != crate::core::Response::WIN.0 as usize {
-                            lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
                     }
                     if num_non_empty > local_max_k {
@@ -884,7 +884,7 @@ impl<'a> Solver<'a> {
                             counts[offset + r_idx] = 0;
                             expected_rem += (count as u32) * (count as u32);
                             if r_idx != crate::core::Response::WIN.0 as usize {
-                                lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                             }
                         }
                         if num_non_empty > local_max_k {
@@ -925,7 +925,7 @@ impl<'a> Solver<'a> {
                         counts[r_idx] = 0;
                         expected_rem += (count as u32) * (count as u32);
                         if r_idx != crate::core::Response::WIN.0 as usize {
-                            lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
                     }
                     if num_non_empty > local_max_k {
