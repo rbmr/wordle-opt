@@ -766,7 +766,7 @@ impl<'a> Solver<'a> {
                     counts[r_idx] = 0;
                     expected_rem += (count as u32) * (count as u32);
                     if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                     }
                 }
                 if num_non_empty > local_max_k {
