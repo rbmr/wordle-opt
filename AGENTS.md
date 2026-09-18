@@ -156,9 +156,10 @@ benchmark iteration that's the actual day-to-day work.
   same way a senior engineer would maintain test coverage on a codebase
   they own - not just when told to.
 - If you add a new correctness-critical code path (concurrency, unsafe,
-  lock-free structures), think about it adversarially yourself before an
-  independent review catches it: race conditions, memory ordering, ABA
-  problems, use-after-free-shaped bugs.
+  lock-free structures), review it adversarially yourself before trusting
+  it: race conditions, memory ordering, ABA problems, use-after-free-shaped
+  bugs. There is no separate review pass checking this for you - the
+  self-review is the review.
 
 ## Communication and repo hygiene
 
@@ -178,13 +179,10 @@ benchmark iteration that's the actual day-to-day work.
 - Commit messages: terse, professional, describe what changed and why -
   no AI branding, no narrating your own process. The existing git history
   on this repo (`git log --oneline`) is a good model to match.
-- An independent review pass (a different model) periodically audits this
-  repo and posts findings to issue #1 prefixed "### Independent Review".
-  Treat its findings seriously - it has caught real correctness
-  regressions and a broken test-registration bug before. If it opens a
-  "REVIEW FINDING" issue, that takes priority over other work until
-  resolved or explicitly triaged as a false positive (with reasoning
-  posted to the issue, not just closed silently).
+- There is no separate reviewer, whether a different model or a scheduled
+  process - the setup is deliberately minimal and hands-off, and every
+  cycle of usage goes toward the actual problem, not auxiliary tooling.
+  You are responsible for your own correctness review before committing.
 
 ## If you're blocked
 
