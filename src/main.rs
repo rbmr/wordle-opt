@@ -304,12 +304,12 @@ fn run_benchmark_random(
     .unwrap();
     writeln!(
         file,
-        "| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] |"
+        "| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] | CacheHits Avg |"
     )
     .unwrap();
     writeln!(
         file,
-        "|------|---------|---------------------|------------------------|----------------------|"
+        "|------|---------|---------------------|------------------------|----------------------|---------------|"
     )
     .unwrap();
 
@@ -321,6 +321,7 @@ fn run_benchmark_random(
         let mut costs = Vec::with_capacity(samples_per_size);
         let mut times = Vec::with_capacity(samples_per_size);
         let mut states = Vec::with_capacity(samples_per_size);
+        let mut cache_hits_vec = Vec::with_capacity(samples_per_size);
 
         for sample_idx in 0..samples_per_size {
             let subset = sample_random_subset(&mut rng, n_candidates, size);
@@ -329,23 +330,29 @@ fn run_benchmark_random(
             let start = Instant::now();
             let cost = Solver::solve(matrix, &subset, dict, &metrics);
             let secs = start.elapsed().as_secs_f64();
+            let s_states = metrics
+                .states_evaluated
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let s_chits = metrics
+                .cache_hits
+                .load(std::sync::atomic::Ordering::Relaxed);
 
             println!(
-                "  size={} sample={}/{} cost={} time={:.3}s",
+                "  size={} sample={}/{} cost={} time={:.3}s states={} cache_hits={} hit_rate={:.1}%",
                 size,
                 sample_idx + 1,
                 samples_per_size,
                 cost,
-                secs
+                secs,
+                s_states,
+                s_chits,
+                100.0 * s_chits as f64 / (s_chits + s_states).max(1) as f64
             );
 
             costs.push(cost);
             times.push(secs);
-            states.push(
-                metrics
-                    .states_evaluated
-                    .load(std::sync::atomic::Ordering::Relaxed),
-            );
+            states.push(s_states);
+            cache_hits_vec.push(s_chits);
         }
 
         let cost_min = *costs.iter().min().unwrap();
@@ -357,6 +364,7 @@ fn run_benchmark_random(
         let states_min = *states.iter().min().unwrap();
         let states_max = *states.iter().max().unwrap();
         let states_avg = states.iter().sum::<usize>() as f64 / states.len() as f64;
+        let chits_avg = cache_hits_vec.iter().sum::<usize>() as f64 / cache_hits_vec.len() as f64;
 
         println!(
             "{:<6} | {:<8} | {:<24} | {:<24}",
@@ -368,7 +376,7 @@ fn run_benchmark_random(
 
         writeln!(
             file,
-            "| {} | {} | {}/{:.1}/{} | {:.2}/{:.2}/{:.2} | {}/{:.1}/{} |",
+            "| {} | {} | {}/{:.1}/{} | {:.2}/{:.2}/{:.2} | {}/{:.1}/{} | {:.0} |",
             size,
             samples_per_size,
             cost_min,
@@ -379,7 +387,8 @@ fn run_benchmark_random(
             time_max,
             states_min,
             states_avg,
-            states_max
+            states_max,
+            chits_avg
         )
         .unwrap();
     }

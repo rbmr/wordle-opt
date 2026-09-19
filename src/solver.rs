@@ -64,14 +64,12 @@ pub struct Solver<'a> {
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     capacity_bounds_2d: &'a [Vec<u32>],
-    pub seen_projections: [rustc_hash::FxHashSet<u32>; 32],
+
     pub cache: &'a crate::cache::GlobalCache,
     /// Shared global upper bound across all parallel root-level tasks.
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    /// Max depth is naturally bounded, but we provide 32 levels to be safe against deep suboptimal branches.
-    scratch_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     pub scratch_set_projs: [Vec<u32>; 32],
     scratch_proj_tuples: [Vec<u64>; 32],
     scratch_guesses: [Vec<usize>; 32],
@@ -203,11 +201,9 @@ impl<'a> Solver<'a> {
             max_k,
             dict,
             metrics,
-            seen_projections: std::array::from_fn(|_| rustc_hash::FxHashSet::default()),
             capacity_bounds_2d,
             cache,
             global_beta,
-            scratch_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_set_projs: std::array::from_fn(|_| Vec::new()),
             scratch_proj_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
@@ -230,6 +226,7 @@ impl<'a> Solver<'a> {
         metrics: &'a Metrics,
     ) -> u32 {
         let cache_size = if crate::is_compute_host() {
+            // 512 M entries × 8 bytes each = 4 GB. Compute has 14 GB available.
             512 * 1024 * 1024
         } else {
             64 * 1024 * 1024
@@ -478,7 +475,7 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
-        if c_len <= 15 {
+        if c_len <= 20 {
             let mut best_inside = u32::MAX;
             for i in 0..c_len {
                 let ci = set[i];
@@ -522,17 +519,7 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        // Capacity hint: the number of non-equivalent, non-useless guesses is bounded by
-        // allowed_guesses.len() but for small candidate sets (common at depth 3+) the
-        // actual count is much smaller. Over-allocating to allowed_guesses.len() wastes
-        // 100s of KB per call when depth is 3+ and the set is tiny. A cap of c_len * 300
-        // covers realistic non-equivalent-guess counts; if exceeded, the Vec grows normally.
-        let cap = allowed_guesses.len().min(c_len * 300 + 64);
-        let mut active_tuples = std::mem::take(&mut self.scratch_tuples[depth]);
-        active_tuples.clear();
-        if active_tuples.capacity() < cap {
-            active_tuples.reserve(cap - active_tuples.capacity());
-        }
+
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
