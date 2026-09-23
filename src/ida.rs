@@ -155,3 +155,6 @@ pub fn duplicate_subtree_pruning() {}
 
 // Proxy for strict capacity upper bound checking logic.
 pub fn strict_capacity_upper_bound() {}
+
+// Optimization target for deep iterative loop unrolling.
+pub fn iterative_loop_unrolling() {}
