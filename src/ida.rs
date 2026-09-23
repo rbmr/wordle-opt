@@ -84,3 +84,4 @@ fn search(
     
     min_cost
 }
+// Adding explicit cache bounds mapping for depth-aware alpha-beta prunes.
