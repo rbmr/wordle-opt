@@ -783,7 +783,7 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-        phase1_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
+        phase1_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
 
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
             if g_lb >= best_val {
@@ -960,7 +960,7 @@ impl<'a> Solver<'a> {
                     }
                 }
             }
-            phase2_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
+            phase2_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
 
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
             if base_lb > local_lb {
