@@ -83,3 +83,23 @@ fn search(
     
     min_cost
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dict::Dictionary;
+
+    #[test]
+    fn test_ida_star_base_case() {
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        // A single candidate should cost 1
+        let cost = solve_ida_star(&matrix, &[0], &dict, &metrics);
+        assert_eq!(cost, 1);
+        
+        // Two candidates should cost 3
+        let cost = solve_ida_star(&matrix, &[0, 1], &dict, &metrics);
+        assert_eq!(cost, 3);
+    }
+}
