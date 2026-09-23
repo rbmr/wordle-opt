@@ -1286,5 +1286,3 @@ mod solver_cache_tests {
     }
 }
 
-// Agent note: Attempting to explore Iterative Deepening to reduce cache churn
-// at deeper depths.
