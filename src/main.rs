@@ -801,7 +801,7 @@ fn main() {
         let val = solver.min_guess_val(
             &initial_candidates,
             root_guess,
-            &allowed_guesses,
+            
             u32::MAX,
             1,
             max_k,

@@ -4,6 +4,14 @@ use crate::heuristic;
 use crate::matrix::ResponseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+thread_local! {
+    static EQUIV_CACHE: RefCell<HashMap<u32, Rc<Vec<u16>>>> = RefCell::new(HashMap::new());
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -23,6 +31,7 @@ pub struct Metrics {
     pub pruned_by_bounds: AtomicUsize,
     pub pruned_by_equivalence: AtomicUsize,
     pub cache_hits: AtomicUsize,
+    pub cache_misses: AtomicUsize,
     /// Number of root-level first guesses fully evaluated (for progress reporting).
     pub root_guesses_done: AtomicUsize,
 }
@@ -42,6 +51,7 @@ impl Metrics {
             pruned_by_bounds: AtomicUsize::new(0),
             pruned_by_equivalence: AtomicUsize::new(0),
             cache_hits: AtomicUsize::new(0),
+            cache_misses: AtomicUsize::new(0),
             root_guesses_done: AtomicUsize::new(0),
         }
     }
@@ -70,8 +80,8 @@ pub struct Solver<'a> {
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    pub scratch_set_projs: [Vec<u32>; 32],
-    scratch_proj_tuples: [Vec<u64>; 32],
+    pub 
+    scratch_is_in_set: [Vec<bool>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
@@ -204,8 +214,8 @@ impl<'a> Solver<'a> {
             capacity_bounds_2d,
             cache,
             global_beta,
-            scratch_set_projs: std::array::from_fn(|_| Vec::new()),
-            scratch_proj_tuples: std::array::from_fn(|_| Vec::new()),
+            
+            scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
             scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
@@ -335,7 +345,7 @@ impl<'a> Solver<'a> {
                     );
                     // For a bucket, the cost is evaluated via min_state_val.
                     // We use a very loose beta since we evaluate in parallel.
-                    solver.min_state_val(&bucket, &active_guesses, initial_greedy_cost, 2, max_k)
+                    solver.min_state_val(&bucket, initial_greedy_cost, 2, max_k)
                 })
                 .sum();
 
@@ -391,7 +401,7 @@ impl<'a> Solver<'a> {
                     &beta,
                 );
                 let val =
-                    local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1, max_k);
+                    local_solver.min_guess_val(set, g, current_beta, 1, max_k);
 
                 // atomic min
                 let mut current = beta.load(Ordering::Relaxed);
@@ -432,7 +442,7 @@ impl<'a> Solver<'a> {
     fn min_state_val(
         &mut self,
         set: &[usize],
-        allowed_guesses: &[usize],
+         
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -525,27 +535,6 @@ impl<'a> Solver<'a> {
             c_mask |= self.matrix.candidate_masks[c];
         }
 
-        let mut set_projs = std::mem::take(&mut self.scratch_set_projs[depth]);
-        set_projs.clear();
-        for i in 0..c_len {
-            let g = self.dict.candidate_to_guess[set[i]];
-            let mut proj = 0u32;
-            let chars = &self.dict.guess_chars[g];
-            let l0 = chars[0] as u32;
-            proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-            let l1 = chars[1] as u32;
-            proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-            let l2 = chars[2] as u32;
-            proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-            let l3 = chars[3] as u32;
-            proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-            let l4 = chars[4] as u32;
-            proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-            set_projs.push(proj);
-        }
-
-        let mut equiv_pruned = 0;
-
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
         active_guesses.clear();
 
@@ -554,58 +543,70 @@ impl<'a> Solver<'a> {
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
         
-        let mut proj_tuples = std::mem::take(&mut self.scratch_proj_tuples[depth]);
-        proj_tuples.clear();
 
-        for &g in allowed_guesses {
-            let chars = &self.dict.guess_chars[g];
-            let mut proj = 0u64;
-            let l0 = chars[0] as u64;
-            proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
-            let l1 = chars[1] as u64;
-            proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
-            let l2 = chars[2] as u64;
-            proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
-            let l3 = chars[3] as u64;
-            proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
-            let l4 = chars[4] as u64;
-            proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
-            
-            // pack proj (25 bits) and g (16 bits) into u64. We put proj in the high bits so sorting by u64 sorts by proj!
-            let packed = (proj << 32) | (g as u64);
-            proj_tuples.push(packed);
-        }
-        
-        proj_tuples.sort_unstable();
-        
-        set_projs.sort_unstable();
-
-        let mut last_proj = u64::MAX;
-        for &packed in &proj_tuples {
-            let proj = packed >> 32;
-            let g = (packed & 0xFFFFFFFF) as usize;
-            
-            if proj == last_proj {
-                equiv_pruned += 1;
-                continue;
+        let active_guesses_rc = EQUIV_CACHE.with(|cache_ref| {
+            let mut cache = cache_ref.borrow_mut();
+            if let Some(cached) = cache.get(&c_mask) {
+                return Rc::clone(cached);
             }
-            last_proj = proj;
-            
-            active_guesses.push(g);
-            let proj32 = proj as u32;
-            let in_set = if c_len <= 16 {
-                let mut found = false;
-                for i in 0..c_len {
-                    if proj32 == set_projs[i] {
-                        found = true;
-                        break;
-                    }
-                }
-                found
-            } else {
-                set_projs.binary_search(&proj32).is_ok()
-            };
 
+            self.metrics.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if cache.len() > 16384 {
+                cache.clear();
+            }
+
+            let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
+            for g in 0..self.dict.guesses.len() {
+                let chars = &self.dict.guess_chars[g];
+                let mut proj = 0u64;
+                let l0 = chars[0] as u64;
+                proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
+                let l1 = chars[1] as u64;
+                proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
+                let l2 = chars[2] as u64;
+                proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
+                let l3 = chars[3] as u64;
+                proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
+                let l4 = chars[4] as u64;
+                proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
+
+                let packed = (proj << 32) | (g as u64);
+                proj_tuples.push(packed);
+            }
+            proj_tuples.sort_unstable();
+
+            let mut active = Vec::with_capacity(8192);
+            let mut last_proj = u64::MAX;
+            for packed in proj_tuples {
+                let proj = packed >> 32;
+                let g = (packed & 0xFFFFFFFF) as u16;
+                if proj == last_proj {
+                    continue;
+                }
+                last_proj = proj;
+                active.push(g);
+            }
+            
+            let rc = Rc::new(active);
+            cache.insert(c_mask, Rc::clone(&rc));
+            rc
+        });
+
+        // Fast set-membership check
+        let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
+        for &c in set {
+            is_in_set[c] = true;
+        }
+
+        for &g16 in active_guesses_rc.as_ref() {
+            let g = g16 as usize;
+            active_guesses.push(g);
+            let c_idx = self.dict.guess_to_candidate[g];
+            let in_set = if c_idx != u16::MAX {
+                is_in_set[c_idx as usize]
+            } else {
+                false
+            };
             if in_set {
                 phase1_guesses.push(g);
             } else {
@@ -613,11 +614,16 @@ impl<'a> Solver<'a> {
             }
         }
 
-        self.scratch_set_projs[depth] = set_projs;
+        for &c in set {
+            is_in_set[c] = false;
+        }
+        self.scratch_is_in_set[depth] = is_in_set;
+
+
 
         self.metrics
             .pruned_by_equivalence
-            .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(0, std::sync::atomic::Ordering::Relaxed);
 
         let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
         let mut counts = [0u16; 2048];
@@ -792,7 +798,7 @@ impl<'a> Solver<'a> {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
-            let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, parent_max_k);
+            let val = self.min_guess_val(set, _g, best_val, depth, parent_max_k);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -983,7 +989,7 @@ impl<'a> Solver<'a> {
                         continue;
                     }
                     let val =
-                        self.min_guess_val(set, _g, &active_guesses, best_val, depth, local_max_k);
+                        self.min_guess_val(set, _g, best_val, depth, local_max_k);
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -995,7 +1001,7 @@ impl<'a> Solver<'a> {
         }
 
         self.scratch_guesses[depth] = active_guesses;
-        self.scratch_proj_tuples[depth] = proj_tuples;
+
         self.scratch_phase1_guesses[depth] = phase1_guesses;
         self.scratch_phase2_guesses[depth] = phase2_guesses;
         self.scratch_phase1_tuples[depth] = phase1_tuples;
@@ -1021,7 +1027,7 @@ impl<'a> Solver<'a> {
         &mut self,
         set: &[usize],
         guess: usize,
-        allowed_guesses: &[usize],
+         
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -1147,7 +1153,7 @@ impl<'a> Solver<'a> {
             }
 
             let val =
-                self.min_state_val(p, allowed_guesses, effective_beta, depth + 1, parent_max_k);
+                self.min_state_val(p,  effective_beta, depth + 1, parent_max_k);
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;

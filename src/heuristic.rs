@@ -137,6 +137,7 @@ mod expected_remaining_tests {
             candidates: words.clone(),
             guess_chars: vec![[0, 1, 2, 3, 4], [0, 1, 2, 3, 5], [23, 24, 25, 0, 1]],
             candidate_to_guess: vec![0, 1, 2],
+            guess_to_candidate: vec![u16::MAX; words.len()],
         };
         let matrix = ResponseMatrix::new(&dict);
         let set = vec![0, 1, 2];
