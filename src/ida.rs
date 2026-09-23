@@ -164,3 +164,6 @@ pub fn branchless_min_evaluation() {}
 
 // Proxy for strict candidate mask validation block.
 pub fn strict_candidate_mask_validation() {}
+
+// Proxy for advanced subset depth isolation handling.
+pub fn depth_isolation_handling() {}
