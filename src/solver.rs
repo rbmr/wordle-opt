@@ -195,6 +195,7 @@ impl<'a> Solver<'a> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_global_beta(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -687,6 +688,7 @@ impl<'a> Solver<'a> {
                 }
             }
         } else {
+            #[allow(clippy::chunks_exact_to_as_chunks)]
             let mut chunks = phase1_guesses.chunks_exact(8);
             for chunk in chunks.by_ref() {
                 let g0 = chunk[0];
@@ -850,16 +852,15 @@ impl<'a> Solver<'a> {
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
-                    if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
+                    if lb_cost < beta && num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
                     }
                     if lb_cost < best_val {
                         phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     }
                 }
             } else {
+                #[allow(clippy::chunks_exact_to_as_chunks)]
                 let mut chunks = phase2_guesses.chunks_exact(8);
                 for chunk in chunks.by_ref() {
                     let g0 = chunk[0];
@@ -925,10 +926,8 @@ impl<'a> Solver<'a> {
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
                         }
-                        if lb_cost < beta {
-                            if num_non_empty > valid_max_k {
-                                valid_max_k = num_non_empty;
-                            }
+                        if lb_cost < beta && num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
                         }
                         if lb_cost < best_val {
                             phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
@@ -966,10 +965,8 @@ impl<'a> Solver<'a> {
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
-                    if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
+                    if lb_cost < beta && num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
                     }
                     if lb_cost < best_val {
                         phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
@@ -1110,10 +1107,8 @@ impl<'a> Solver<'a> {
         // Fast slice partition using counting sort
         let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
         sorted_set.clear();
-        sorted_set.reserve(set.len());
-        unsafe {
-            sorted_set.set_len(set.len());
-        }
+        sorted_set.clear();
+        sorted_set.resize(set.len(), 0);
 
         let mut offsets = [0u16; 243];
         let mut curr = 0;
