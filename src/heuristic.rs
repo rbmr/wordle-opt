@@ -236,3 +236,27 @@ mod tight_capacity_bounds_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod phase2_capacity_bounds_tests {
+    use super::*;
+
+    #[test]
+    fn test_phase2_capacity_bound_is_correct() {
+        // We proved mathematically that if n=5, valid_max_k=2, local_max_k=3,
+        // a Phase 2 guess can achieve 12, but tight_capacity_bound gives 13.
+        let phase1_lb = tight_capacity_bound(5, 2, 3);
+        assert_eq!(phase1_lb, 13, "Phase 1 bound is 13");
+        
+        let phase2_lb = phase2_capacity_bound(5, 3, 3);
+        assert_eq!(phase2_lb, 12, "Phase 2 bound is 12");
+        
+        let tight_lb = phase1_lb.min(phase2_lb);
+        assert_eq!(tight_lb, 12, "Minimum bound correctly prevents Phase 2 pruning");
+    }
+
+    #[test]
+    fn test_phase2_zero_candidates() {
+        assert_eq!(phase2_capacity_bound(0, 3, 3), 0);
+    }
+}
