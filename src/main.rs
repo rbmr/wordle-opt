@@ -1,5 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
+pub mod ida;
 pub mod core;
 pub mod dict;
 pub mod heuristic;
