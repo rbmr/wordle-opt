@@ -475,7 +475,7 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
-        if c_len <= 20 {
+        if c_len <= 15 {
             let mut best_inside = u32::MAX;
             for i in 0..c_len {
                 let ci = set[i];
@@ -620,7 +620,7 @@ impl<'a> Solver<'a> {
             .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
 
         let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
-        let mut counts = [0u16; 1024];
+        let mut counts = [0u16; 2048];
         let mut non_empty = [0u8; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
@@ -671,26 +671,42 @@ impl<'a> Solver<'a> {
                 }
             }
         } else {
-            let mut chunks = phase1_guesses.chunks_exact(4);
+            let mut chunks = phase1_guesses.chunks_exact(8);
             for chunk in chunks.by_ref() {
                 let g0 = chunk[0];
                 let g1 = chunk[1];
                 let g2 = chunk[2];
                 let g3 = chunk[3];
+                let g4 = chunk[4];
+                let g5 = chunk[5];
+                let g6 = chunk[6];
+                let g7 = chunk[7];
                 let g0_off = g0 * self.matrix.num_candidates;
                 let g1_off = g1 * self.matrix.num_candidates;
                 let g2_off = g2 * self.matrix.num_candidates;
                 let g3_off = g3 * self.matrix.num_candidates;
+                let g4_off = g4 * self.matrix.num_candidates;
+                let g5_off = g5 * self.matrix.num_candidates;
+                let g6_off = g6 * self.matrix.num_candidates;
+                let g7_off = g7 * self.matrix.num_candidates;
                 for &c in set {
                     let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
                     let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
                     let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
                     let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
+                    let r4 = unsafe { self.matrix.data.get_unchecked(g4_off + c).0 as usize };
+                    let r5 = unsafe { self.matrix.data.get_unchecked(g5_off + c).0 as usize };
+                    let r6 = unsafe { self.matrix.data.get_unchecked(g6_off + c).0 as usize };
+                    let r7 = unsafe { self.matrix.data.get_unchecked(g7_off + c).0 as usize };
                     unsafe {
                         *counts.get_unchecked_mut(r0) += 1;
                         *counts.get_unchecked_mut(256 + r1) += 1;
                         *counts.get_unchecked_mut(512 + r2) += 1;
                         *counts.get_unchecked_mut(768 + r3) += 1;
+                        *counts.get_unchecked_mut(1024 + r4) += 1;
+                        *counts.get_unchecked_mut(1280 + r5) += 1;
+                        *counts.get_unchecked_mut(1536 + r6) += 1;
+                        *counts.get_unchecked_mut(1792 + r7) += 1;
                     }
                 }
                 for (idx, &g) in chunk.iter().enumerate() {
@@ -828,26 +844,42 @@ impl<'a> Solver<'a> {
                     }
                 }
             } else {
-                let mut chunks = phase2_guesses.chunks_exact(4);
+                let mut chunks = phase2_guesses.chunks_exact(8);
                 for chunk in chunks.by_ref() {
                     let g0 = chunk[0];
                     let g1 = chunk[1];
                     let g2 = chunk[2];
                     let g3 = chunk[3];
+                    let g4 = chunk[4];
+                    let g5 = chunk[5];
+                    let g6 = chunk[6];
+                    let g7 = chunk[7];
                     let g0_off = g0 * self.matrix.num_candidates;
                     let g1_off = g1 * self.matrix.num_candidates;
                     let g2_off = g2 * self.matrix.num_candidates;
                     let g3_off = g3 * self.matrix.num_candidates;
+                    let g4_off = g4 * self.matrix.num_candidates;
+                    let g5_off = g5 * self.matrix.num_candidates;
+                    let g6_off = g6 * self.matrix.num_candidates;
+                    let g7_off = g7 * self.matrix.num_candidates;
                     for &c in set {
                         let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
                         let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
                         let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
                         let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
+                        let r4 = unsafe { self.matrix.data.get_unchecked(g4_off + c).0 as usize };
+                        let r5 = unsafe { self.matrix.data.get_unchecked(g5_off + c).0 as usize };
+                        let r6 = unsafe { self.matrix.data.get_unchecked(g6_off + c).0 as usize };
+                        let r7 = unsafe { self.matrix.data.get_unchecked(g7_off + c).0 as usize };
                         unsafe {
                             *counts.get_unchecked_mut(r0) += 1;
                             *counts.get_unchecked_mut(256 + r1) += 1;
                             *counts.get_unchecked_mut(512 + r2) += 1;
                             *counts.get_unchecked_mut(768 + r3) += 1;
+                            *counts.get_unchecked_mut(1024 + r4) += 1;
+                            *counts.get_unchecked_mut(1280 + r5) += 1;
+                            *counts.get_unchecked_mut(1536 + r6) += 1;
+                            *counts.get_unchecked_mut(1792 + r7) += 1;
                         }
                     }
                     for (idx, &g) in chunk.iter().enumerate() {
