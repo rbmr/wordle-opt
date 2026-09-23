@@ -85,3 +85,12 @@ fn search(
     min_cost
 }
 // Adding explicit cache bounds mapping for depth-aware alpha-beta prunes.
+
+/// Computes a fast lower bound to aggressively prune unpromising branches early.
+pub fn fast_lower_bound(subset: &[usize]) -> u32 {
+    if subset.len() <= 2 {
+        (subset.len() * (subset.len() + 1) / 2) as u32
+    } else {
+        subset.len() as u32
+    }
+}
