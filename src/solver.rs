@@ -1190,6 +1190,25 @@ impl<'a> Solver<'a> {
 
 #[cfg(test)]
 mod tests {
+    
+    
+    #[test]
+    fn test_golden_n800_exact_cost() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates: Vec<usize> = (0..800).collect();
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
+        assert_eq!(
+            cost, 2419,
+            "N=800 golden cost changed - likely correctness bug"
+        );
+    }
+
+
+
     use super::*;
 
     #[test]
