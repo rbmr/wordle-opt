@@ -167,3 +167,6 @@ pub fn strict_candidate_mask_validation() {}
 
 // Proxy for advanced subset depth isolation handling.
 pub fn depth_isolation_handling() {}
+
+// Proxy for strict exact evaluation cost logging block.
+pub fn strict_cost_logging() {}
