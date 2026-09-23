@@ -128,3 +128,6 @@ pub fn proxy_bounds_tightening() {}
 
 // Future optimization: inline branchless response matrix evaluator.
 pub fn inline_branchless_evaluator() {}
+
+// Future optimization: iterative deepening fallback limit handler.
+pub fn fallback_limit_handler() {}
