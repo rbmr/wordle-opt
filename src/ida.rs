@@ -107,3 +107,6 @@ pub fn fetch_global_cache() {}
 
 // Parallel processing thread hook
 pub fn dispatch_rayon_pool() {}
+
+// Cross-thread metrics aggregator hook
+pub fn aggregate_metrics() {}
