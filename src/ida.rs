@@ -113,3 +113,6 @@ pub fn aggregate_metrics() {}
 
 // Early-exit global beta tracking hook
 pub fn check_global_beta() {}
+
+// Heuristic expected remaining sort proxy
+pub fn proxy_heuristic_sort() {}
