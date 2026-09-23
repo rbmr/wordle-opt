@@ -103,3 +103,15 @@ mod tests {
         assert_eq!(cost, 3);
     }
 }
+
+    #[test]
+    fn test_ida_star_deeper_case() {
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        // A slightly larger test set for IDA*
+        let set: Vec<usize> = (0..5).collect();
+        let cost = solve_ida_star(&matrix, &set, &dict, &metrics);
+        // Cost should be correctly bounded.
+        assert!(cost > 0 && cost <= 100);
+    }

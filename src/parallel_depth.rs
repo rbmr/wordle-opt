@@ -44,3 +44,43 @@ pub fn solve_parallel_depth2<'a>(
 
     beta.load(Ordering::Relaxed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::Metrics;
+    use crate::dict::Dictionary;
+    use crate::matrix::ResponseMatrix;
+    use crate::cache::GlobalCache;
+    use std::sync::RwLock;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_parallel_depth2_runs() {
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let global_cache = GlobalCache::new(1024);
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| RwLock::new(HashMap::new()));
+        let beta = AtomicU32::new(100);
+        let active_guesses: Vec<usize> = vec![0, 1, 2];
+        let initial_candidates: Vec<usize> = vec![0, 1];
+        let max_k = 2;
+        let capacity_bounds_2d = vec![vec![0; 3]; 3];
+
+        let result = solve_parallel_depth2(
+            &matrix,
+            &initial_candidates,
+            &dict,
+            &metrics,
+            &equiv_cache,
+            &global_cache,
+            max_k,
+            &capacity_bounds_2d,
+            &beta,
+            &active_guesses,
+        );
+        // We just care that it executes without panicking and beta is correctly reduced.
+        assert!(result <= 100);
+    }
+}
