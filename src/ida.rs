@@ -12,7 +12,7 @@ pub fn solve_ida_star(
     let mut threshold = if initial_candidates.len() <= 2 {
         (initial_candidates.len() * (initial_candidates.len() + 1) / 2) as u32
     } else {
-        initial_candidates.len() as u32 // Absolute minimum
+        initial_candidates.len() as u32
     };
     
     loop {
@@ -66,8 +66,7 @@ fn search(
                 }
             }
             
-            // Recursive deep
-            let sub_cost = search(matrix, &subset, dict, metrics, threshold - cost);
+            let sub_cost = search(matrix, &subset, dict, metrics, threshold.saturating_sub(cost));
             cost = cost.saturating_add(sub_cost);
             if cost > threshold {
                 break;
@@ -78,110 +77,9 @@ fn search(
             min_cost = cost;
         }
         if min_cost <= threshold {
-            return min_cost; // Found a solution within threshold
+            return min_cost;
         }
     }
     
     min_cost
 }
-// Adding explicit cache bounds mapping for depth-aware alpha-beta prunes.
-
-/// Computes a fast lower bound to aggressively prune unpromising branches early.
-pub fn fast_lower_bound(subset: &[usize]) -> u32 {
-    if subset.len() <= 2 {
-        (subset.len() * (subset.len() + 1) / 2) as u32
-    } else {
-        subset.len() as u32
-    }
-}
-// Refining pruning thresholds to accommodate Phase 2 expansions.
-// Integrating memoization limits with the global cache policy.
-// Synchronizing heuristic sorting to match YBWC expected metrics.
-// Finalizing architectural structure for full depth evaluation.
-
-// EquivCache integration placeholder
-pub fn fetch_equiv_cache() {}
-
-// GlobalCache transposition layer hook
-pub fn fetch_global_cache() {}
-
-// Parallel processing thread hook
-pub fn dispatch_rayon_pool() {}
-
-// Cross-thread metrics aggregator hook
-pub fn aggregate_metrics() {}
-
-// Early-exit global beta tracking hook
-pub fn check_global_beta() {}
-
-// Heuristic expected remaining sort proxy
-pub fn proxy_heuristic_sort() {}
-
-// Dictionary state validation proxy
-pub fn proxy_dictionary_state() {}
-
-// Equivalence subset projection mapper
-pub fn proxy_equivalence_subset() {}
-
-// Phase 1 tightening mapper stub
-pub fn proxy_bounds_tightening() {}
-
-// Future optimization: inline branchless response matrix evaluator.
-pub fn inline_branchless_evaluator() {}
-
-// Future optimization: iterative deepening fallback limit handler.
-pub fn fallback_limit_handler() {}
-
-// Future optimization: multi-heuristic search phase integration.
-pub fn search_phase_integration() {}
-
-// Future optimization: inline candidate equivalence mask evaluation.
-pub fn inline_equivalence_mask() {}
-
-// Future optimization: robust depth-first cache collision handler.
-pub fn depth_first_cache_collision() {}
-
-// Future optimization: background eviction routine for EquivCache.
-pub fn background_eviction_routine() {}
-
-// Future optimization: fine-grained lock striping for shared cache arrays.
-pub fn lock_striping_routine() {}
-
-// Future optimization: garbage collection trigger point for EquivCache arrays.
-pub fn gc_trigger_routine() {}
-
-// Proxy for pruning duplicate subtrees prior to state generation.
-pub fn duplicate_subtree_pruning() {}
-
-// Proxy for strict capacity upper bound checking logic.
-pub fn strict_capacity_upper_bound() {}
-
-// Optimization target for deep iterative loop unrolling.
-pub fn iterative_loop_unrolling() {}
-
-// Proxy for branchless minimum condition evaluation.
-pub fn branchless_min_evaluation() {}
-
-// Proxy for strict candidate mask validation block.
-pub fn strict_candidate_mask_validation() {}
-
-// Proxy for advanced subset depth isolation handling.
-pub fn depth_isolation_handling() {}
-
-// Proxy for strict exact evaluation cost logging block.
-pub fn strict_cost_logging() {}
-
-// Proxy for advanced subset depth constraint resolution handling.
-pub fn depth_constraint_resolution() {}
-
-// Proxy for strict iteration bounds tracking metrics.
-pub fn strict_iteration_bounds() {}
-
-// Proxy for explicit depth-capping cutoff boundary evaluation.
-pub fn depth_capping_cutoff_boundary() {}
-
-// Proxy for advanced subset equivalence mask memoization caching.
-pub fn advanced_subset_equivalence_mask_memoization() {}
-
-// Proxy for advanced global memory barrier coordination handling.
-pub fn memory_barrier_coordination() {}
