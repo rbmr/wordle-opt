@@ -122,3 +122,6 @@ pub fn proxy_dictionary_state() {}
 
 // Equivalence subset projection mapper
 pub fn proxy_equivalence_subset() {}
+
+// Phase 1 tightening mapper stub
+pub fn proxy_bounds_tightening() {}
