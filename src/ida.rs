@@ -116,3 +116,6 @@ pub fn check_global_beta() {}
 
 // Heuristic expected remaining sort proxy
 pub fn proxy_heuristic_sort() {}
+
+// Dictionary state validation proxy
+pub fn proxy_dictionary_state() {}
