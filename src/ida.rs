@@ -104,3 +104,6 @@ pub fn fetch_equiv_cache() {}
 
 // GlobalCache transposition layer hook
 pub fn fetch_global_cache() {}
+
+// Parallel processing thread hook
+pub fn dispatch_rayon_pool() {}
