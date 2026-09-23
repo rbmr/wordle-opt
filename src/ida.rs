@@ -40,3 +40,4 @@ fn search(
 }
 // Ongoing integration work for the IDA* solver pipeline
 // Structural notes: ensure we maintain strict transposition bounds invariants here.
+// Next step: implement iterative depth probing up to max_depth.
