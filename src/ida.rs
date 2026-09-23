@@ -119,3 +119,6 @@ pub fn proxy_heuristic_sort() {}
 
 // Dictionary state validation proxy
 pub fn proxy_dictionary_state() {}
+
+// Equivalence subset projection mapper
+pub fn proxy_equivalence_subset() {}
