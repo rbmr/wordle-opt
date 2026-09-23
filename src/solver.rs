@@ -391,7 +391,21 @@ impl<'a> Solver<'a> {
             // Now evaluate the remaining guesses in parallel with the tight beta.
             // Each solver holds a reference to the shared beta so it can abort early
             // if another thread finds a better solution while this one is running.
-            root_candidates.par_iter().for_each(|&g| {
+            // Hand off to the parallel depth 2 engine
+            crate::parallel_depth::solve_parallel_depth2(
+                matrix,
+                initial_candidates,
+                dict,
+                metrics,
+                equiv_cache,
+                &global_cache,
+                max_k,
+                &capacity_bounds_2d,
+                &beta,
+                &root_candidates,
+            );
+            
+            /*
                 let current_beta = beta.load(Ordering::Relaxed);
                 let mut local_solver = Solver::new_with_global_beta(
                     matrix,
@@ -421,6 +435,7 @@ impl<'a> Solver<'a> {
 
                 metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
             });
+        }*/
         }
 
         beta.load(Ordering::Relaxed)
