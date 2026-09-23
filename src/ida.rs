@@ -125,3 +125,6 @@ pub fn proxy_equivalence_subset() {}
 
 // Phase 1 tightening mapper stub
 pub fn proxy_bounds_tightening() {}
+
+// Future optimization: inline branchless response matrix evaluator.
+pub fn inline_branchless_evaluator() {}
