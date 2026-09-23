@@ -15,7 +15,6 @@ pub fn solve_ida_star(
         initial_candidates.len() as u32 // Absolute minimum
     };
     
-    // We would iteratively deepen here, but for now we just return the base threshold
     loop {
         let cost = search(matrix, initial_candidates, dict, metrics, threshold);
         if cost <= threshold {
@@ -26,20 +25,62 @@ pub fn solve_ida_star(
 }
 
 fn search(
-    _matrix: &ResponseMatrix,
+    matrix: &ResponseMatrix,
     set: &[usize],
-    _dict: &Dictionary,
+    dict: &Dictionary,
     metrics: &Metrics,
-    _threshold: u32,
+    threshold: u32,
 ) -> u32 {
     metrics.states_evaluated.fetch_add(1, Ordering::Relaxed);
     if set.len() <= 2 {
         return (set.len() * (set.len() + 1) / 2) as u32;
     }
-    u32::MAX
+    
+    let mut min_cost = u32::MAX;
+    
+    for g in 0..dict.guesses.len() {
+        let mut cost = set.len() as u32;
+        let mut counts = [0u16; 243];
+        let mut num_non_empty = 0;
+        
+        for &c in set {
+            let r = matrix.get(g, c).0 as usize;
+            if counts[r] == 0 {
+                num_non_empty += 1;
+            }
+            counts[r] += 1;
+        }
+        
+        if num_non_empty == 1 && !set.contains(&g) {
+            continue;
+        }
+        
+        for r_idx in 0..243 {
+            if counts[r_idx] == 0 || r_idx == crate::core::Response::WIN.0 as usize {
+                continue;
+            }
+            let mut subset = Vec::with_capacity(counts[r_idx] as usize);
+            for &c in set {
+                if matrix.get(g, c).0 as usize == r_idx {
+                    subset.push(c);
+                }
+            }
+            
+            // Recursive deep
+            let sub_cost = search(matrix, &subset, dict, metrics, threshold - cost);
+            cost = cost.saturating_add(sub_cost);
+            if cost > threshold {
+                break;
+            }
+        }
+        
+        if cost < min_cost {
+            min_cost = cost;
+        }
+        if min_cost <= threshold {
+            return min_cost; // Found a solution within threshold
+        }
+    }
+    
+    min_cost
 }
-// Ongoing integration work for the IDA* solver pipeline
-// Structural notes: ensure we maintain strict transposition bounds invariants here.
-// Next step: implement iterative depth probing up to max_depth.
-// Ensuring bounds transitions map precisely to previous benchmark regressions.
-// Maintaining isolation for incremental cache loading behavior.
