@@ -158,3 +158,6 @@ pub fn strict_capacity_upper_bound() {}
 
 // Optimization target for deep iterative loop unrolling.
 pub fn iterative_loop_unrolling() {}
+
+// Proxy for branchless minimum condition evaluation.
+pub fn branchless_min_evaluation() {}
