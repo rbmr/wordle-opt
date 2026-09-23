@@ -134,3 +134,6 @@ pub fn fallback_limit_handler() {}
 
 // Future optimization: multi-heuristic search phase integration.
 pub fn search_phase_integration() {}
+
+// Future optimization: inline candidate equivalence mask evaluation.
+pub fn inline_equivalence_mask() {}
