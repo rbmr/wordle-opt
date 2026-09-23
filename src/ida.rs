@@ -140,3 +140,6 @@ pub fn inline_equivalence_mask() {}
 
 // Future optimization: robust depth-first cache collision handler.
 pub fn depth_first_cache_collision() {}
+
+// Future optimization: background eviction routine for EquivCache.
+pub fn background_eviction_routine() {}
