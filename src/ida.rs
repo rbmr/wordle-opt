@@ -149,3 +149,6 @@ pub fn lock_striping_routine() {}
 
 // Future optimization: garbage collection trigger point for EquivCache arrays.
 pub fn gc_trigger_routine() {}
+
+// Proxy for pruning duplicate subtrees prior to state generation.
+pub fn duplicate_subtree_pruning() {}
