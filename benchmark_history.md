@@ -343,3 +343,19 @@ Each size draws 1 independent random subsets (no replacement within a subset) fr
 | 100 | 1 | 248/248.0/248 | 0.05/0.05/0.05 | 10/10.0/10 | 0 |
 | 250 | 1 | 685/685.0/685 | 1.36/1.36/1.36 | 479/479.0/479 | 93 |
 
+## Randomized Benchmark Run: commit=368bc22 host=assistant cpus=2 seed=20260906 samples_per_size=1 unix_time=1790136524
+Each size draws 1 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] | CacheHits Avg |
+|------|---------|---------------------|------------------------|----------------------|---------------|
+| 100 | 1 | 248/248.0/248 | 0.13/0.13/0.13 | 10/10.0/10 | 0 |
+| 250 | 1 | 685/685.0/685 | 2.36/2.36/2.36 | 478/478.0/478 | 93 |
+| 500 | 1 | 1455/1455.0/1455 | 92.86/92.86/92.86 | 22915/22915.0/22915 | 4735 |
+
+## Randomized Benchmark Run: commit=368bc22 host=assistant cpus=2 seed=20260906 samples_per_size=1 unix_time=1790136621
+Each size draws 1 independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with 20260906 at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] | CacheHits Avg |
+|------|---------|---------------------|------------------------|----------------------|---------------|
+| 100 | 1 | 248/248.0/248 | 0.14/0.14/0.14 | 10/10.0/10 | 0 |
+| 250 | 1 | 685/685.0/685 | 2.76/2.76/2.76 | 478/478.0/478 | 93 |
+| 500 | 1 | 1455/1455.0/1455 | 91.15/91.15/91.15 | 22931/22931.0/22931 | 4736 |
+

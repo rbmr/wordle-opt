@@ -1059,14 +1059,15 @@ impl<'a> Solver<'a> {
         let g_offset = guess * self.matrix.num_candidates;
         for &c in set {
             let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-            unsafe {
-                if *counts.get_unchecked(r) == 0 {
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                    num_non_empty += 1;
-                }
-                *counts.get_unchecked_mut(r) += 1;
+            unsafe { *counts.get_unchecked_mut(r) += 1; }
+        }
+        for r in 0..243 {
+            if counts[r] > 0 {
+                non_empty_indices[num_non_empty] = r as u8;
+                num_non_empty += 1;
             }
         }
+
 
         if num_non_empty == 1 {
             return beta;
