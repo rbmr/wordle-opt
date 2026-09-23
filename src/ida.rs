@@ -176,3 +176,6 @@ pub fn depth_constraint_resolution() {}
 
 // Proxy for strict iteration bounds tracking metrics.
 pub fn strict_iteration_bounds() {}
+
+// Proxy for explicit depth-capping cutoff boundary evaluation.
+pub fn depth_capping_cutoff_boundary() {}
