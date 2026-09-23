@@ -239,7 +239,7 @@ fn test_cache_depth_preferred_replacement() {
 
     // Insert looser bound
     cache.insert(hash, 50, false);
-    
+
     // Tighter lower bound replaces looser
     cache.insert(hash, 60, false);
     let (val, exact) = cache.get(hash).unwrap();

@@ -13,7 +13,13 @@ use fastrand;
 fn solve_both(dict: &Dictionary, matrix: &ResponseMatrix, subset: &[usize]) -> (u32, u32) {
     let naive_cost = NaiveSolver::new(matrix, dict).solve(subset);
     let metrics = Metrics::new();
-    let opt_cost = Solver::solve(matrix, subset, dict, &metrics, &std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new())));
+    let opt_cost = Solver::solve(
+        matrix,
+        subset,
+        dict,
+        &metrics,
+        &std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new())),
+    );
     (naive_cost, opt_cost)
 }
 
@@ -178,7 +184,10 @@ mod extra_bounds_tests {
             let mut prev = 0;
             for n in 1..200 {
                 let bound = capacity_bound(n, k);
-                assert!(bound >= prev, "Capacity bound should be monotonic for fixed k");
+                assert!(
+                    bound >= prev,
+                    "Capacity bound should be monotonic for fixed k"
+                );
                 prev = bound;
             }
         }
@@ -190,7 +199,10 @@ mod extra_bounds_tests {
             let mut prev = capacity_bound(n, 2);
             for k in 3..20 {
                 let bound = capacity_bound(n, k);
-                assert!(bound <= prev, "Capacity bound should decrease as k increases (more branches available)");
+                assert!(
+                    bound <= prev,
+                    "Capacity bound should decrease as k increases (more branches available)"
+                );
                 prev = bound;
             }
         }

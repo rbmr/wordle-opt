@@ -158,7 +158,11 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         for _ in 0..iterations {
             let metrics = Metrics::new();
             let start = Instant::now();
-            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
+            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+                std::sync::RwLock::new(
+                    std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                )
+            });
             let cost = Solver::solve(matrix, &candidates, dict, &metrics, &equiv_cache_arr);
             let secs = start.elapsed().as_secs_f64();
 
@@ -329,9 +333,17 @@ fn run_benchmark_random(
 
             let metrics = Metrics::new();
             let start = Instant::now();
-            let _equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
-            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
-        let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
+            let _equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+                std::sync::RwLock::new(
+                    std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                )
+            });
+            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+                std::sync::RwLock::new(
+                    std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                )
+            });
+            let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
             let secs = start.elapsed().as_secs_f64();
             let s_states = metrics
                 .states_evaluated
@@ -486,7 +498,11 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
         let metrics = Metrics::new();
         let start = Instant::now();
-        let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
+        let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+            std::sync::RwLock::new(
+                std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+            )
+        });
         let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
         let secs = start.elapsed().as_secs_f64();
 
@@ -595,7 +611,9 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     // Thread is intentionally leaked (daemon-like); process exits when solve completes.
     drop(progress_thread);
 
-    let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
+    let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+        std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new())
+    });
     let cost = Solver::solve(matrix, &all_candidates, dict, &metrics, &equiv_cache_arr);
     let elapsed = start.elapsed();
 
@@ -784,7 +802,11 @@ fn main() {
         use std::sync::atomic::AtomicU32;
         let global_beta = AtomicU32::new(u32::MAX);
 
-        let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
+        let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+            std::sync::RwLock::new(
+                std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+            )
+        });
         let mut solver = Solver::new_with_global_beta(
             &matrix,
             max_k,
@@ -805,14 +827,7 @@ fn main() {
         );
 
         let start = Instant::now();
-        let val = solver.min_guess_val(
-            &initial_candidates,
-            root_guess,
-            
-            u32::MAX,
-            1,
-            max_k,
-        );
+        let val = solver.min_guess_val(&initial_candidates, root_guess, u32::MAX, 1, max_k);
         println!(
             "Root Guess: {} ({}) -> Cost: {}",
             root_guess,

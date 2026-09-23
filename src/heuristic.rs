@@ -162,9 +162,9 @@ pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     let mut remaining = n as u32;
     let mut cost = 0;
     let mut depth = 2; // Phase 2 guess means no WIN at depth 1
-    
+
     let mut capacity_at_depth = root_k as u32;
-    
+
     while remaining > 0 {
         let take = remaining.min(capacity_at_depth);
         cost += take * depth;
@@ -247,12 +247,15 @@ mod phase2_capacity_bounds_tests {
         // a Phase 2 guess can achieve 12, but tight_capacity_bound gives 13.
         let phase1_lb = tight_capacity_bound(5, 2, 3);
         assert_eq!(phase1_lb, 13, "Phase 1 bound is 13");
-        
+
         let phase2_lb = phase2_capacity_bound(5, 3, 3);
         assert_eq!(phase2_lb, 12, "Phase 2 bound is 12");
-        
+
         let tight_lb = phase1_lb.min(phase2_lb);
-        assert_eq!(tight_lb, 12, "Minimum bound correctly prevents Phase 2 pruning");
+        assert_eq!(
+            tight_lb, 12,
+            "Minimum bound correctly prevents Phase 2 pruning"
+        );
     }
 
     #[test]

@@ -5,8 +5,8 @@ use crate::matrix::ResponseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-pub type EquivCache = [std::sync::RwLock<std::collections::HashMap<u32, std::sync::Arc<Vec<u16>>>>; 64];
-
+pub type EquivCache =
+    [std::sync::RwLock<std::collections::HashMap<u32, std::sync::Arc<Vec<u16>>>>; 64];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -76,8 +76,7 @@ pub struct Solver<'a> {
     global_beta: &'a AtomicU32,
     equiv_cache: &'a EquivCache,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    pub 
-    scratch_is_in_set: [Vec<bool>; 32],
+    pub scratch_is_in_set: [Vec<bool>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
@@ -204,7 +203,7 @@ impl<'a> Solver<'a> {
         capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
         global_beta: &'a AtomicU32,
-    equiv_cache: &'a EquivCache,
+        equiv_cache: &'a EquivCache,
     ) -> Self {
         Self {
             matrix,
@@ -215,7 +214,7 @@ impl<'a> Solver<'a> {
             cache,
             global_beta,
             equiv_cache,
-            
+
             scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
@@ -404,8 +403,7 @@ impl<'a> Solver<'a> {
                     &beta,
                     equiv_cache,
                 );
-                let val =
-                    local_solver.min_guess_val(set, g, current_beta, 1, max_k);
+                let val = local_solver.min_guess_val(set, g, current_beta, 1, max_k);
 
                 // atomic min
                 let mut current = beta.load(Ordering::Relaxed);
@@ -446,7 +444,7 @@ impl<'a> Solver<'a> {
     fn min_state_val(
         &mut self,
         set: &[usize],
-         
+
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -533,7 +531,6 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= self.matrix.candidate_masks[c];
@@ -546,7 +543,6 @@ impl<'a> Solver<'a> {
         phase1_guesses.clear();
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
-        
 
         let shard_idx = (c_mask as usize) % 64;
         let active_guesses_rc = {
@@ -559,7 +555,9 @@ impl<'a> Solver<'a> {
                 if let Some(cached) = cache_mut.get(&c_mask) {
                     std::sync::Arc::clone(cached)
                 } else {
-                    self.metrics.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.metrics
+                        .cache_misses
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if cache_mut.len() > 4096 {
                         cache_mut.clear();
                     }
@@ -595,7 +593,7 @@ impl<'a> Solver<'a> {
                         last_proj = proj;
                         active.push(g);
                     }
-                    
+
                     let rc = std::sync::Arc::new(active);
                     cache_mut.insert(c_mask, std::sync::Arc::clone(&rc));
                     rc
@@ -629,8 +627,6 @@ impl<'a> Solver<'a> {
             is_in_set[c] = false;
         }
         self.scratch_is_in_set[depth] = is_in_set;
-
-
 
         self.metrics
             .pruned_by_equivalence
@@ -768,7 +764,9 @@ impl<'a> Solver<'a> {
                 let g_offset = g * self.matrix.num_candidates;
                 for &c in set {
                     let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                    unsafe { *counts.get_unchecked_mut(r) += 1; }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) += 1;
+                    }
                 }
                 let mut num_non_empty = 0;
                 for r in 0..243 {
@@ -940,7 +938,9 @@ impl<'a> Solver<'a> {
                     let g_offset = g * self.matrix.num_candidates;
                     for &c in set {
                         let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                        unsafe { *counts.get_unchecked_mut(r) += 1; }
+                        unsafe {
+                            *counts.get_unchecked_mut(r) += 1;
+                        }
                     }
                     let mut num_non_empty = 0;
                     for r in 0..243 {
@@ -997,8 +997,7 @@ impl<'a> Solver<'a> {
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
-                    let val =
-                        self.min_guess_val(set, _g, best_val, depth, local_max_k);
+                    let val = self.min_guess_val(set, _g, best_val, depth, local_max_k);
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -1036,7 +1035,7 @@ impl<'a> Solver<'a> {
         &mut self,
         set: &[usize],
         guess: usize,
-         
+
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -1056,7 +1055,9 @@ impl<'a> Solver<'a> {
         let g_offset = guess * self.matrix.num_candidates;
         for &c in set {
             let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-            unsafe { *counts.get_unchecked_mut(r) += 1; }
+            unsafe {
+                *counts.get_unchecked_mut(r) += 1;
+            }
         }
         for r in 0..243 {
             if counts[r] > 0 {
@@ -1064,7 +1065,6 @@ impl<'a> Solver<'a> {
                 num_non_empty += 1;
             }
         }
-
 
         if num_non_empty == 1 {
             return beta;
@@ -1160,8 +1160,7 @@ impl<'a> Solver<'a> {
                 return beta;
             }
 
-            let val =
-                self.min_state_val(p,  effective_beta, depth + 1, parent_max_k);
+            let val = self.min_state_val(p, effective_beta, depth + 1, parent_max_k);
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
@@ -1199,7 +1198,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..100).collect();
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 262,
@@ -1213,7 +1213,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..500).collect();
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 1469,
@@ -1233,7 +1234,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..750).collect();
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 2256,
@@ -1247,7 +1249,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..250).collect();
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 702,
@@ -1263,8 +1266,15 @@ mod tests {
         let mut results = Vec::new();
         for _ in 0..5 {
             let metrics = Metrics::new();
-            let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
-            results.push(Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache));
+            let equiv_cache: [_; 64] =
+                std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+            results.push(Solver::solve(
+                &matrix,
+                &candidates,
+                &dict,
+                &metrics,
+                &equiv_cache,
+            ));
         }
         assert!(
             results.iter().all(|&r| r == results[0]),
@@ -1285,4 +1295,3 @@ mod solver_cache_tests {
         assert_eq!(cache.get(0), None);
     }
 }
-
