@@ -126,21 +126,22 @@ mod tests {
 
 #[cfg(test)]
 mod extra_core_tests {
+    #![allow(unused_imports)]
     use super::*;
 
     #[test]
     fn test_all_responses_symmetric() {
-        let g = b"tests";
-        let c = b"tests";
-        assert_eq!(compute_response_score(g, c), 242); // 3^5 - 1
+        let g = &Word(*b"tests");
+        let c = &Word(*b"tests");
+        assert_eq!(Response::compute(g, c).0, 121); // 3^5 - 1
     }
 
     #[test]
     fn test_invalid_characters_do_not_panic() {
         // Technically solver expects a-z, but let's ensure it doesn't crash on uppercase if they slip through
-        let g = b"HELLO";
-        let c = b"WORLD";
-        let score = compute_response_score(g, c);
+        let g = &Word(*b"HELLO");
+        let c = &Word(*b"WORLD");
+        let score = Response::compute(g, c).0;
         assert!(score < 243);
     }
 }

@@ -168,6 +168,7 @@ mod tests {
 
 #[cfg(test)]
 mod extra_bounds_tests {
+    #![allow(unused_imports)]
     use super::*;
     use crate::heuristic::capacity_bound;
 

@@ -231,3 +231,35 @@ mod tests {
         }
     }
 }
+
+#[test]
+fn test_cache_depth_preferred_replacement() {
+    let cache = GlobalCache::new(1024);
+    let hash = 0x5000000000000001; // hash45 = 0x5000000000000
+
+    // Insert looser bound
+    cache.insert(hash, 50, false);
+    
+    // Tighter lower bound replaces looser
+    cache.insert(hash, 60, false);
+    let (val, exact) = cache.get(hash).unwrap();
+    assert_eq!(val, 60);
+    assert!(!exact);
+
+    // Exact bound replaces tighter lower bound
+    cache.insert(hash, 60, true);
+    let (val, exact) = cache.get(hash).unwrap();
+    assert_eq!(val, 60);
+    assert!(exact);
+
+    // Looser exact bound? (Should not happen in practice if tree is stable, but test policy)
+    // The policy says exact bound replaces lower bound.
+    cache.insert(hash, 55, true);
+    let (val, _) = cache.get(hash).unwrap();
+    // Cache policy doesn't explicitly check old_value if both are exact.
+    // Wait, the policy says:
+    // if old_exact && !is_exact { return; }
+    // if !old_exact && !is_exact && value < old_value { return; }
+    // So if both are exact, it blindly overwrites.
+    assert_eq!(val, 55);
+}
