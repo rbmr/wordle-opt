@@ -51,7 +51,7 @@ fn search(
             counts[r] += 1;
         }
         
-        if num_non_empty == 1 && !set.contains(&g) {
+        if num_non_empty == 1 {
             continue;
         }
         
