@@ -986,7 +986,9 @@ impl<'a> Solver<'a> {
                 local_lb = base_lb;
             }
 
-            let tight_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
+            let phase1_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
+            let phase2_lb = heuristic::phase2_capacity_bound(c_len, local_max_k, local_max_k);
+            let tight_lb = phase1_lb.min(phase2_lb);
             if tight_lb > local_lb {
                 local_lb = tight_lb;
             }

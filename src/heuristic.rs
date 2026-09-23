@@ -152,6 +152,29 @@ mod expected_remaining_tests {
     }
 }
 
+pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    if root_k <= 1 || max_k <= 1 {
+        return capacity_bound(n, max_k);
+    }
+    let mut remaining = n as u32;
+    let mut cost = 0;
+    let mut depth = 2; // Phase 2 guess means no WIN at depth 1
+    
+    let mut capacity_at_depth = root_k as u32;
+    
+    while remaining > 0 {
+        let take = remaining.min(capacity_at_depth);
+        cost += take * depth;
+        remaining -= take;
+        depth += 1;
+        capacity_at_depth = capacity_at_depth.saturating_mul(max_k as u32 - 1);
+    }
+    cost
+}
+
 pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if n == 0 {
         return 0;
