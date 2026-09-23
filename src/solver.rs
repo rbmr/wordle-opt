@@ -1290,3 +1290,6 @@ mod solver_cache_tests {
         assert_eq!(cache.get(0), None);
     }
 }
+
+// Agent note: Attempting to explore Iterative Deepening to reduce cache churn
+// at deeper depths.
