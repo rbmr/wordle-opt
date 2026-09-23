@@ -13,7 +13,7 @@ use fastrand;
 fn solve_both(dict: &Dictionary, matrix: &ResponseMatrix, subset: &[usize]) -> (u32, u32) {
     let naive_cost = NaiveSolver::new(matrix, dict).solve(subset);
     let metrics = Metrics::new();
-    let opt_cost = Solver::solve(matrix, subset, dict, &metrics);
+    let opt_cost = Solver::solve(matrix, subset, dict, &metrics, &std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new())));
     (naive_cost, opt_cost)
 }
 

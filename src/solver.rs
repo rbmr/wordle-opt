@@ -8,9 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-thread_local! {
-    static EQUIV_CACHE: RefCell<HashMap<u32, Rc<Vec<u16>>>> = RefCell::new(HashMap::new());
-}
+pub type EquivCache = [std::sync::RwLock<std::collections::HashMap<u32, std::sync::Arc<Vec<u16>>>>; 64];
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,6 +77,7 @@ pub struct Solver<'a> {
     /// Shared global upper bound across all parallel root-level tasks.
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
+    equiv_cache: &'a EquivCache,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
     pub 
     scratch_is_in_set: [Vec<bool>; 32],
@@ -185,6 +184,7 @@ impl<'a> Solver<'a> {
         metrics: &'a Metrics,
         capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
+        equiv_cache: &'a EquivCache,
     ) -> Self {
         Self::new_with_global_beta(
             matrix,
@@ -194,6 +194,7 @@ impl<'a> Solver<'a> {
             capacity_bounds_2d,
             cache,
             &SENTINEL_BETA,
+            equiv_cache,
         )
     }
 
@@ -205,6 +206,7 @@ impl<'a> Solver<'a> {
         capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
         global_beta: &'a AtomicU32,
+    equiv_cache: &'a EquivCache,
     ) -> Self {
         Self {
             matrix,
@@ -214,6 +216,7 @@ impl<'a> Solver<'a> {
             capacity_bounds_2d,
             cache,
             global_beta,
+            equiv_cache,
             
             scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
@@ -234,6 +237,7 @@ impl<'a> Solver<'a> {
         initial_candidates: &[usize],
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
+        equiv_cache: &'a EquivCache,
     ) -> u32 {
         let cache_size = if crate::is_compute_host() {
             // 512 M entries × 8 bytes each = 4 GB. Compute has 14 GB available.
@@ -342,6 +346,7 @@ impl<'a> Solver<'a> {
                         metrics,
                         &capacity_bounds_2d,
                         &global_cache,
+                        equiv_cache,
                     );
                     // For a bucket, the cost is evaluated via min_state_val.
                     // We use a very loose beta since we evaluate in parallel.
@@ -399,6 +404,7 @@ impl<'a> Solver<'a> {
                     &capacity_bounds_2d,
                     &global_cache,
                     &beta,
+                    equiv_cache,
                 );
                 let val =
                     local_solver.min_guess_val(set, g, current_beta, 1, max_k);
@@ -544,53 +550,60 @@ impl<'a> Solver<'a> {
         phase2_guesses.clear();
         
 
-        let active_guesses_rc = EQUIV_CACHE.with(|cache_ref| {
-            let mut cache = cache_ref.borrow_mut();
+        let shard_idx = (c_mask as usize) % 64;
+        let active_guesses_rc = {
+            let cache = self.equiv_cache[shard_idx].read().unwrap();
             if let Some(cached) = cache.get(&c_mask) {
-                return Rc::clone(cached);
-            }
+                std::sync::Arc::clone(cached)
+            } else {
+                drop(cache);
+                let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
+                if let Some(cached) = cache_mut.get(&c_mask) {
+                    std::sync::Arc::clone(cached)
+                } else {
+                    self.metrics.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if cache_mut.len() > 4096 {
+                        cache_mut.clear();
+                    }
 
-            self.metrics.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if cache.len() > 16384 {
-                cache.clear();
-            }
+                    let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
+                    for g in 0..self.dict.guesses.len() {
+                        let chars = &self.dict.guess_chars[g];
+                        let mut proj = 0u64;
+                        let l0 = chars[0] as u64;
+                        proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
+                        let l1 = chars[1] as u64;
+                        proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
+                        let l2 = chars[2] as u64;
+                        proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
+                        let l3 = chars[3] as u64;
+                        proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
+                        let l4 = chars[4] as u64;
+                        proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
 
-            let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
-            for g in 0..self.dict.guesses.len() {
-                let chars = &self.dict.guess_chars[g];
-                let mut proj = 0u64;
-                let l0 = chars[0] as u64;
-                proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
-                let l1 = chars[1] as u64;
-                proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
-                let l2 = chars[2] as u64;
-                proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
-                let l3 = chars[3] as u64;
-                proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
-                let l4 = chars[4] as u64;
-                proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
+                        let packed = (proj << 32) | (g as u64);
+                        proj_tuples.push(packed);
+                    }
+                    proj_tuples.sort_unstable();
 
-                let packed = (proj << 32) | (g as u64);
-                proj_tuples.push(packed);
-            }
-            proj_tuples.sort_unstable();
-
-            let mut active = Vec::with_capacity(8192);
-            let mut last_proj = u64::MAX;
-            for packed in proj_tuples {
-                let proj = packed >> 32;
-                let g = (packed & 0xFFFFFFFF) as u16;
-                if proj == last_proj {
-                    continue;
+                    let mut active = Vec::with_capacity(8192);
+                    let mut last_proj = u64::MAX;
+                    for packed in proj_tuples {
+                        let proj = packed >> 32;
+                        let g = (packed & 0xFFFFFFFF) as u16;
+                        if proj == last_proj {
+                            continue;
+                        }
+                        last_proj = proj;
+                        active.push(g);
+                    }
+                    
+                    let rc = std::sync::Arc::new(active);
+                    cache_mut.insert(c_mask, std::sync::Arc::clone(&rc));
+                    rc
                 }
-                last_proj = proj;
-                active.push(g);
             }
-            
-            let rc = Rc::new(active);
-            cache.insert(c_mask, Rc::clone(&rc));
-            rc
-        });
+        };
 
         // Fast set-membership check
         let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
@@ -1191,7 +1204,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..100).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 262,
             "N=100 golden cost changed - likely correctness bug"
@@ -1204,7 +1218,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..500).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 1469,
             "N=500 golden cost changed - likely correctness bug"
@@ -1223,7 +1238,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..750).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 2256,
             "N=750 golden cost changed - likely correctness bug"
@@ -1236,7 +1252,8 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..250).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 702,
             "N=250 golden cost changed - likely correctness bug"
@@ -1251,7 +1268,8 @@ mod tests {
         let mut results = Vec::new();
         for _ in 0..5 {
             let metrics = Metrics::new();
-            results.push(Solver::solve(&matrix, &candidates, &dict, &metrics));
+            let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+            results.push(Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache));
         }
         assert!(
             results.iter().all(|&r| r == results[0]),
