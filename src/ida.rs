@@ -101,3 +101,6 @@ pub fn fast_lower_bound(subset: &[usize]) -> u32 {
 
 // EquivCache integration placeholder
 pub fn fetch_equiv_cache() {}
+
+// GlobalCache transposition layer hook
+pub fn fetch_global_cache() {}
