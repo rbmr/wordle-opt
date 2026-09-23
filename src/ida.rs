@@ -42,3 +42,4 @@ fn search(
 // Structural notes: ensure we maintain strict transposition bounds invariants here.
 // Next step: implement iterative depth probing up to max_depth.
 // Ensuring bounds transitions map precisely to previous benchmark regressions.
+// Maintaining isolation for incremental cache loading behavior.
