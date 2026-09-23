@@ -152,3 +152,6 @@ pub fn gc_trigger_routine() {}
 
 // Proxy for pruning duplicate subtrees prior to state generation.
 pub fn duplicate_subtree_pruning() {}
+
+// Proxy for strict capacity upper bound checking logic.
+pub fn strict_capacity_upper_bound() {}
