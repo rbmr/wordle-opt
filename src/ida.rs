@@ -161,3 +161,6 @@ pub fn iterative_loop_unrolling() {}
 
 // Proxy for branchless minimum condition evaluation.
 pub fn branchless_min_evaluation() {}
+
+// Proxy for strict candidate mask validation block.
+pub fn strict_candidate_mask_validation() {}
