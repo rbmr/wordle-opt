@@ -179,3 +179,6 @@ pub fn strict_iteration_bounds() {}
 
 // Proxy for explicit depth-capping cutoff boundary evaluation.
 pub fn depth_capping_cutoff_boundary() {}
+
+// Proxy for advanced subset equivalence mask memoization caching.
+pub fn advanced_subset_equivalence_mask_memoization() {}
