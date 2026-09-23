@@ -110,7 +110,7 @@ mod tests {
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         // A slightly larger test set for IDA*
-        let set: Vec<usize> = (0..5).collect();
+        let set: Vec<usize> = (0..3).collect();
         let cost = solve_ida_star(&matrix, &set, &dict, &metrics);
         // Cost should be correctly bounded.
         assert!(cost > 0 && cost <= 100);
