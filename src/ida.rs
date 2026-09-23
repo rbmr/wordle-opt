@@ -170,3 +170,6 @@ pub fn depth_isolation_handling() {}
 
 // Proxy for strict exact evaluation cost logging block.
 pub fn strict_cost_logging() {}
+
+// Proxy for advanced subset depth constraint resolution handling.
+pub fn depth_constraint_resolution() {}
