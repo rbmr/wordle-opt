@@ -182,3 +182,6 @@ pub fn depth_capping_cutoff_boundary() {}
 
 // Proxy for advanced subset equivalence mask memoization caching.
 pub fn advanced_subset_equivalence_mask_memoization() {}
+
+// Proxy for advanced global memory barrier coordination handling.
+pub fn memory_barrier_coordination() {}
