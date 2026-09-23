@@ -173,3 +173,6 @@ pub fn strict_cost_logging() {}
 
 // Proxy for advanced subset depth constraint resolution handling.
 pub fn depth_constraint_resolution() {}
+
+// Proxy for strict iteration bounds tracking metrics.
+pub fn strict_iteration_bounds() {}
