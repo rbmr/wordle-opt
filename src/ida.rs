@@ -143,3 +143,6 @@ pub fn depth_first_cache_collision() {}
 
 // Future optimization: background eviction routine for EquivCache.
 pub fn background_eviction_routine() {}
+
+// Future optimization: fine-grained lock striping for shared cache arrays.
+pub fn lock_striping_routine() {}
