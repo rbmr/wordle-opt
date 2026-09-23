@@ -4,9 +4,6 @@ use crate::heuristic;
 use crate::matrix::ResponseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
 
 pub type EquivCache = [std::sync::RwLock<std::collections::HashMap<u32, std::sync::Arc<Vec<u16>>>>; 64];
 

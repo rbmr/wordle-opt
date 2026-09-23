@@ -329,7 +329,7 @@ fn run_benchmark_random(
 
             let metrics = Metrics::new();
             let start = Instant::now();
-            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
+            let _equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
             let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new()));
         let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
             let secs = start.elapsed().as_secs_f64();
