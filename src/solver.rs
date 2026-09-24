@@ -84,6 +84,8 @@ pub struct Solver<'a> {
     scratch_phase2_guesses: [Vec<usize>; 32],
     scratch_phase1_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
+    scratch_hash_table: [Vec<u64>; 32],
+    scratch_added_indices: [Vec<usize>; 32],
 }
 
 impl<'a> Solver<'a> {
@@ -224,6 +226,8 @@ impl<'a> Solver<'a> {
             scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
+            scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
+            scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
         }
     }
 
