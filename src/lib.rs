@@ -161,7 +161,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             let start = Instant::now();
             let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
-                    std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                    std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
                 )
             });
             let cost = Solver::solve(matrix, &candidates, dict, &metrics, &equiv_cache_arr);
@@ -336,12 +336,12 @@ fn run_benchmark_random(
             let start = Instant::now();
             let _equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
-                    std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                    std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
                 )
             });
             let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
-                    std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                    std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
                 )
             });
             let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
@@ -501,7 +501,7 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         let start = Instant::now();
         let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
             std::sync::RwLock::new(
-                std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
             )
         });
         let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
@@ -613,7 +613,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     drop(progress_thread);
 
     let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
-        std::sync::RwLock::new(std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new())
+        std::sync::RwLock::new(std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new())
     });
     let cost = Solver::solve(matrix, &all_candidates, dict, &metrics, &equiv_cache_arr);
     let elapsed = start.elapsed();
@@ -806,7 +806,7 @@ pub fn run_cli() {
 
         let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
             std::sync::RwLock::new(
-                std::collections::HashMap::<u32, std::sync::Arc<Vec<u16>>>::new(),
+                std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
             )
         });
         let mut solver = Solver::new_with_global_beta(

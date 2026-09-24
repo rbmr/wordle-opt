@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 pub type EquivCache =
-    [std::sync::RwLock<std::collections::HashMap<u32, std::sync::Arc<Vec<u16>>>>; 64];
+    [std::sync::RwLock<std::collections::HashMap<u64, std::sync::Arc<Vec<u16>>>>; 64];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -561,41 +561,36 @@ impl<'a> Solver<'a> {
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
 
-        let shard_idx = (c_mask as usize) % 64;
+        let mut set_hash = 0u64;
+        for &c in set {
+            set_hash = set_hash.rotate_left(13) ^ self.matrix.zobrist[c];
+        }
+
+        let shard_idx = (set_hash as usize) % 64;
         let active_guesses_rc = {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
-            if let Some(cached) = cache.get(&c_mask) {
+            if let Some(cached) = cache.get(&set_hash) {
                 std::sync::Arc::clone(cached)
             } else {
                 drop(cache);
                 
                 // Do the heavy projection/sorting outside the write lock to prevent blocking
-                // other threads trying to access different c_masks in the same shard.
+                // other threads trying to access different set_hashes in the same shard.
                 let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
                 for g in 0..self.dict.guesses.len() {
-                    let chars = &self.dict.guess_chars[g];
                     let mut proj = 0u64;
-                    let l0 = chars[0] as u64;
-                    proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
-                    let l1 = chars[1] as u64;
-                    proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
-                    let l2 = chars[2] as u64;
-                    proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
-                    let l3 = chars[3] as u64;
-                    proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
-                    let l4 = chars[4] as u64;
-                    proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
-
-                    let packed = (proj << 32) | (g as u64);
-                    proj_tuples.push(packed);
+                    let g_off = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
+                        proj = proj.rotate_left(5) ^ self.matrix.zobrist[c].wrapping_mul(r as u64 + 1);
+                    }
+                    proj_tuples.push((proj, g as u16));
                 }
                 proj_tuples.sort_unstable();
 
                 let mut active = Vec::with_capacity(8192);
                 let mut last_proj = u64::MAX;
-                for packed in proj_tuples {
-                    let proj = packed >> 32;
-                    let g = (packed & 0xFFFFFFFF) as u16;
+                for &(proj, g) in &proj_tuples {
                     if proj == last_proj {
                         continue;
                     }
@@ -603,11 +598,12 @@ impl<'a> Solver<'a> {
                     active.push(g);
                 }
 
+                
                 let rc = std::sync::Arc::new(active);
 
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
                 // Check again in case another thread computed it while we were working
-                if let Some(cached) = cache_mut.get(&c_mask) {
+                if let Some(cached) = cache_mut.get(&set_hash) {
                     std::sync::Arc::clone(cached)
                 } else {
                     self.metrics
@@ -620,7 +616,7 @@ impl<'a> Solver<'a> {
                     if cache_mut.len() > 4096 {
                         cache_mut.clear();
                     }
-                    cache_mut.insert(c_mask, std::sync::Arc::clone(&rc));
+                    cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
                     rc
                 }
             }
