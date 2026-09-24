@@ -674,9 +674,9 @@ impl<'a> Solver<'a> {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
                 let mut num_non_empty = 0;
-                let g_offset = g * self.matrix.num_candidates;
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    let c_off = c * self.matrix.num_guesses;
+                    let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
                     unsafe {
                         if *counts.get_unchecked(r) == 0 {
                             *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
@@ -720,23 +720,16 @@ impl<'a> Solver<'a> {
                 let g5 = chunk[5];
                 let g6 = chunk[6];
                 let g7 = chunk[7];
-                let g0_off = g0 * self.matrix.num_candidates;
-                let g1_off = g1 * self.matrix.num_candidates;
-                let g2_off = g2 * self.matrix.num_candidates;
-                let g3_off = g3 * self.matrix.num_candidates;
-                let g4_off = g4 * self.matrix.num_candidates;
-                let g5_off = g5 * self.matrix.num_candidates;
-                let g6_off = g6 * self.matrix.num_candidates;
-                let g7_off = g7 * self.matrix.num_candidates;
                 for &c in set {
-                    let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
-                    let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
-                    let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
-                    let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
-                    let r4 = unsafe { self.matrix.data.get_unchecked(g4_off + c).0 as usize };
-                    let r5 = unsafe { self.matrix.data.get_unchecked(g5_off + c).0 as usize };
-                    let r6 = unsafe { self.matrix.data.get_unchecked(g6_off + c).0 as usize };
-                    let r7 = unsafe { self.matrix.data.get_unchecked(g7_off + c).0 as usize };
+                    let c_off = c * self.matrix.num_guesses;
+                    let r0 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g0).0 as usize };
+                    let r1 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g1).0 as usize };
+                    let r2 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g2).0 as usize };
+                    let r3 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g3).0 as usize };
+                    let r4 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g4).0 as usize };
+                    let r5 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g5).0 as usize };
+                    let r6 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g6).0 as usize };
+                    let r7 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g7).0 as usize };
                     unsafe {
                         *counts.get_unchecked_mut(r0) += 1;
                         *counts.get_unchecked_mut(256 + r1) += 1;
@@ -786,9 +779,9 @@ impl<'a> Solver<'a> {
             for &g in chunks.remainder() {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
-                let g_offset = g * self.matrix.num_candidates;
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    let c_off = c * self.matrix.num_guesses;
+                    let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
                     unsafe {
                         *counts.get_unchecked_mut(r) += 1;
                     }
@@ -848,9 +841,9 @@ impl<'a> Solver<'a> {
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
                     let mut num_non_empty = 0;
-                    let g_offset = g * self.matrix.num_candidates;
                     for &c in set {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        let c_off = c * self.matrix.num_guesses;
+                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
                         unsafe {
                             if *counts.get_unchecked(r) == 0 {
                                 *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
@@ -894,23 +887,16 @@ impl<'a> Solver<'a> {
                     let g5 = chunk[5];
                     let g6 = chunk[6];
                     let g7 = chunk[7];
-                    let g0_off = g0 * self.matrix.num_candidates;
-                    let g1_off = g1 * self.matrix.num_candidates;
-                    let g2_off = g2 * self.matrix.num_candidates;
-                    let g3_off = g3 * self.matrix.num_candidates;
-                    let g4_off = g4 * self.matrix.num_candidates;
-                    let g5_off = g5 * self.matrix.num_candidates;
-                    let g6_off = g6 * self.matrix.num_candidates;
-                    let g7_off = g7 * self.matrix.num_candidates;
                     for &c in set {
-                        let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
-                        let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
-                        let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
-                        let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
-                        let r4 = unsafe { self.matrix.data.get_unchecked(g4_off + c).0 as usize };
-                        let r5 = unsafe { self.matrix.data.get_unchecked(g5_off + c).0 as usize };
-                        let r6 = unsafe { self.matrix.data.get_unchecked(g6_off + c).0 as usize };
-                        let r7 = unsafe { self.matrix.data.get_unchecked(g7_off + c).0 as usize };
+                        let c_off = c * self.matrix.num_guesses;
+                        let r0 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g0).0 as usize };
+                        let r1 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g1).0 as usize };
+                        let r2 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g2).0 as usize };
+                        let r3 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g3).0 as usize };
+                        let r4 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g4).0 as usize };
+                        let r5 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g5).0 as usize };
+                        let r6 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g6).0 as usize };
+                        let r7 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g7).0 as usize };
                         unsafe {
                             *counts.get_unchecked_mut(r0) += 1;
                             *counts.get_unchecked_mut(256 + r1) += 1;
