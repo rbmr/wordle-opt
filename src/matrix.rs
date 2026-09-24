@@ -14,6 +14,7 @@ pub struct ResponseMatrix {
     pub candidate_masks: Vec<u32>,
     pub zobrist: Vec<u64>,
     pub data: Vec<Response>,
+    pub data_c_g: Vec<Response>, // Transposed matrix: [candidate][guess]
 }
 
 impl ResponseMatrix {
@@ -64,6 +65,13 @@ impl ResponseMatrix {
                 }
             });
 
+        let mut data_c_g = vec![Response(0); num_candidates * num_guesses];
+        for c in 0..num_candidates {
+            for g in 0..num_guesses {
+                data_c_g[c * num_guesses + g] = data[g * num_candidates + c];
+            }
+        }
+
         Self {
             num_guesses,
             num_candidates,
@@ -71,6 +79,7 @@ impl ResponseMatrix {
             candidate_masks,
             zobrist,
             data,
+            data_c_g,
         }
     }
 
