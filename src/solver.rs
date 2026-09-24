@@ -75,6 +75,7 @@ pub struct Solver<'a> {
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
     equiv_cache: &'a EquivCache,
+    pub current_cost_so_far: u32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
     pub scratch_is_in_set: [Vec<bool>; 32],
     scratch_guesses: [Vec<usize>; 32],
@@ -214,6 +215,7 @@ impl<'a> Solver<'a> {
             cache,
             global_beta,
             equiv_cache,
+            current_cost_so_far: 0,
 
             scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
@@ -566,55 +568,58 @@ impl<'a> Solver<'a> {
                 std::sync::Arc::clone(cached)
             } else {
                 drop(cache);
+                
+                // Do the heavy projection/sorting outside the write lock to prevent blocking
+                // other threads trying to access different c_masks in the same shard.
+                let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
+                for g in 0..self.dict.guesses.len() {
+                    let chars = &self.dict.guess_chars[g];
+                    let mut proj = 0u64;
+                    let l0 = chars[0] as u64;
+                    proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
+                    let l1 = chars[1] as u64;
+                    proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
+                    let l2 = chars[2] as u64;
+                    proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
+                    let l3 = chars[3] as u64;
+                    proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
+                    let l4 = chars[4] as u64;
+                    proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
+
+                    let packed = (proj << 32) | (g as u64);
+                    proj_tuples.push(packed);
+                }
+                proj_tuples.sort_unstable();
+
+                let mut active = Vec::with_capacity(8192);
+                let mut last_proj = u64::MAX;
+                for packed in proj_tuples {
+                    let proj = packed >> 32;
+                    let g = (packed & 0xFFFFFFFF) as u16;
+                    if proj == last_proj {
+                        continue;
+                    }
+                    last_proj = proj;
+                    active.push(g);
+                }
+
+                let rc = std::sync::Arc::new(active);
+
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
+                // Check again in case another thread computed it while we were working
                 if let Some(cached) = cache_mut.get(&c_mask) {
                     std::sync::Arc::clone(cached)
                 } else {
                     self.metrics
                         .cache_misses
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.metrics.pruned_by_equivalence.fetch_add(
+                        self.dict.guesses.len() - rc.len(),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     if cache_mut.len() > 4096 {
                         cache_mut.clear();
                     }
-
-                    let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
-                    for g in 0..self.dict.guesses.len() {
-                        let chars = &self.dict.guess_chars[g];
-                        let mut proj = 0u64;
-                        let l0 = chars[0] as u64;
-                        proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
-                        let l1 = chars[1] as u64;
-                        proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
-                        let l2 = chars[2] as u64;
-                        proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
-                        let l3 = chars[3] as u64;
-                        proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
-                        let l4 = chars[4] as u64;
-                        proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
-
-                        let packed = (proj << 32) | (g as u64);
-                        proj_tuples.push(packed);
-                    }
-                    proj_tuples.sort_unstable();
-
-                    let mut active = Vec::with_capacity(8192);
-                    let mut last_proj = u64::MAX;
-                    for packed in proj_tuples {
-                        let proj = packed >> 32;
-                        let g = (packed & 0xFFFFFFFF) as u16;
-                        if proj == last_proj {
-                            continue;
-                        }
-                        last_proj = proj;
-                        active.push(g);
-                    }
-
-                    self.metrics.pruned_by_equivalence.fetch_add(
-                        self.dict.guesses.len() - active.len(),
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
-
-                    let rc = std::sync::Arc::new(active);
                     cache_mut.insert(c_mask, std::sync::Arc::clone(&rc));
                     rc
                 }
@@ -1060,10 +1065,11 @@ impl<'a> Solver<'a> {
         depth: usize,
         parent_max_k: usize,
     ) -> u32 {
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         // Tighten local beta using the shared global bound from concurrent threads.
         // min_state_val caches against the tightened beta; alpha-beta semantics guarantee
         // any cached lower bound produced this way is <= the true sub-state cost.
-        let beta = beta.min(self.global_beta.load(Ordering::Relaxed));
+        let beta = beta.min(current_global_beta);
 
         self.metrics
             .guesses_evaluated
@@ -1165,33 +1171,26 @@ impl<'a> Solver<'a> {
 
             // Also respect the global beta from concurrent threads: if another thread
             // already found a solution cheaper than beta, tighten our local bound.
-            let effective_beta = if depth == 1 {
-                new_beta.min(
-                    self.global_beta
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                        .saturating_sub(b),
-                )
-            } else {
-                new_beta
-            };
+            let effective_beta = new_beta.min(
+                current_global_beta.saturating_sub(self.current_cost_so_far + b),
+            );
 
             if effective_beta == 0 {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
             }
 
+            self.current_cost_so_far += b;
             let val = self.min_state_val(p, effective_beta, depth + 1, parent_max_k);
+            self.current_cost_so_far -= b;
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return beta;
             }
             // Propagate any tightening from the global beta.
-            if depth == 1 {
-                let global_now = self.global_beta.load(std::sync::atomic::Ordering::Relaxed);
-                if b + val >= global_now {
-                    self.scratch_sorted_sets[depth] = sorted_set;
-                    return beta;
-                }
+            if self.current_cost_so_far + b + val >= current_global_beta {
+                self.scratch_sorted_sets[depth] = sorted_set;
+                return beta;
             }
             cost = b + val;
         }
