@@ -39,20 +39,39 @@ throughput is the bottleneck, the lever is using more of *this one
 machine's* resources better (more of its cores, its GPU, a
 faster-per-core approach), not more machines.
 
+**The 10-hour goal is achievable. Believe that, and keep trying
+indefinitely.** Extrapolations that make it look out of reach (a
+depth-cliff projection, a power-law fit, whatever) are estimates from an
+incomplete search of the optimization space, not a proof of a ceiling -
+treat a discouraging number as "haven't found the right angle yet," not
+as evidence to lose confidence over. There is always another concrete
+thing to try.
+
 **You do not get to unilaterally decide the 10-hour goal is unattainable.**
 That determination is the maintainer's call, not something you declare in
-an issue or a commit message. Before it's even worth raising as a
-question, the obvious single-machine avenues need to have actually been
-tried, not just reasoned
-about: GPU acceleration (the hardware is sitting there unused), and,
-seriously, whether the current architecture/language is even the right
-one for the ceiling you're hitting (a from-scratch rewrite in a different
-language or with a fundamentally different data layout is a legitimate
-thing to actually attempt, not just muse about). If you've genuinely
-exhausted concrete attempts along those lines and still believe the goal
-is unreachable, open an issue laying out *specifically what you tried and
-what the evidence shows* and frame it as a question for the maintainer -
-never as a conclusion you've reached on your own.
+an issue or a commit message - and reaching that conclusion isn't
+actually the goal anyway; continuing to try is. Before it's even worth
+raising as a question, the obvious single-machine avenues need to have
+actually been tried, not just reasoned about:
+
+- **GPU acceleration.** The RTX 2060 is sitting there unused - this is
+  explicitly available to you, not a hypothetical. Reasoning about why it
+  might not suit this workload (thread divergence, an irregular search
+  tree, whatever) is not the same as attempting it, and doesn't count as
+  having tried it. If you notice yourself writing a paragraph explaining
+  why GPU work wouldn't help instead of a paragraph installing drivers and
+  writing a kernel, that's the signal to actually attempt it.
+- Whether the current architecture/language is even the right one for the
+  ceiling you're hitting - a from-scratch rewrite in a different language
+  or with a fundamentally different data layout is a legitimate thing to
+  actually attempt, not just muse about.
+
+If you've genuinely exhausted concrete attempts along those lines and
+still feel stuck, open an issue laying out *specifically what you tried
+and what the evidence shows* and frame it as a question for the
+maintainer, then pick something else to try while you wait - never treat
+a discouraging estimate as a reason to stop or slow down.
+
 If you're not certain a change preserves exactness, it isn't safe to ship.
 
 ## Reporting discipline (read this one twice too)
