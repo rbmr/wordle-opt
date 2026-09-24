@@ -456,7 +456,7 @@ impl<'a> Solver<'a> {
     ///    remaining candidates and evaluated via `min_guess_val`, tightening `best_val` as
     ///    better guesses are found and stopping early once `best_val` reaches the proven
     ///    local lower bound.
-    fn min_state_val(
+    pub fn min_state_val(
         &mut self,
         set: &[usize],
 
@@ -608,6 +608,11 @@ impl<'a> Solver<'a> {
                         last_proj = proj;
                         active.push(g);
                     }
+
+                    self.metrics.pruned_by_equivalence.fetch_add(
+                        self.dict.guesses.len() - active.len(),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
 
                     let rc = std::sync::Arc::new(active);
                     cache_mut.insert(c_mask, std::sync::Arc::clone(&rc));
