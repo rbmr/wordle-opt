@@ -580,26 +580,37 @@ impl<'a> Solver<'a> {
                 
                 // Do the heavy projection/sorting outside the write lock to prevent blocking
                 // other threads trying to access different set_hashes in the same shard.
-                let mut proj_tuples = Vec::with_capacity(self.dict.guesses.len());
+                let mut active = Vec::with_capacity(1024);
+                let table = &mut self.scratch_hash_table[depth];
+                let added_indices = &mut self.scratch_added_indices[depth];
+                added_indices.clear();
+                
                 for g in 0..self.dict.guesses.len() {
                     let mut proj = 0u64;
                     let g_off = g * self.matrix.num_candidates;
                     for &c in set {
                         let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                        proj = proj.rotate_left(5) ^ self.matrix.zobrist[c].wrapping_mul(r as u64 + 1);
+                        proj ^= self.matrix.zobrist[c].wrapping_mul(r as u64 + 1);
                     }
-                    proj_tuples.push((proj, g as u16));
+                    if proj == 0 { proj = 1; }
+                    let mut idx = (proj as usize) & 32767;
+                    loop {
+                        let slot = table[idx];
+                        if slot == 0 {
+                            table[idx] = proj;
+                            active.push(g as u16);
+                            added_indices.push(idx);
+                            break;
+                        }
+                        if slot == proj {
+                            break;
+                        }
+                        idx = (idx + 1) & 32767;
+                    }
                 }
-                proj_tuples.sort_unstable();
-
-                let mut active = Vec::with_capacity(8192);
-                let mut last_proj = u64::MAX;
-                for &(proj, g) in &proj_tuples {
-                    if proj == last_proj {
-                        continue;
-                    }
-                    last_proj = proj;
-                    active.push(g);
+                
+                for &idx in added_indices.iter() {
+                    table[idx] = 0;
                 }
 
                 
