@@ -567,7 +567,7 @@ impl<'a> Solver<'a> {
 
         let mut set_hash = 0u64;
         for &c in set {
-            set_hash = set_hash.rotate_left(13) ^ self.matrix.zobrist[c];
+            set_hash ^= self.matrix.zobrist[c];
         }
 
         let shard_idx = (set_hash as usize) % 64;
