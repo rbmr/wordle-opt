@@ -86,6 +86,7 @@ pub struct Solver<'a> {
     scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     scratch_hash_table: [Vec<u64>; 32],
     scratch_added_indices: [Vec<usize>; 32],
+    scratch_projs: [Vec<u64>; 32],
 }
 
 impl<'a> Solver<'a> {
@@ -228,6 +229,7 @@ impl<'a> Solver<'a> {
             scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
             scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
+            scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
         }
     }
 
@@ -585,15 +587,23 @@ impl<'a> Solver<'a> {
                 let added_indices = &mut self.scratch_added_indices[depth];
                 added_indices.clear();
                 
-                for g in 0..self.dict.guesses.len() {
-                    let mut proj = 0u64;
-                    let g_off = g * self.matrix.num_candidates;
-                    for &c in set {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                        proj ^= self.matrix.zobrist[c].wrapping_mul(r as u64 + 1);
+                let projs = &mut self.scratch_projs[depth];
+                projs.fill(0);
+                let num_guesses = self.dict.guesses.len();
+                
+                for &c in set {
+                    let c_off = c * num_guesses;
+                    let z = self.matrix.zobrist[c];
+                    for g in 0..num_guesses {
+                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
+                        projs[g] ^= z.wrapping_mul(r as u64 + 1);
                     }
+                }
+                
+                for g in 0..num_guesses {
+                    let mut proj = projs[g];
                     if proj == 0 { proj = 1; }
-                    let mut idx = (proj as usize) & 32767;
+                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
                     loop {
                         let slot = table[idx];
                         if slot == 0 {
