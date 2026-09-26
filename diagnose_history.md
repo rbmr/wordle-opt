@@ -56,3 +56,16 @@ real Wordle answers) will cost a similar disproportionate jump. Improving
 cache/transposition-table reuse at depth, or reducing how often the
 search needs to prove a shallower solution impossible before trying
 deeper, is likely a higher-leverage target than per-node micro-optimization.
+## Diagnose Run: commit=ece57b7 host=ubuntu-main seed=20260910 sizes=[1250]
+
+Changes vs baseline (f618964): Zobrist-exact deduplication hashing,
+fail-soft min_state_val, single tight-beta root scan replacing IDA*.
+
+| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn |
+|------|------|-------|------|---------|--------|---------|----------|----------|---------|---------| 
+| 1250 | 133 | 6 | 4009 | 988.731 | 5589280 | 4458070 | 2414721 | 16707486074 | 21808410 |
+
+Depth-6 at N=1250 (old baseline: depth-5 at N=1200). Despite deeper search,
+time dropped ~1.9× vs old N=1200 (1918s→989s), driven by much higher equiv
+pruning (16.7B). BndsPrn dramatically lower (21M vs 4B) because equiv
+pruning eliminates nodes before they reach the bounds check.
