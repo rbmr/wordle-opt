@@ -464,7 +464,7 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     .unwrap();
     writeln!(
         file,
-        "| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn |"
+        "| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn | EquivMiss |"
     )
     .unwrap();
     writeln!(
@@ -474,7 +474,7 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
     .unwrap();
 
     println!(
-        "{:<6} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
+        "{:<6} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
         "Size",
         "MaxK",
         "Depth",
@@ -484,11 +484,12 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         "Guesses",
         "CacheHit",
         "EquivPrn",
-        "BndsPrn"
+        "BndsPrn",
+        "EquivMiss"
     );
     println!(
-        "{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
-        "", "", "", "", "", "", "", "", "", ""
+        "{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
+        "", "", "", "", "", "", "", "", "", "", ""
     );
 
     for &s in sizes {
@@ -523,9 +524,12 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             .pruned_by_equivalence
             .load(std::sync::atomic::Ordering::Relaxed);
         let max_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
+        let equiv_misses = metrics
+            .cache_misses
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         println!(
-            "{:<6} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9}",
+            "{:<6} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
             size,
             max_k,
             max_depth,
@@ -535,11 +539,12 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             guesses,
             cache_hits,
             equiv_pruned,
-            bounds_pruned
+            bounds_pruned,
+            equiv_misses
         );
         writeln!(
             file,
-            "| {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
             size,
             max_k,
             max_depth,
@@ -549,7 +554,8 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
             guesses,
             cache_hits,
             equiv_pruned,
-            bounds_pruned
+            bounds_pruned,
+            equiv_misses
         )
         .unwrap();
     }
