@@ -394,14 +394,14 @@ impl<'a> Solver<'a> {
                 active_guesses.len() - 1
             );
 
-            // Iterative Deepening with Leaps (IDA*-style)
-            let mut current_lb = capacity_bounds_2d[max_k][set.len()];
-            let high = greedy_cost_to_beat;
-            
-            while current_lb < high {
-                let current_beta = std::sync::atomic::AtomicU32::new(current_lb + 1);
-                
-                let (result_beta, min_lb) = crate::parallel_depth::solve_parallel_depth2(
+            // Single tight-beta scan over remaining root candidates.
+            // first_guess_cost is computed exactly above via bucket parallelization,
+            // so it is already the tightest possible upper bound. One pass with
+            // beta=greedy_cost_to_beat prunes almost all root candidates immediately.
+            // IDA* is not needed here: beta is already exact after evaluating first_g.
+            if !root_candidates.is_empty() {
+                let scan_beta = std::sync::atomic::AtomicU32::new(greedy_cost_to_beat);
+                let result_beta = crate::parallel_depth::solve_parallel_depth2(
                     matrix,
                     initial_candidates,
                     dict,
@@ -410,22 +410,13 @@ impl<'a> Solver<'a> {
                     &global_cache,
                     max_k,
                     &capacity_bounds_2d,
-                    &current_beta,
+                    &scan_beta,
                     &root_candidates,
                 );
-                
-                if result_beta <= current_lb {
-                    // A solution was found! 
-                    return result_beta.min(first_guess_cost);
-                }
-                
-                // No solution was found (it failed high).
-                // min_lb contains the minimum lower bound across all evaluated root guesses.
-                // We can safely leap our search bound forward.
-                current_lb = min_lb.max(current_lb + 1);
+                return result_beta.min(first_guess_cost);
             }
-            
-            return high.min(first_guess_cost);
+
+            return first_guess_cost;
         }
 
         initial_greedy_cost

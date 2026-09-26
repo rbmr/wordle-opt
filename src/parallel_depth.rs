@@ -17,8 +17,7 @@ pub fn solve_parallel_depth2<'a>(
     capacity_bounds_2d: &[Vec<u32>],
     beta: &'a AtomicU32,
     active_guesses: &[usize],
-) -> (u32, u32) {
-    let min_lower_bound = AtomicU32::new(u32::MAX);
+) -> u32 {
 
     active_guesses.par_iter().for_each(|&g| {
         let current_beta = beta.load(Ordering::Relaxed);
@@ -57,7 +56,6 @@ pub fn solve_parallel_depth2<'a>(
 
         // Alpha-beta: Early prune the entire guess before sorting/allocating buckets
         if lb >= current_beta {
-            min_lower_bound.fetch_min(lb, Ordering::Relaxed);
             return;
         }
 
@@ -146,10 +144,9 @@ pub fn solve_parallel_depth2<'a>(
                 metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
             }
         }
-        min_lower_bound.fetch_min(total, Ordering::Relaxed);
     });
 
-    (beta.load(Ordering::Relaxed), min_lower_bound.load(Ordering::Relaxed))
+    beta.load(Ordering::Relaxed)
 }
 
 #[cfg(test)]
@@ -188,6 +185,6 @@ mod tests {
             &active_guesses,
         );
         // We just care that it executes without panicking and beta is correctly reduced.
-        assert!(result.0 <= 100);
+        assert!(result <= 100);
     }
 }
