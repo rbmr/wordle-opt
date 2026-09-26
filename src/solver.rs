@@ -259,7 +259,6 @@ impl<'a> Solver<'a> {
         let set = initial_candidates;
 
         let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
-        let beta = AtomicU32::new(initial_greedy_cost);
 
         // Filter active guesses
         let mut active_guesses = Vec::with_capacity(guesses.len());
@@ -359,8 +358,8 @@ impl<'a> Solver<'a> {
                 })
                 .sum();
 
-            let val = base_cost + bucket_costs;
-            beta.fetch_min(val, Ordering::Relaxed);
+            let first_guess_cost = base_cost + bucket_costs;
+            let greedy_cost_to_beat = initial_greedy_cost.min(first_guess_cost);
 
             // Pre-filter alternative root guesses: only retain those whose
             // capacity_bound lb is strictly less than the current beta.
@@ -368,7 +367,6 @@ impl<'a> Solver<'a> {
             // so we can skip it entirely. Note: allowed_guesses (active_guesses)
             // is passed unchanged to sub-problems; this filter only affects
             // which root tasks we launch.
-            let beta_after_first = beta.load(Ordering::Relaxed);
             let root_candidates: Vec<usize> = active_guesses[1..]
                 .iter()
                 .copied()
@@ -386,7 +384,7 @@ impl<'a> Solver<'a> {
                             })
                             .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
                             .sum::<u32>();
-                    lb < beta_after_first
+                    lb < greedy_cost_to_beat
                 })
                 .collect();
 
@@ -396,57 +394,44 @@ impl<'a> Solver<'a> {
                 active_guesses.len() - 1
             );
 
-            // Now evaluate the remaining guesses in parallel with the tight beta.
-            // Each solver holds a reference to the shared beta so it can abort early
-            // if another thread finds a better solution while this one is running.
-            // Hand off to the parallel depth 2 engine
-            crate::parallel_depth::solve_parallel_depth2(
-                matrix,
-                initial_candidates,
-                dict,
-                metrics,
-                equiv_cache,
-                &global_cache,
-                max_k,
-                &capacity_bounds_2d,
-                &beta,
-                &root_candidates,
-            );
+            // Binary search the exact optimal cost (MTD(f)-style zero-window search)
+            let mut low = capacity_bounds_2d[max_k][set.len()];
+            let mut high = greedy_cost_to_beat;
             
-            /*
-                let current_beta = beta.load(Ordering::Relaxed);
-                let mut local_solver = Solver::new_with_global_beta(
+            let mut best_val = high;
+            
+            while low < high {
+                let mid = low + (high - low) / 2;
+                let current_beta = std::sync::atomic::AtomicU32::new(mid + 1);
+                
+                crate::parallel_depth::solve_parallel_depth2(
                     matrix,
-                    max_k,
+                    initial_candidates,
                     dict,
                     metrics,
-                    &capacity_bounds_2d,
-                    &global_cache,
-                    &beta,
                     equiv_cache,
+                    &global_cache,
+                    max_k,
+                    &capacity_bounds_2d,
+                    &current_beta,
+                    &root_candidates,
                 );
-                let val = local_solver.min_guess_val(set, g, current_beta, 1, max_k);
-
-                // atomic min
-                let mut current = beta.load(Ordering::Relaxed);
-                while val < current {
-                    match beta.compare_exchange_weak(
-                        current,
-                        val,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break,
-                        Err(actual) => current = actual,
-                    }
+                
+                let result = current_beta.load(std::sync::atomic::Ordering::Relaxed);
+                if result <= mid {
+                    // A solution <= mid exists! The optimal cost is <= result.
+                    high = result;
+                    best_val = result;
+                } else {
+                    // No solution <= mid exists. The optimal cost is strictly > mid.
+                    low = mid + 1;
                 }
-
-                metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
-            });
-        }*/
+            }
+            
+            return best_val.min(first_guess_cost);
         }
 
-        beta.load(Ordering::Relaxed)
+        initial_greedy_cost
     }
 
     /// Computes the minimum expected cost to solve `set`, minimizing over every guess in
@@ -553,11 +538,6 @@ impl<'a> Solver<'a> {
         }
 
         let mut best_val = beta;
-
-        let mut c_mask = 0u32;
-        for &c in set {
-            c_mask |= self.matrix.candidate_masks[c];
-        }
 
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
         active_guesses.clear();
