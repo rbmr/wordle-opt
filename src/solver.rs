@@ -472,7 +472,7 @@ impl<'a> Solver<'a> {
                 return cached_val;
             } else {
                 if cached_val >= beta {
-                    return beta;
+                    return cached_val;
                 }
                 cached_lower_bound = cached_val;
             }
@@ -1111,7 +1111,7 @@ impl<'a> Solver<'a> {
             self.metrics
                 .pruned_by_bounds
                 .fetch_add(1, Ordering::Relaxed);
-            return beta;
+            return cost;
         }
 
         // Fast slice partition using counting sort
@@ -1161,7 +1161,7 @@ impl<'a> Solver<'a> {
 
             if effective_beta == 0 {
                 self.scratch_sorted_sets[depth] = sorted_set;
-                return beta;
+                return cost;
             }
 
             self.current_cost_so_far += b;
@@ -1169,12 +1169,12 @@ impl<'a> Solver<'a> {
             self.current_cost_so_far -= b;
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
-                return beta;
+                return b + val;
             }
             // Propagate any tightening from the global beta.
             if self.current_cost_so_far + b + val >= current_global_beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
-                return beta;
+                return b + val;
             }
             cost = b + val;
         }
