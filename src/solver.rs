@@ -394,17 +394,14 @@ impl<'a> Solver<'a> {
                 active_guesses.len() - 1
             );
 
-            // Binary search the exact optimal cost (MTD(f)-style zero-window search)
-            let mut low = capacity_bounds_2d[max_k][set.len()];
-            let mut high = greedy_cost_to_beat;
+            // Iterative Deepening with Leaps (IDA*-style)
+            let mut current_lb = capacity_bounds_2d[max_k][set.len()];
+            let high = greedy_cost_to_beat;
             
-            let mut best_val = high;
-            
-            while low < high {
-                let mid = low + (high - low) / 2;
-                let current_beta = std::sync::atomic::AtomicU32::new(mid + 1);
+            while current_lb < high {
+                let current_beta = std::sync::atomic::AtomicU32::new(current_lb + 1);
                 
-                crate::parallel_depth::solve_parallel_depth2(
+                let (result_beta, min_lb) = crate::parallel_depth::solve_parallel_depth2(
                     matrix,
                     initial_candidates,
                     dict,
@@ -417,18 +414,18 @@ impl<'a> Solver<'a> {
                     &root_candidates,
                 );
                 
-                let result = current_beta.load(std::sync::atomic::Ordering::Relaxed);
-                if result <= mid {
-                    // A solution <= mid exists! The optimal cost is <= result.
-                    high = result;
-                    best_val = result;
-                } else {
-                    // No solution <= mid exists. The optimal cost is strictly > mid.
-                    low = mid + 1;
+                if result_beta <= current_lb {
+                    // A solution was found! 
+                    return result_beta.min(first_guess_cost);
                 }
+                
+                // No solution was found (it failed high).
+                // min_lb contains the minimum lower bound across all evaluated root guesses.
+                // We can safely leap our search bound forward.
+                current_lb = min_lb.max(current_lb + 1);
             }
             
-            return best_val.min(first_guess_cost);
+            return high.min(first_guess_cost);
         }
 
         initial_greedy_cost
