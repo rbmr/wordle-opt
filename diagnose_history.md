@@ -69,3 +69,23 @@ Depth-6 at N=1250 (old baseline: depth-5 at N=1200). Despite deeper search,
 time dropped ~1.9× vs old N=1200 (1918s→989s), driven by much higher equiv
 pruning (16.7B). BndsPrn dramatically lower (21M vs 4B) because equiv
 pruning eliminates nodes before they reach the bounds check.
+## Diagnose Run: commit=ca7f4a9 host=ubuntu-main seed=20260910 sizes=[1000,1200]
+
+Comparison run against historical baseline (commit f618964) at matching N values.
+Note: binary was compiled from ece57b7 (ca7f4a9 only changed diagnose_history.md).
+
+| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn |
+|------|------|-------|------|---------|--------|---------|----------|----------|---------|
+| 1000 | 126 | 6 | 3136 | 210.923 | 1667301 | 900475 | 398536 | 3343484633 | 7032653 |
+| 1200 | 131 | 5 | 3817 | 601.021 | 3858360 | 3105521 | 1736940 | 10785973160 | 15611732 |
+
+Old baseline for comparison:
+| 1000 (old) | 124 | 4 | 3133 | 284.483 | 578872 | 890564 | 910717 | 4019518279 | 1414537770 |
+| 1200 (old) | 128 | 5 | 3823 | 1918.391 | 2735481 | 3725692 | 2371173 | 15643910366 | 4068465206 |
+
+N=1000: 1.35× faster (210s vs 284s), but depth changed 4→6.
+N=1200: **3.2× faster** (601s vs 1918s), same depth 5.
+BndsPrn dropped dramatically (7M vs 1.4B for N=1000; 15M vs 4B for N=1200),
+indicating equiv pruning now dominates. EquivMiss not captured (binary reused
+from prior compile; EquivMiss added in ae7d3f2 which only touches lib.rs,
+not yet deployed).
