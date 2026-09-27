@@ -259,11 +259,12 @@ const BENCHMARK_RANDOM_SEED: u64 = 20260906;
 /// "typical" N-word instance, and a single sample can't distinguish a real
 /// improvement from that one input happening to be easy or hard. Multiple
 /// random samples per size give an actual distribution (reported as
-/// min/avg/max cost and time), and because the RNG is seeded with a fixed
-/// constant, the exact same set of samples is drawn on every re-run - so
-/// this stays exactly as reproducible as the deterministic benchmark, it's
-/// just reproducible over a representative spread of inputs instead of one
-/// fixed slice.
+/// min/avg/max cost and time). Each size's whole batch of samples is drawn
+/// from a stream derived from `(BENCHMARK_RANDOM_SEED, size)` alone (see
+/// `subset_rng`), so it stays exactly as reproducible as the deterministic
+/// benchmark, and reproducible independent of what other sizes are in the
+/// same `sizes` list - it's just reproducible over a representative spread
+/// of inputs instead of one fixed slice.
 fn run_benchmark_random(
     matrix: &ResponseMatrix,
     dict: &Dictionary,
@@ -304,7 +305,7 @@ fn run_benchmark_random(
     .unwrap();
     writeln!(
         file,
-        "Each size draws {} independent random subsets (no replacement within a subset) from a single fastrand::Rng seeded with {} at the start of the run, consumed in size order - so this exact sequence of samples is reproduced by any re-run with the same seed, sizes, and sample count.",
+        "Each size draws {} independent random subsets (no replacement within a subset) from a stream derived from (seed={}, size) alone - so a given size's samples are reproduced by any re-run with the same seed and sample count, regardless of what other sizes are requested alongside it.",
         samples_per_size, BENCHMARK_RANDOM_SEED
     )
     .unwrap();
@@ -319,11 +320,11 @@ fn run_benchmark_random(
     )
     .unwrap();
 
-    let mut rng = fastrand::Rng::with_seed(BENCHMARK_RANDOM_SEED);
     let n_candidates = dict.candidates.len();
 
     for &s in sizes {
         let size = s.min(n_candidates);
+        let mut rng = subset_rng(BENCHMARK_RANDOM_SEED, size);
         let mut costs = Vec::with_capacity(samples_per_size);
         let mut times = Vec::with_capacity(samples_per_size);
         let mut states = Vec::with_capacity(samples_per_size);
@@ -426,27 +427,66 @@ fn sample_random_subset(rng: &mut fastrand::Rng, n_candidates: usize, size: usiz
     subset
 }
 
+/// splitmix64 finalizer - avalanches a u64 so nearby inputs don't produce
+/// correlated outputs. Used to combine an independent (seed, size) pair into
+/// a single RNG seed below.
+fn mix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
+/// Derives the RNG stream that draws the subset for one (seed, size) pair.
+///
+/// Both `run_benchmark_random` and the old `run_diagnose` used to share one
+/// `fastrand::Rng` sequentially across an entire `sizes` list, so the subset
+/// drawn for a given size silently depended on what other sizes preceded it
+/// in that specific invocation's list - two runs asking for "the same N"
+/// could draw different subsets if their `sizes` lists differed, which
+/// silently invalidated any comparison keyed only on (seed, N). This was
+/// caught via `diagnose_history.md`: commit f618964 (`sizes=[750, 1000,
+/// 1100, ...]`) and commit ca7f4a9 (`sizes=[1000, 1200]`) drew two different
+/// N=1000 subsets under the identical seed, since N=1000 was the 2nd draw in
+/// one run and the 1st in the other.
+///
+/// Deriving the stream from `(seed, size)` alone - independent of list
+/// content or order - fixes this: the subset for a given size now depends
+/// only on the seed and that size, never on what else was requested
+/// alongside it.
+fn subset_rng(seed: u64, size: usize) -> fastrand::Rng {
+    let combined = mix64(seed) ^ mix64((size as u64).wrapping_mul(0x9E3779B97F4A7C15));
+    fastrand::Rng::with_seed(mix64(combined))
+}
+
 /// Separate fixed seed from `BENCHMARK_RANDOM_SEED`, so a `diagnose` run
 /// never silently shares (or is confused for) `benchmark-random`'s sample
 /// sequence - they draw from independent, but each individually
-/// reproducible, RNG streams.
+/// reproducible, RNG streams. This is the default when `-s` isn't given.
 const DIAGNOSE_SEED: u64 = 20260910;
 
 /// Reports the full `Metrics` breakdown (not just states_evaluated, like
-/// `benchmark-random` does) plus the max branching factor `k` for one random
-/// sample per size in `sizes`. Use this to investigate *why* wall-clock time
-/// scales the way it does relative to cost - e.g. `benchmark-random` showed
-/// avg cost/candidate scaling smoothly from N=1000 to N=1500 while wall time
-/// jumped ~25x, and the aggregate cost metric alone can't say whether that's
-/// weaker equivalence pruning, weaker bounds pruning, worse cache locality,
-/// more guesses needed per state, or a larger branching factor loosening
-/// capacity bounds. This prints the raw counters needed to tell those apart;
-/// it does not try to precompute derived ratios and hand you the answer -
-/// pruned_by_bounds in particular is incremented from two different call
-/// sites in solver.rs (a guess-selection-time prune in min_state_val and a
-/// mid-evaluation prune in min_guess_val) that this doesn't disentangle.
-fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
-    let mut rng = fastrand::Rng::with_seed(DIAGNOSE_SEED);
+/// `benchmark-random` does) plus the max branching factor `k`, for every
+/// (size, seed) pair in the cross product of `sizes` x `seeds`. Use this to
+/// investigate *why* wall-clock time scales the way it does relative to
+/// cost - e.g. `benchmark-random` showed avg cost/candidate scaling smoothly
+/// from N=1000 to N=1500 while wall time jumped ~25x, and the aggregate cost
+/// metric alone can't say whether that's weaker equivalence pruning, weaker
+/// bounds pruning, worse cache locality, more guesses needed per state, or a
+/// larger branching factor loosening capacity bounds. This prints the raw
+/// counters needed to tell those apart; it does not try to precompute
+/// derived ratios and hand you the answer - pruned_by_bounds in particular
+/// is incremented from two different call sites in solver.rs (a
+/// guess-selection-time prune in min_state_val and a mid-evaluation prune in
+/// min_guess_val) that this doesn't disentangle.
+///
+/// Comparing across algorithm versions (commits), sizes, and seeds is only
+/// valid because each (size, seed) pair's subset is drawn from
+/// `subset_rng(seed, size)` - independent of the other pair, and of what
+/// else is in `sizes`/`seeds` for this invocation. `commit` (logged in the
+/// header) is the third axis of that (algo, size, seed) comparison grid -
+/// it's implicit in which checkout you run `diagnose` from, not a runtime
+/// parameter.
+fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], seeds: &[u64]) {
     let n_candidates = dict.candidates.len();
     let commit = git_commit_hash();
     let host = hostname();
@@ -458,24 +498,25 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         .expect("Cannot open diagnose_history.md");
     writeln!(
         file,
-        "## Diagnose Run: commit={} host={} seed={} sizes={:?}",
-        commit, host, DIAGNOSE_SEED, sizes
+        "## Diagnose Run: commit={} host={} sizes={:?} seeds={:?}",
+        commit, host, sizes, seeds
     )
     .unwrap();
     writeln!(
         file,
-        "| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn | EquivMiss |"
+        "| Size | Seed | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn | EquivMiss |"
     )
     .unwrap();
     writeln!(
         file,
-        "|------|------|-------|------|---------|--------|---------|----------|----------|---------|"
+        "|------|------|------|-------|------|---------|--------|---------|----------|----------|---------|"
     )
     .unwrap();
 
     println!(
-        "{:<6} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
+        "{:<6} | {:<20} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
         "Size",
+        "Seed",
         "MaxK",
         "Depth",
         "Cost",
@@ -488,76 +529,81 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
         "EquivMiss"
     );
     println!(
-        "{:-<6}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
-        "", "", "", "", "", "", "", "", "", "", ""
+        "{:-<6}-+-{:-<20}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
+        "", "", "", "", "", "", "", "", "", "", "", ""
     );
 
     for &s in sizes {
         let size = s.min(n_candidates);
-        let subset = sample_random_subset(&mut rng, n_candidates, size);
+        for &seed in seeds {
+            let mut rng = subset_rng(seed, size);
+            let subset = sample_random_subset(&mut rng, n_candidates, size);
 
-        let max_k = heuristic::compute_max_branching_factor(matrix, &subset);
+            let max_k = heuristic::compute_max_branching_factor(matrix, &subset);
 
-        let metrics = Metrics::new();
-        let start = Instant::now();
-        let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
-            std::sync::RwLock::new(
-                std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
+            let metrics = Metrics::new();
+            let start = Instant::now();
+            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+                std::sync::RwLock::new(
+                    std::collections::HashMap::<u64, std::sync::Arc<Vec<u16>>>::new(),
+                )
+            });
+            let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
+            let secs = start.elapsed().as_secs_f64();
+
+            let states = metrics
+                .states_evaluated
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let guesses = metrics
+                .guesses_evaluated
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let cache_hits = metrics
+                .cache_hits
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let bounds_pruned = metrics
+                .pruned_by_bounds
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let equiv_pruned = metrics
+                .pruned_by_equivalence
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let max_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
+            let equiv_misses = metrics
+                .cache_misses
+                .load(std::sync::atomic::Ordering::Relaxed);
+
+            println!(
+                "{:<6} | {:<20} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
+                size,
+                seed,
+                max_k,
+                max_depth,
+                cost,
+                secs,
+                states,
+                guesses,
+                cache_hits,
+                equiv_pruned,
+                bounds_pruned,
+                equiv_misses
+            );
+            writeln!(
+                file,
+                "| {} | {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
+                size,
+                seed,
+                max_k,
+                max_depth,
+                cost,
+                secs,
+                states,
+                guesses,
+                cache_hits,
+                equiv_pruned,
+                bounds_pruned,
+                equiv_misses
             )
-        });
-        let cost = Solver::solve(matrix, &subset, dict, &metrics, &equiv_cache_arr);
-        let secs = start.elapsed().as_secs_f64();
-
-        let states = metrics
-            .states_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let guesses = metrics
-            .guesses_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let cache_hits = metrics
-            .cache_hits
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let bounds_pruned = metrics
-            .pruned_by_bounds
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let equiv_pruned = metrics
-            .pruned_by_equivalence
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let max_depth = metrics.max_depth.load(std::sync::atomic::Ordering::Relaxed);
-        let equiv_misses = metrics
-            .cache_misses
-            .load(std::sync::atomic::Ordering::Relaxed);
-
-        println!(
-            "{:<6} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
-            size,
-            max_k,
-            max_depth,
-            cost,
-            secs,
-            states,
-            guesses,
-            cache_hits,
-            equiv_pruned,
-            bounds_pruned,
-            equiv_misses
-        );
-        writeln!(
-            file,
-            "| {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
-            size,
-            max_k,
-            max_depth,
-            cost,
-            secs,
-            states,
-            guesses,
-            cache_hits,
-            equiv_pruned,
-            bounds_pruned,
-            equiv_misses
-        )
-        .unwrap();
+            .unwrap();
+        }
     }
     writeln!(file).unwrap();
 }
@@ -771,10 +817,13 @@ pub fn run_cli() {
         run_benchmark_random(&matrix, &dict, &sizes, samples);
     } else if args.len() > 1 && args[1] == "diagnose" {
         let mut sizes: Vec<usize> = vec![100, 250, 500, 750, 1000, 1500];
+        let mut seeds: Vec<u64> = vec![DIAGNOSE_SEED];
         let mut i = 2;
         while i + 1 < args.len() {
-            if args[i] == "-n" {
-                sizes = args[i + 1].split(',').map(|s| s.parse().unwrap()).collect();
+            match args[i].as_str() {
+                "-n" => sizes = args[i + 1].split(',').map(|s| s.parse().unwrap()).collect(),
+                "-s" => seeds = args[i + 1].split(',').map(|s| s.parse().unwrap()).collect(),
+                _ => {}
             }
             i += 2;
         }
@@ -786,7 +835,9 @@ pub fn run_cli() {
             std::process::exit(1);
         }
 
-        run_diagnose(&matrix, &dict, &sizes);
+        // Full (size, seed) cross product, taken automatically - see
+        // subset_rng's doc comment for why each pair is independent.
+        run_diagnose(&matrix, &dict, &sizes, &seeds);
     } else if args.len() > 1 && args[1] == "evaluate-root" {
         let root_guess = args[2].parse::<usize>().unwrap();
 
@@ -853,7 +904,7 @@ pub fn run_cli() {
         }
     } else {
         println!(
-            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] | full | verify | evaluate-root <GUESS_ID>>"
+            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID>>"
         );
     }
 }
