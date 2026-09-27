@@ -123,3 +123,25 @@ mod tests {
         assert_eq!(r, Response::new(2, 0, 0, 0, 0));
     }
 }
+
+#[cfg(test)]
+mod extra_core_tests {
+    #![allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn test_all_responses_symmetric() {
+        let g = &Word(*b"tests");
+        let c = &Word(*b"tests");
+        assert_eq!(Response::compute(g, c).0, 121); // 3^5 - 1
+    }
+
+    #[test]
+    fn test_invalid_characters_do_not_panic() {
+        // Technically solver expects a-z, but let's ensure it doesn't crash on uppercase if they slip through
+        let g = &Word(*b"HELLO");
+        let c = &Word(*b"WORLD");
+        let score = Response::compute(g, c).0;
+        assert!(score < 243);
+    }
+}

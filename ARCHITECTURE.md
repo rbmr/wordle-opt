@@ -133,3 +133,19 @@ and against `cargo test --release` (the golden regression tests in
 statistics data - see README.md's Benchmarking section). If a future change
 makes a section here inaccurate, fix the section rather than leaving it as
 aspirational documentation of what used to be true.
+
+## Equivalence Caching and Mathematical Bounds (Added 2026-09)
+
+To eliminate the `O(G log G)` sorting overhead of finding equivalence classes at every node, `wordle-opt` implements a lock-striped globally shared `EquivCache`. 
+- **The Key (`c_mask`)**: The cache uses a 26-bit integer `c_mask` representing the union of all characters present in the remaining candidates.
+- **The Projection (`proj`)**: It maps `c_mask` to a deduplicated list of allowed guesses. The deduplication works by filtering out characters in a guess that do not appear in `c_mask`. If two guesses have identical characters at the identical positions for all characters present in `c_mask`, they are guaranteed to produce the exact same response against the current candidate set. This is a mathematically exact mapping.
+
+Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) and **Phase 2** (non-candidate guesses):
+- `valid_max_k` (the maximum branching factor among Phase 1 guesses) restricts the capacity bounds of trees rooted in a Phase 1 guess.
+- `local_max_k` (the maximum branching factor across all guesses) bounds Phase 2 guesses. 
+- A rigorous `phase2_capacity_bound` is implemented for Phase 2 guesses (since they cannot result in a WIN at depth 1, all candidates are pushed to depth 2 or deeper). The global heuristic lower bound `tight_lb` is perfectly constrained to `min(phase1_capacity_bound, phase2_capacity_bound)`.
+
+
+## 8. Depth-2 Parallel Alpha-Beta (`src/parallel_depth.rs`)
+
+To mitigate the straggler problem at extreme depths (e.g. `N=2340`) where a single root guess can take over 17 hours to evaluate, the solver pushes work-stealing parallelism (`rayon`) down to the `depth=2` layer. Rather than exclusively evaluating root guesses in parallel, `parallel_depth.rs` distributes the top-level subtrees across cores while sharing a unified global beta limit to maximize hardware utilization and prevent individual hard subtrees from stalling the cluster wall clock.

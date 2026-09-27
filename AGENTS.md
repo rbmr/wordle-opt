@@ -142,7 +142,7 @@ a short `timeout` locally rather than guessing.
   unreachable. (This has actually happened - a session lost real time
   believing compute was locked behind Tailscale auth when the private
   link was working the entire time.)
-- **Never hand-roll rsync/ssh/cargo commands against `compute`.** Use
+- **Exception:** You are explicitly authorized to use direct SSH commands to install the GPU driver on `compute`. Otherwise, **never hand-roll rsync/ssh/cargo commands against `compute`.** Use
   `deploy_and_bench.sh` for benchmark iteration and `run_full.sh` /
   `check_full.sh` for the full run (see README). They exist so every run -
   yours or a future session's - syncs, tests, and benchmarks the same

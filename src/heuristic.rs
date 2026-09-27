@@ -137,6 +137,7 @@ mod expected_remaining_tests {
             candidates: words.clone(),
             guess_chars: vec![[0, 1, 2, 3, 4], [0, 1, 2, 3, 5], [23, 24, 25, 0, 1]],
             candidate_to_guess: vec![0, 1, 2],
+            guess_to_candidate: vec![u16::MAX; words.len()],
         };
         let matrix = ResponseMatrix::new(&dict);
         let set = vec![0, 1, 2];
@@ -149,6 +150,29 @@ mod expected_remaining_tests {
         let exp0 = compute_expected_remaining(&matrix, &set, 0);
         assert_eq!(exp0, 3);
     }
+}
+
+pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    if root_k <= 1 || max_k <= 1 {
+        return capacity_bound(n, max_k);
+    }
+    let mut remaining = n as u32;
+    let mut cost = 0;
+    let mut depth = 2; // Phase 2 guess means no WIN at depth 1
+
+    let mut capacity_at_depth = root_k as u32;
+
+    while remaining > 0 {
+        let take = remaining.min(capacity_at_depth);
+        cost += take * depth;
+        remaining -= take;
+        depth += 1;
+        capacity_at_depth = capacity_at_depth.saturating_mul(max_k as u32 - 1);
+    }
+    cost
 }
 
 pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
@@ -210,5 +234,32 @@ mod tight_capacity_bounds_tests {
             tight_cost,
             loose_cost
         );
+    }
+}
+
+#[cfg(test)]
+mod phase2_capacity_bounds_tests {
+    use super::*;
+
+    #[test]
+    fn test_phase2_capacity_bound_is_correct() {
+        // We proved mathematically that if n=5, valid_max_k=2, local_max_k=3,
+        // a Phase 2 guess can achieve 12, but tight_capacity_bound gives 13.
+        let phase1_lb = tight_capacity_bound(5, 2, 3);
+        assert_eq!(phase1_lb, 13, "Phase 1 bound is 13");
+
+        let phase2_lb = phase2_capacity_bound(5, 3, 3);
+        assert_eq!(phase2_lb, 12, "Phase 2 bound is 12");
+
+        let tight_lb = phase1_lb.min(phase2_lb);
+        assert_eq!(
+            tight_lb, 12,
+            "Minimum bound correctly prevents Phase 2 pruning"
+        );
+    }
+
+    #[test]
+    fn test_phase2_zero_candidates() {
+        assert_eq!(phase2_capacity_bound(0, 3, 3), 0);
     }
 }

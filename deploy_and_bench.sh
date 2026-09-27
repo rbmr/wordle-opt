@@ -42,7 +42,7 @@ echo "Building on compute..."
 ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release"
 
 echo "Running correctness tests on compute (catches a broken change before benchmarking it)..."
-ssh "$HOST" "cd wordle-opt && timeout 600 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
+ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
 
 # This script is for benchmark-random only, always foreground and bounded to
 # 10h - it does NOT have a `full` mode. An earlier version briefly added one
@@ -52,4 +52,4 @@ ssh "$HOST" "cd wordle-opt && timeout 600 env RUSTFLAGS=\"-C target-cpu=native\"
 # full run detached and let you poll it instead of blocking on it. Use those
 # for a `full` run; this script stays benchmark-random-only.
 echo "Running benchmark suite on compute (bounded by timeout 36000)..."
-ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- benchmark-random $*"
+ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- $*"

@@ -5,6 +5,9 @@ use crate::matrix::ResponseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
+pub type EquivCache =
+    [std::sync::RwLock<std::collections::HashMap<u64, std::sync::Arc<Vec<u16>>>>; 64];
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
 
@@ -23,6 +26,7 @@ pub struct Metrics {
     pub pruned_by_bounds: AtomicUsize,
     pub pruned_by_equivalence: AtomicUsize,
     pub cache_hits: AtomicUsize,
+    pub cache_misses: AtomicUsize,
     /// Number of root-level first guesses fully evaluated (for progress reporting).
     pub root_guesses_done: AtomicUsize,
 }
@@ -42,6 +46,7 @@ impl Metrics {
             pruned_by_bounds: AtomicUsize::new(0),
             pruned_by_equivalence: AtomicUsize::new(0),
             cache_hits: AtomicUsize::new(0),
+            cache_misses: AtomicUsize::new(0),
             root_guesses_done: AtomicUsize::new(0),
         }
     }
@@ -64,22 +69,24 @@ pub struct Solver<'a> {
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     capacity_bounds_2d: &'a [Vec<u32>],
-    pub seen_projections: [rustc_hash::FxHashSet<u32>; 32],
+
     pub cache: &'a crate::cache::GlobalCache,
     /// Shared global upper bound across all parallel root-level tasks.
     /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
+    equiv_cache: &'a EquivCache,
+    pub current_cost_so_far: u32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    /// Max depth is naturally bounded, but we provide 32 levels to be safe against deep suboptimal branches.
-    scratch_tuples: [Vec<(usize, u32, u32, usize)>; 32],
-    pub scratch_set_projs: [Vec<u32>; 32],
-    scratch_proj_tuples: [Vec<u64>; 32],
+    pub scratch_is_in_set: [Vec<bool>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
     scratch_phase2_guesses: [Vec<usize>; 32],
     scratch_phase1_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
+    scratch_hash_table: [Vec<u64>; 32],
+    scratch_added_indices: [Vec<usize>; 32],
+    scratch_projs: [Vec<u64>; 32],
 }
 
 impl<'a> Solver<'a> {
@@ -177,6 +184,7 @@ impl<'a> Solver<'a> {
         metrics: &'a Metrics,
         capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
+        equiv_cache: &'a EquivCache,
     ) -> Self {
         Self::new_with_global_beta(
             matrix,
@@ -186,9 +194,11 @@ impl<'a> Solver<'a> {
             capacity_bounds_2d,
             cache,
             &SENTINEL_BETA,
+            equiv_cache,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_global_beta(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -197,25 +207,29 @@ impl<'a> Solver<'a> {
         capacity_bounds_2d: &'a [Vec<u32>],
         cache: &'a crate::cache::GlobalCache,
         global_beta: &'a AtomicU32,
+        equiv_cache: &'a EquivCache,
     ) -> Self {
         Self {
             matrix,
             max_k,
             dict,
             metrics,
-            seen_projections: std::array::from_fn(|_| rustc_hash::FxHashSet::default()),
             capacity_bounds_2d,
             cache,
             global_beta,
-            scratch_tuples: std::array::from_fn(|_| Vec::new()),
-            scratch_set_projs: std::array::from_fn(|_| Vec::new()),
-            scratch_proj_tuples: std::array::from_fn(|_| Vec::new()),
+            equiv_cache,
+            current_cost_so_far: 0,
+
+            scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
             scratch_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
             scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
             scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
+            scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
+            scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
+            scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
         }
     }
 
@@ -228,8 +242,10 @@ impl<'a> Solver<'a> {
         initial_candidates: &[usize],
         dict: &'a crate::dict::Dictionary,
         metrics: &'a Metrics,
+        equiv_cache: &'a EquivCache,
     ) -> u32 {
         let cache_size = if crate::is_compute_host() {
+            // 512 M entries × 8 bytes each = 4 GB. Compute has 14 GB available.
             512 * 1024 * 1024
         } else {
             64 * 1024 * 1024
@@ -243,7 +259,6 @@ impl<'a> Solver<'a> {
         let set = initial_candidates;
 
         let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
-        let beta = AtomicU32::new(initial_greedy_cost);
 
         // Filter active guesses
         let mut active_guesses = Vec::with_capacity(guesses.len());
@@ -335,15 +350,16 @@ impl<'a> Solver<'a> {
                         metrics,
                         &capacity_bounds_2d,
                         &global_cache,
+                        equiv_cache,
                     );
                     // For a bucket, the cost is evaluated via min_state_val.
                     // We use a very loose beta since we evaluate in parallel.
-                    solver.min_state_val(&bucket, &active_guesses, initial_greedy_cost, 2, max_k)
+                    solver.min_state_val(&bucket, initial_greedy_cost, 2, max_k)
                 })
                 .sum();
 
-            let val = base_cost + bucket_costs;
-            beta.fetch_min(val, Ordering::Relaxed);
+            let first_guess_cost = base_cost + bucket_costs;
+            let greedy_cost_to_beat = initial_greedy_cost.min(first_guess_cost);
 
             // Pre-filter alternative root guesses: only retain those whose
             // capacity_bound lb is strictly less than the current beta.
@@ -351,7 +367,6 @@ impl<'a> Solver<'a> {
             // so we can skip it entirely. Note: allowed_guesses (active_guesses)
             // is passed unchanged to sub-problems; this filter only affects
             // which root tasks we launch.
-            let beta_after_first = beta.load(Ordering::Relaxed);
             let root_candidates: Vec<usize> = active_guesses[1..]
                 .iter()
                 .copied()
@@ -369,7 +384,7 @@ impl<'a> Solver<'a> {
                             })
                             .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
                             .sum::<u32>();
-                    lb < beta_after_first
+                    lb < greedy_cost_to_beat
                 })
                 .collect();
 
@@ -379,42 +394,32 @@ impl<'a> Solver<'a> {
                 active_guesses.len() - 1
             );
 
-            // Now evaluate the remaining guesses in parallel with the tight beta.
-            // Each solver holds a reference to the shared beta so it can abort early
-            // if another thread finds a better solution while this one is running.
-            root_candidates.par_iter().for_each(|&g| {
-                let current_beta = beta.load(Ordering::Relaxed);
-                let mut local_solver = Solver::new_with_global_beta(
+            // Single tight-beta scan over remaining root candidates.
+            // first_guess_cost is computed exactly above via bucket parallelization,
+            // so it is already the tightest possible upper bound. One pass with
+            // beta=greedy_cost_to_beat prunes almost all root candidates immediately.
+            // IDA* is not needed here: beta is already exact after evaluating first_g.
+            if !root_candidates.is_empty() {
+                let scan_beta = std::sync::atomic::AtomicU32::new(greedy_cost_to_beat);
+                let result_beta = crate::parallel_depth::solve_parallel_depth2(
                     matrix,
-                    max_k,
+                    initial_candidates,
                     dict,
                     metrics,
-                    &capacity_bounds_2d,
+                    equiv_cache,
                     &global_cache,
-                    &beta,
+                    max_k,
+                    &capacity_bounds_2d,
+                    &scan_beta,
+                    &root_candidates,
                 );
-                let val =
-                    local_solver.min_guess_val(set, g, &active_guesses, current_beta, 1, max_k);
+                return result_beta.min(first_guess_cost);
+            }
 
-                // atomic min
-                let mut current = beta.load(Ordering::Relaxed);
-                while val < current {
-                    match beta.compare_exchange_weak(
-                        current,
-                        val,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break,
-                        Err(actual) => current = actual,
-                    }
-                }
-
-                metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
-            });
+            return first_guess_cost;
         }
 
-        beta.load(Ordering::Relaxed)
+        initial_greedy_cost
     }
 
     /// Computes the minimum expected cost to solve `set`, minimizing over every guess in
@@ -432,10 +437,10 @@ impl<'a> Solver<'a> {
     ///    remaining candidates and evaluated via `min_guess_val`, tightening `best_val` as
     ///    better guesses are found and stopping early once `best_val` reaches the proven
     ///    local lower bound.
-    fn min_state_val(
+    pub fn min_state_val(
         &mut self,
         set: &[usize],
-        allowed_guesses: &[usize],
+
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -458,7 +463,7 @@ impl<'a> Solver<'a> {
                 return cached_val;
             } else {
                 if cached_val >= beta {
-                    return beta;
+                    return cached_val;
                 }
                 cached_lower_bound = cached_val;
             }
@@ -522,43 +527,6 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        // Capacity hint: the number of non-equivalent, non-useless guesses is bounded by
-        // allowed_guesses.len() but for small candidate sets (common at depth 3+) the
-        // actual count is much smaller. Over-allocating to allowed_guesses.len() wastes
-        // 100s of KB per call when depth is 3+ and the set is tiny. A cap of c_len * 300
-        // covers realistic non-equivalent-guess counts; if exceeded, the Vec grows normally.
-        let cap = allowed_guesses.len().min(c_len * 300 + 64);
-        let mut active_tuples = std::mem::take(&mut self.scratch_tuples[depth]);
-        active_tuples.clear();
-        if active_tuples.capacity() < cap {
-            active_tuples.reserve(cap - active_tuples.capacity());
-        }
-        let mut c_mask = 0u32;
-        for &c in set {
-            c_mask |= self.matrix.candidate_masks[c];
-        }
-
-        let mut set_projs = std::mem::take(&mut self.scratch_set_projs[depth]);
-        set_projs.clear();
-        for i in 0..c_len {
-            let g = self.dict.candidate_to_guess[set[i]];
-            let mut proj = 0u32;
-            let chars = &self.dict.guess_chars[g];
-            let l0 = chars[0] as u32;
-            proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-            let l1 = chars[1] as u32;
-            proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-            let l2 = chars[2] as u32;
-            proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-            let l3 = chars[3] as u32;
-            proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-            let l4 = chars[4] as u32;
-            proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-            set_projs.push(proj);
-        }
-
-        let mut equiv_pruned = 0;
-
         let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
         active_guesses.clear();
 
@@ -566,51 +534,102 @@ impl<'a> Solver<'a> {
         phase1_guesses.clear();
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
-        
-        let mut proj_tuples = std::mem::take(&mut self.scratch_proj_tuples[depth]);
-        proj_tuples.clear();
 
-        for &g in allowed_guesses {
-            let chars = &self.dict.guess_chars[g];
-            let mut proj = 0u64;
-            let l0 = chars[0] as u64;
-            proj |= (l0 + 1) * ((c_mask as u64 >> l0) & 1);
-            let l1 = chars[1] as u64;
-            proj |= ((l1 + 1) * ((c_mask as u64 >> l1) & 1)) << 5;
-            let l2 = chars[2] as u64;
-            proj |= ((l2 + 1) * ((c_mask as u64 >> l2) & 1)) << 10;
-            let l3 = chars[3] as u64;
-            proj |= ((l3 + 1) * ((c_mask as u64 >> l3) & 1)) << 15;
-            let l4 = chars[4] as u64;
-            proj |= ((l4 + 1) * ((c_mask as u64 >> l4) & 1)) << 20;
-            
-            // pack proj (25 bits) and g (16 bits) into u64. We put proj in the high bits so sorting by u64 sorts by proj!
-            let packed = (proj << 32) | (g as u64);
-            proj_tuples.push(packed);
+        let mut set_hash = 0u64;
+        for &c in set {
+            set_hash ^= self.matrix.zobrist[c];
         }
-        
-        proj_tuples.sort_unstable();
-        
-        let mut last_proj = u64::MAX;
-        for &packed in &proj_tuples {
-            let proj = packed >> 32;
-            let g = (packed & 0xFFFFFFFF) as usize;
-            
-            if proj == last_proj {
-                equiv_pruned += 1;
-                continue;
-            }
-            last_proj = proj;
-            
-            active_guesses.push(g);
-            let mut in_set = false;
-            let proj32 = proj as u32;
-            for i in 0..c_len {
-                if proj32 == set_projs[i] {
-                    in_set = true;
-                    break;
+
+        let shard_idx = (set_hash as usize) % 64;
+        let active_guesses_rc = {
+            let cache = self.equiv_cache[shard_idx].read().unwrap();
+            if let Some(cached) = cache.get(&set_hash) {
+                std::sync::Arc::clone(cached)
+            } else {
+                drop(cache);
+                
+                // Do the heavy projection/sorting outside the write lock to prevent blocking
+                // other threads trying to access different set_hashes in the same shard.
+                let mut active = Vec::with_capacity(1024);
+                let table = &mut self.scratch_hash_table[depth];
+                let added_indices = &mut self.scratch_added_indices[depth];
+                added_indices.clear();
+                
+                let projs = &mut self.scratch_projs[depth];
+                projs.fill(0);
+                let num_guesses = self.dict.guesses.len();
+                
+                for &c in set {
+                    let c_off = c * num_guesses;
+                    let z = self.matrix.zobrist[c];
+                    for g in 0..num_guesses {
+                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
+                        projs[g] ^= z.wrapping_mul(r as u64 + 1);
+                    }
+                }
+                
+                for g in 0..num_guesses {
+                    let mut proj = projs[g];
+                    if proj == 0 { proj = 1; }
+                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
+                    loop {
+                        let slot = table[idx];
+                        if slot == 0 {
+                            table[idx] = proj;
+                            active.push(g as u16);
+                            added_indices.push(idx);
+                            break;
+                        }
+                        if slot == proj {
+                            break;
+                        }
+                        idx = (idx + 1) & 32767;
+                    }
+                }
+                
+                for &idx in added_indices.iter() {
+                    table[idx] = 0;
+                }
+
+                
+                let rc = std::sync::Arc::new(active);
+
+                let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
+                // Check again in case another thread computed it while we were working
+                if let Some(cached) = cache_mut.get(&set_hash) {
+                    std::sync::Arc::clone(cached)
+                } else {
+                    self.metrics
+                        .cache_misses
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.metrics.pruned_by_equivalence.fetch_add(
+                        self.dict.guesses.len() - rc.len(),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    if cache_mut.len() > 4096 {
+                        cache_mut.clear();
+                    }
+                    cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
+                    rc
                 }
             }
+        };
+
+        // Fast set-membership check
+        let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
+        for &c in set {
+            is_in_set[c] = true;
+        }
+
+        for &g16 in active_guesses_rc.as_ref() {
+            let g = g16 as usize;
+            active_guesses.push(g);
+            let c_idx = self.dict.guess_to_candidate[g];
+            let in_set = if c_idx != u16::MAX {
+                is_in_set[c_idx as usize]
+            } else {
+                false
+            };
             if in_set {
                 phase1_guesses.push(g);
             } else {
@@ -618,14 +637,17 @@ impl<'a> Solver<'a> {
             }
         }
 
-        self.scratch_set_projs[depth] = set_projs;
+        for &c in set {
+            is_in_set[c] = false;
+        }
+        self.scratch_is_in_set[depth] = is_in_set;
 
         self.metrics
             .pruned_by_equivalence
-            .fetch_add(equiv_pruned, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(0, std::sync::atomic::Ordering::Relaxed);
 
         let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
-        let mut counts = [0u16; 243];
+        let mut counts = [0u16; 2048];
         let mut non_empty = [0u8; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
@@ -633,14 +655,17 @@ impl<'a> Solver<'a> {
         let mut phase2_tuples = std::mem::take(&mut self.scratch_phase2_tuples[depth]);
         phase2_tuples.clear();
 
+        let mut local_max_k = 0;
+        let mut valid_max_k = 0;
+
         if set.len() <= 16 {
             for &g in &phase1_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
                 let mut num_non_empty = 0;
-                let g_offset = g * self.matrix.num_candidates;
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    let c_off = c * self.matrix.num_guesses;
+                    let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
                     unsafe {
                         if *counts.get_unchecked(r) == 0 {
                             *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
@@ -659,21 +684,96 @@ impl<'a> Solver<'a> {
                     counts[r_idx] = 0;
                     expected_rem += (count as u32) * (count as u32);
                     if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                     }
                 }
+                if num_non_empty > local_max_k {
+                    local_max_k = num_non_empty;
+                }
                 if lb_cost < beta {
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
             }
         } else {
-            for &g in &phase1_guesses {
+            #[allow(clippy::chunks_exact_to_as_chunks)]
+            let mut chunks = phase1_guesses.chunks_exact(8);
+            for chunk in chunks.by_ref() {
+                let g0 = chunk[0];
+                let g1 = chunk[1];
+                let g2 = chunk[2];
+                let g3 = chunk[3];
+                let g4 = chunk[4];
+                let g5 = chunk[5];
+                let g6 = chunk[6];
+                let g7 = chunk[7];
+                for &c in set {
+                    let c_off = c * self.matrix.num_guesses;
+                    let r0 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g0).0 as usize };
+                    let r1 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g1).0 as usize };
+                    let r2 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g2).0 as usize };
+                    let r3 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g3).0 as usize };
+                    let r4 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g4).0 as usize };
+                    let r5 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g5).0 as usize };
+                    let r6 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g6).0 as usize };
+                    let r7 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g7).0 as usize };
+                    unsafe {
+                        *counts.get_unchecked_mut(r0) += 1;
+                        *counts.get_unchecked_mut(256 + r1) += 1;
+                        *counts.get_unchecked_mut(512 + r2) += 1;
+                        *counts.get_unchecked_mut(768 + r3) += 1;
+                        *counts.get_unchecked_mut(1024 + r4) += 1;
+                        *counts.get_unchecked_mut(1280 + r5) += 1;
+                        *counts.get_unchecked_mut(1536 + r6) += 1;
+                        *counts.get_unchecked_mut(1792 + r7) += 1;
+                    }
+                }
+                for (idx, &g) in chunk.iter().enumerate() {
+                    let offset = idx * 256;
+                    let mut num_non_empty = 0;
+                    for r in 0..243 {
+                        if counts[offset + r] > 0 {
+                            non_empty[num_non_empty] = r as u8;
+                            num_non_empty += 1;
+                        }
+                    }
+                    if num_non_empty == 1 {
+                        counts[offset + non_empty[0] as usize] = 0;
+                        continue;
+                    }
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[offset + r_idx];
+                        counts[offset + r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta {
+                        if num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                        phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    }
+                }
+            }
+            for &g in chunks.remainder() {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
-                let g_offset = g * self.matrix.num_candidates;
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                    unsafe { *counts.get_unchecked_mut(r) += 1; }
+                    let c_off = c * self.matrix.num_guesses;
+                    let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
+                    unsafe {
+                        *counts.get_unchecked_mut(r) += 1;
+                    }
                 }
                 let mut num_non_empty = 0;
                 for r in 0..243 {
@@ -692,10 +792,16 @@ impl<'a> Solver<'a> {
                     counts[r_idx] = 0;
                     expected_rem += (count as u32) * (count as u32);
                     if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
+                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                     }
                 }
+                if num_non_empty > local_max_k {
+                    local_max_k = num_non_empty;
+                }
                 if lb_cost < beta {
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
             }
@@ -709,7 +815,7 @@ impl<'a> Solver<'a> {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
-            let val = self.min_guess_val(set, _g, &active_guesses, best_val, depth, self.max_k);
+            let val = self.min_guess_val(set, _g, best_val, depth, parent_max_k);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -719,56 +825,164 @@ impl<'a> Solver<'a> {
         }
 
         if best_val > local_lb {
-            for &g in &phase2_guesses {
-                let mut expected_rem = 0u32;
-                let mut lb_cost = c_len as u32;
-                let mut num_non_empty = 0;
-                let g_offset = g * self.matrix.num_candidates;
-                for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                    unsafe {
-                        if *counts.get_unchecked(r) == 0 {
-                            *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+            if set.len() <= 16 {
+                for &g in &phase2_guesses {
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    let mut num_non_empty = 0;
+                    for &c in set {
+                        let c_off = c * self.matrix.num_guesses;
+                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
+                        unsafe {
+                            if *counts.get_unchecked(r) == 0 {
+                                *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                                num_non_empty += 1;
+                            }
+                            *counts.get_unchecked_mut(r) += 1;
+                        }
+                    }
+                    if num_non_empty == 1 {
+                        counts[non_empty[0] as usize] = 0;
+                        continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[r_idx];
+                        counts[r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta && num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    }
+                }
+            } else {
+                #[allow(clippy::chunks_exact_to_as_chunks)]
+                let mut chunks = phase2_guesses.chunks_exact(8);
+                for chunk in chunks.by_ref() {
+                    let g0 = chunk[0];
+                    let g1 = chunk[1];
+                    let g2 = chunk[2];
+                    let g3 = chunk[3];
+                    let g4 = chunk[4];
+                    let g5 = chunk[5];
+                    let g6 = chunk[6];
+                    let g7 = chunk[7];
+                    for &c in set {
+                        let c_off = c * self.matrix.num_guesses;
+                        let r0 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g0).0 as usize };
+                        let r1 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g1).0 as usize };
+                        let r2 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g2).0 as usize };
+                        let r3 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g3).0 as usize };
+                        let r4 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g4).0 as usize };
+                        let r5 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g5).0 as usize };
+                        let r6 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g6).0 as usize };
+                        let r7 = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g7).0 as usize };
+                        unsafe {
+                            *counts.get_unchecked_mut(r0) += 1;
+                            *counts.get_unchecked_mut(256 + r1) += 1;
+                            *counts.get_unchecked_mut(512 + r2) += 1;
+                            *counts.get_unchecked_mut(768 + r3) += 1;
+                            *counts.get_unchecked_mut(1024 + r4) += 1;
+                            *counts.get_unchecked_mut(1280 + r5) += 1;
+                            *counts.get_unchecked_mut(1536 + r6) += 1;
+                            *counts.get_unchecked_mut(1792 + r7) += 1;
+                        }
+                    }
+                    for (idx, &g) in chunk.iter().enumerate() {
+                        let offset = idx * 256;
+                        let mut num_non_empty = 0;
+                        for r in 0..243 {
+                            if counts[offset + r] > 0 {
+                                non_empty[num_non_empty] = r as u8;
+                                num_non_empty += 1;
+                            }
+                        }
+                        if num_non_empty == 1 {
+                            counts[offset + non_empty[0] as usize] = 0;
+                            continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut lb_cost = c_len as u32;
+                        for i in 0..num_non_empty {
+                            let r_idx = non_empty[i] as usize;
+                            let count = counts[offset + r_idx];
+                            counts[offset + r_idx] = 0;
+                            expected_rem += (count as u32) * (count as u32);
+                            if r_idx != crate::core::Response::WIN.0 as usize {
+                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                            }
+                        }
+                        if num_non_empty > local_max_k {
+                            local_max_k = num_non_empty;
+                        }
+                        if lb_cost < beta && num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                        if lb_cost < best_val {
+                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        }
+                    }
+                }
+                for &g in chunks.remainder() {
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    let g_offset = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        unsafe {
+                            *counts.get_unchecked_mut(r) += 1;
+                        }
+                    }
+                    let mut num_non_empty = 0;
+                    for r in 0..243 {
+                        if counts[r] > 0 {
+                            non_empty[num_non_empty] = r as u8;
                             num_non_empty += 1;
                         }
-                        *counts.get_unchecked_mut(r) += 1;
+                    }
+                    if num_non_empty == 1 {
+                        counts[non_empty[0] as usize] = 0;
+                        continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[r_idx];
+                        counts[r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta && num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     }
                 }
-                if num_non_empty == 1 {
-                    counts[non_empty[0] as usize] = 0;
-                    continue;
-                }
-                for i in 0..num_non_empty {
-                    let r_idx = non_empty[i] as usize;
-                    let count = counts[r_idx];
-                    counts[r_idx] = 0;
-                    expected_rem += (count as u32) * (count as u32);
-                    if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[self.max_k][count as usize];
-                    }
-                }
-                phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
             }
             phase2_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
-
-            let mut local_max_k = 0;
-            let mut valid_max_k = 0;
-
-            for &(_, _, g_lb, non_empty) in phase1_tuples.iter().chain(phase2_tuples.iter()) {
-                if non_empty > local_max_k {
-                    local_max_k = non_empty;
-                }
-                if g_lb < beta && non_empty > valid_max_k {
-                    valid_max_k = non_empty;
-                }
-            }
 
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
             if base_lb > local_lb {
                 local_lb = base_lb;
             }
 
-            let tight_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
+            let phase1_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
+            let phase2_lb = heuristic::phase2_capacity_bound(c_len, local_max_k, local_max_k);
+            let tight_lb = phase1_lb.min(phase2_lb);
             if tight_lb > local_lb {
                 local_lb = tight_lb;
             }
@@ -783,8 +997,7 @@ impl<'a> Solver<'a> {
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
-                    let val =
-                        self.min_guess_val(set, _g, &active_guesses, best_val, depth, local_max_k);
+                    let val = self.min_guess_val(set, _g, best_val, depth, local_max_k);
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -796,7 +1009,7 @@ impl<'a> Solver<'a> {
         }
 
         self.scratch_guesses[depth] = active_guesses;
-        self.scratch_proj_tuples[depth] = proj_tuples;
+
         self.scratch_phase1_guesses[depth] = phase1_guesses;
         self.scratch_phase2_guesses[depth] = phase2_guesses;
         self.scratch_phase1_tuples[depth] = phase1_tuples;
@@ -822,15 +1035,16 @@ impl<'a> Solver<'a> {
         &mut self,
         set: &[usize],
         guess: usize,
-        allowed_guesses: &[usize],
+
         beta: u32,
         depth: usize,
         parent_max_k: usize,
     ) -> u32 {
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         // Tighten local beta using the shared global bound from concurrent threads.
         // min_state_val caches against the tightened beta; alpha-beta semantics guarantee
         // any cached lower bound produced this way is <= the true sub-state cost.
-        let beta = beta.min(self.global_beta.load(Ordering::Relaxed));
+        let beta = beta.min(current_global_beta);
 
         self.metrics
             .guesses_evaluated
@@ -843,11 +1057,13 @@ impl<'a> Solver<'a> {
         for &c in set {
             let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
             unsafe {
-                if *counts.get_unchecked(r) == 0 {
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                    num_non_empty += 1;
-                }
                 *counts.get_unchecked_mut(r) += 1;
+            }
+        }
+        for r in 0..243 {
+            if counts[r] > 0 {
+                non_empty_indices[num_non_empty] = r as u8;
+                num_non_empty += 1;
             }
         }
 
@@ -886,29 +1102,27 @@ impl<'a> Solver<'a> {
             self.metrics
                 .pruned_by_bounds
                 .fetch_add(1, Ordering::Relaxed);
-            return beta;
+            return cost;
         }
 
         // Fast slice partition using counting sort
         let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
         sorted_set.clear();
-        if sorted_set.capacity() < set.len() {
-            sorted_set.reserve(set.len() - sorted_set.capacity());
-        }
+        sorted_set.clear();
         sorted_set.resize(set.len(), 0);
 
-        let mut offsets = [0usize; 243];
+        let mut offsets = [0u16; 243];
         let mut curr = 0;
         for i in 0..num_non_empty {
             let r = non_empty_indices[i] as usize;
             offsets[r] = curr;
-            curr += counts[r] as usize;
+            curr += counts[r];
         }
 
         let mut current_offsets = offsets;
         for &c in set {
-            let r_idx = self.matrix.get(guess, c).0 as usize;
-            let pos = current_offsets[r_idx];
+            let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+            let pos = current_offsets[r_idx] as usize;
             sorted_set[pos] = c;
             current_offsets[r_idx] += 1;
         }
@@ -923,7 +1137,7 @@ impl<'a> Solver<'a> {
                 continue;
             }
 
-            let start = offsets[r_idx];
+            let start = offsets[r_idx] as usize;
             let end = start + p_len;
             let p = &sorted_set[start..end];
 
@@ -932,34 +1146,26 @@ impl<'a> Solver<'a> {
 
             // Also respect the global beta from concurrent threads: if another thread
             // already found a solution cheaper than beta, tighten our local bound.
-            let effective_beta = if depth == 1 {
-                new_beta.min(
-                    self.global_beta
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                        .saturating_sub(b),
-                )
-            } else {
-                new_beta
-            };
+            let effective_beta = new_beta.min(
+                current_global_beta.saturating_sub(self.current_cost_so_far + b),
+            );
 
             if effective_beta == 0 {
                 self.scratch_sorted_sets[depth] = sorted_set;
-                return beta;
+                return cost;
             }
 
-            let val =
-                self.min_state_val(p, allowed_guesses, effective_beta, depth + 1, parent_max_k);
+            self.current_cost_so_far += b;
+            let val = self.min_state_val(p, effective_beta, depth + 1, parent_max_k);
+            self.current_cost_so_far -= b;
             if b + val >= beta {
                 self.scratch_sorted_sets[depth] = sorted_set;
-                return beta;
+                return b + val;
             }
             // Propagate any tightening from the global beta.
-            if depth == 1 {
-                let global_now = self.global_beta.load(std::sync::atomic::Ordering::Relaxed);
-                if b + val >= global_now {
-                    self.scratch_sorted_sets[depth] = sorted_set;
-                    return beta;
-                }
+            if self.current_cost_so_far + b + val >= current_global_beta {
+                self.scratch_sorted_sets[depth] = sorted_set;
+                return b + val;
             }
             cost = b + val;
         }
@@ -978,6 +1184,25 @@ impl<'a> Solver<'a> {
 
 #[cfg(test)]
 mod tests {
+    
+    
+    #[test]
+    fn test_golden_n800_exact_cost() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates: Vec<usize> = (0..800).collect();
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
+        assert_eq!(
+            cost, 2419,
+            "N=800 golden cost changed - likely correctness bug"
+        );
+    }
+
+
+
     use super::*;
 
     #[test]
@@ -986,7 +1211,9 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..100).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 262,
             "N=100 golden cost changed - likely correctness bug"
@@ -999,7 +1226,9 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..500).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 1469,
             "N=500 golden cost changed - likely correctness bug"
@@ -1018,7 +1247,9 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..750).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 2256,
             "N=750 golden cost changed - likely correctness bug"
@@ -1031,7 +1262,9 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..250).collect();
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics);
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
             cost, 702,
             "N=250 golden cost changed - likely correctness bug"
@@ -1046,7 +1279,15 @@ mod tests {
         let mut results = Vec::new();
         for _ in 0..5 {
             let metrics = Metrics::new();
-            results.push(Solver::solve(&matrix, &candidates, &dict, &metrics));
+            let equiv_cache: [_; 64] =
+                std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+            results.push(Solver::solve(
+                &matrix,
+                &candidates,
+                &dict,
+                &metrics,
+                &equiv_cache,
+            ));
         }
         assert!(
             results.iter().all(|&r| r == results[0]),
