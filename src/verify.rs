@@ -13,7 +13,13 @@ use fastrand;
 fn solve_both(dict: &Dictionary, matrix: &ResponseMatrix, subset: &[usize]) -> (u32, u32) {
     let naive_cost = NaiveSolver::new(matrix, dict).solve(subset);
     let metrics = Metrics::new();
-    let opt_cost = Solver::solve(matrix, subset, dict, &metrics);
+    let opt_cost = Solver::solve(
+        matrix,
+        subset,
+        dict,
+        &metrics,
+        &std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new())),
+    );
     (naive_cost, opt_cost)
 }
 
@@ -163,5 +169,42 @@ mod tests {
             run_stress_test(&dict, &matrix),
             "optimized solver disagreed with the naive reference on the repetitive-letters stress subset"
         );
+    }
+}
+
+#[cfg(test)]
+mod extra_bounds_tests {
+    #![allow(unused_imports)]
+    use super::*;
+    use crate::heuristic::capacity_bound;
+
+    #[test]
+    fn test_capacity_bound_monotonically_increasing() {
+        for k in 2..20 {
+            let mut prev = 0;
+            for n in 1..200 {
+                let bound = capacity_bound(n, k);
+                assert!(
+                    bound >= prev,
+                    "Capacity bound should be monotonic for fixed k"
+                );
+                prev = bound;
+            }
+        }
+    }
+
+    #[test]
+    fn test_capacity_bound_k_monotonicity() {
+        for n in 1..200 {
+            let mut prev = capacity_bound(n, 2);
+            for k in 3..20 {
+                let bound = capacity_bound(n, k);
+                assert!(
+                    bound <= prev,
+                    "Capacity bound should decrease as k increases (more branches available)"
+                );
+                prev = bound;
+            }
+        }
     }
 }
