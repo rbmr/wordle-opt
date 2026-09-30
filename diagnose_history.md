@@ -89,3 +89,20 @@ BndsPrn dropped dramatically (7M vs 1.4B for N=1000; 15M vs 4B for N=1200),
 indicating equiv pruning now dominates. EquivMiss not captured (binary reused
 from prior compile; EquivMiss added in ae7d3f2 which only touches lib.rs,
 not yet deployed).
+## Diagnose Run: commit=facf19c host=ubuntu-main seed=20260910 sizes=[1400,1500]
+
+Benchmark at larger sizes to track the depth-5/6/7 cliffs.
+Includes the new `EquivMiss` column (added in ae7d3f2).
+
+| Size | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn | EquivMiss |
+|------|------|-------|------|---------|--------|---------|----------|----------|---------|-----------|
+| 1400 | 137 | 6 | 4530 | 1810.038 | 9409035 | 8050059 | 4677863 | 28602776700 | 36993815 | 3730472 |
+| 1500 | 134 | 7 | 4908 | 4013.482 | 19071176 | 20276938 | 12677194 | 58738685463 | 89984090 | 7892757 |
+
+Old N=1400 baseline (from commit f618964):
+| 1400 (old) | 134 | 5 | 4553 | 4663.315 | 6700067 | 10266442 | 8584829 | 39914037080 | 11550641243 |
+
+Analysis:
+- N=1400 speedup is ~2.57x (1810s vs 4663s), despite exploring to Depth 6.
+- N=1500 crosses into Depth 7, taking ~4013s (~67 mins).
+- `EquivMiss` is around 3.7M (for 1400) and 7.9M (for 1500), which is ~40% of the `States` evaluated. This means the 4096-entry `equiv_cache` eviction limit is causing a lot of recomputations.
