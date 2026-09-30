@@ -6,6 +6,7 @@ use crate::solver::EquivCache;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 
+#[allow(clippy::too_many_arguments)]
 pub fn solve_parallel_depth2<'a>(
     matrix: &'a ResponseMatrix,
     initial_candidates: &[usize],
