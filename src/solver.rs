@@ -606,7 +606,7 @@ impl<'a> Solver<'a> {
                         self.dict.guesses.len() - rc.len(),
                         std::sync::atomic::Ordering::Relaxed,
                     );
-                    if cache_mut.len() > 4096 {
+                    if cache_mut.len() > 32768 {
                         cache_mut.clear();
                     }
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
