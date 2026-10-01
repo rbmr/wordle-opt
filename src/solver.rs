@@ -556,7 +556,7 @@ impl<'a> Solver<'a> {
                 
                 // Do the heavy projection/sorting outside the write lock to prevent blocking
                 // other threads trying to access different set_hashes in the same shard.
-                let num_u64s = (self.dict.guesses.len() + 63) / 64;
+                let num_u64s = self.dict.guesses.len().div_ceil(64);
                 let mut active_bits = vec![0u64; num_u64s];
                 let table = &mut self.scratch_hash_table[depth];
                 let added_indices = &mut self.scratch_added_indices[depth];
