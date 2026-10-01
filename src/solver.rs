@@ -613,7 +613,10 @@ impl<'a> Solver<'a> {
                         std::sync::atomic::Ordering::Relaxed,
                     );
                     if cache_mut.len() > 65536 {
-                        cache_mut.clear();
+                        let keys_to_remove: Vec<_> = cache_mut.keys().take(16384).copied().collect();
+                        for k in keys_to_remove {
+                            cache_mut.remove(&k);
+                        }
                     }
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
                     rc
