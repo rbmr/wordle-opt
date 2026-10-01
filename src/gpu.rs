@@ -52,6 +52,6 @@ unsafe impl Send for GpuContextWrapper {}
 unsafe impl Sync for GpuContextWrapper {}
 
 #[cfg(cuda_enabled)]
-lazy_static::lazy_static! {
-    pub static ref GPU_CTX_MUTEX: std::sync::Mutex<GpuContextWrapper> = std::sync::Mutex::new(GpuContextWrapper(unsafe { gpu_alloc_context() }));
+thread_local! {
+    pub static GPU_CTX: std::cell::RefCell<GpuContextWrapper> = std::cell::RefCell::new(GpuContextWrapper(unsafe { gpu_alloc_context() }));
 }

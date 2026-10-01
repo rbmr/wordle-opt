@@ -681,24 +681,26 @@ impl<'a> Solver<'a> {
             if use_gpu1 {
                 #[cfg(cuda_enabled)]
                 {
-                    let ctx_guard = crate::gpu::GPU_CTX_MUTEX.lock().unwrap(); let ctx = ctx_guard.0;
-                    unsafe {
-                        let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase1_guesses.len());
-                        for i in 0..phase1_guesses.len() { in_g[i] = phase1_guesses[i] as u16; }
-                        let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
-                        for i in 0..set.len() { in_s[i] = set[i] as u16; }
-                        crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase1_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
-                        let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase1_guesses.len());
-                        let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase1_guesses.len());
-                        let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase1_guesses.len());
-                        for i in 0..phase1_guesses.len() {
-                            let num_non_empty = nums[i] as usize;
-                            if num_non_empty == 1 { continue; }
-                            let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase1_guesses[i];
-                            if num_non_empty > local_max_k { local_max_k = num_non_empty; }
-                            if lb_cost < beta { if num_non_empty > valid_max_k { valid_max_k = num_non_empty; } phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
+                    crate::gpu::GPU_CTX.with(|ctx_ref| {
+                        let ctx = ctx_ref.borrow().0;
+                        unsafe {
+                            let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase1_guesses.len());
+                            for i in 0..phase1_guesses.len() { in_g[i] = phase1_guesses[i] as u16; }
+                            let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
+                            for i in 0..set.len() { in_s[i] = set[i] as u16; }
+                            crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase1_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                            let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase1_guesses.len());
+                            let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase1_guesses.len());
+                            let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase1_guesses.len());
+                            for i in 0..phase1_guesses.len() {
+                                let num_non_empty = nums[i] as usize;
+                                if num_non_empty == 1 { continue; }
+                                let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase1_guesses[i];
+                                if num_non_empty > local_max_k { local_max_k = num_non_empty; }
+                                if lb_cost < beta { if num_non_empty > valid_max_k { valid_max_k = num_non_empty; } phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
+                            }
                         }
-                    }
+                    });
                 }
             } else {
                 for &g in &phase1_guesses {
@@ -876,7 +878,8 @@ impl<'a> Solver<'a> {
                 if use_gpu2 {
                     #[cfg(cuda_enabled)]
                     {
-                        let ctx_guard = crate::gpu::GPU_CTX_MUTEX.lock().unwrap(); let ctx = ctx_guard.0;
+                    crate::gpu::GPU_CTX.with(|ctx_ref| {
+                        let ctx = ctx_ref.borrow().0;
                         unsafe {
                             let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase2_guesses.len());
                             for i in 0..phase2_guesses.len() { in_g[i] = phase2_guesses[i] as u16; }
@@ -895,6 +898,7 @@ impl<'a> Solver<'a> {
                                 if lb_cost < best_val { phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
                             }
                         }
+                    });
                     }
                 } else {
                     for &g in &phase2_guesses {
