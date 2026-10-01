@@ -57,6 +57,6 @@ echo "Launching full N=2340 solve on compute, detached, bounded at ${TIMEOUT_SEC
 # Invoke the built binary directly, not `cargo run` - `cargo run` would make
 # $! the PID of the cargo wrapper process, not the actual solver, which
 # check_full.sh needs to be able to tell whether the run is still alive.
-ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT nohup timeout ${TIMEOUT_SECS} ./target/release/wordle-opt full > $LOG 2>&1 & echo \$! > $PIDFILE"
+ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT nohup timeout ${TIMEOUT_SECS} ./target/release/wordle-opt full > $LOG 2>&1 < /dev/null & echo \$! > $PIDFILE"
 
 echo "Started. Poll progress with: ./check_full.sh"

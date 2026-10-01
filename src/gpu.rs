@@ -23,7 +23,7 @@ unsafe extern "C" {
 }
 
 #[cfg(cuda_enabled)]
-pub fn init_gpu_once(matrix: &[u8], bounds: &[Vec<u32>], max_k: usize) {
+pub fn init_gpu_once(matrix: &[u8], _bounds: &[Vec<u32>], _max_k: usize) {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         let max_possible_k = 2340;
