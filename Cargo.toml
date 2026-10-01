@@ -8,6 +8,7 @@ repository = "https://github.com/rbmr/wordle-opt"
 license = "MIT"
 
 [dependencies]
+lazy_static = "1.5.0"
 fastrand = "2.0.0"
 rayon = "1.12.0"
 rustc-hash = "2.1.3"
@@ -25,3 +26,7 @@ debug = true
 [[bench]]
 name = "solver_bench"
 harness = false
+
+[build-dependencies]
+cc = "1.5.1"
+
