@@ -246,7 +246,7 @@ impl<'a> Solver<'a> {
     ) -> u32 {
         let cache_size = if crate::is_compute_host() {
             // 512 M entries × 8 bytes each = 4 GB. Compute has 14 GB available.
-            512 * 1024 * 1024
+            128 * 1024 * 1024
         } else {
             64 * 1024 * 1024
         };
@@ -606,7 +606,7 @@ impl<'a> Solver<'a> {
                         self.dict.guesses.len() - rc.len(),
                         std::sync::atomic::Ordering::Relaxed,
                     );
-                    if cache_mut.len() > 32768 {
+                    if cache_mut.len() > 8192 {
                         cache_mut.clear();
                     }
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
