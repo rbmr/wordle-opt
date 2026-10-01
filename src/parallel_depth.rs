@@ -139,12 +139,9 @@ pub fn solve_parallel_depth2<'a>(
         let total = running_cost.load(Ordering::Relaxed);
         if !exceeded.load(Ordering::Relaxed) {
             beta.fetch_min(total, Ordering::Relaxed);
-            
-            // Log if a new best root was found
-            if total < current_beta {
-                metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
-            }
         }
+        
+        metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
     });
 
     beta.load(Ordering::Relaxed)
