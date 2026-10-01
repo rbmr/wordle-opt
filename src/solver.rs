@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 pub type EquivCache =
-    [std::sync::RwLock<std::collections::HashMap<u64, std::sync::Arc<Vec<u16>>>>; 64];
+    [std::sync::RwLock<std::collections::HashMap<u64, std::sync::Arc<Vec<u64>>>>; 64];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -287,6 +287,12 @@ impl<'a> Solver<'a> {
                 capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
             }
         }
+        #[cfg(cuda_enabled)]
+        crate::gpu::init_gpu_once(
+            unsafe { std::slice::from_raw_parts(matrix.data_c_g.as_ptr() as *const u8, matrix.data_c_g.len()) },
+            &capacity_bounds_2d,
+            max_k,
+        );
 
         if !active_guesses.is_empty() {
             let first_g = active_guesses[0];
@@ -550,7 +556,8 @@ impl<'a> Solver<'a> {
                 
                 // Do the heavy projection/sorting outside the write lock to prevent blocking
                 // other threads trying to access different set_hashes in the same shard.
-                let mut active = Vec::with_capacity(1024);
+                let num_u64s = (self.dict.guesses.len() + 63) / 64;
+                let mut active_bits = vec![0u64; num_u64s];
                 let table = &mut self.scratch_hash_table[depth];
                 let added_indices = &mut self.scratch_added_indices[depth];
                 added_indices.clear();
@@ -576,7 +583,7 @@ impl<'a> Solver<'a> {
                         let slot = table[idx];
                         if slot == 0 {
                             table[idx] = proj;
-                            active.push(g as u16);
+                            active_bits[g / 64] |= 1 << (g % 64);
                             added_indices.push(idx);
                             break;
                         }
@@ -590,9 +597,8 @@ impl<'a> Solver<'a> {
                 for &idx in added_indices.iter() {
                     table[idx] = 0;
                 }
-
                 
-                let rc = std::sync::Arc::new(active);
+                let rc = std::sync::Arc::new(active_bits);
 
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
                 // Check again in case another thread computed it while we were working
@@ -603,10 +609,10 @@ impl<'a> Solver<'a> {
                         .cache_misses
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     self.metrics.pruned_by_equivalence.fetch_add(
-                        self.dict.guesses.len() - rc.len(),
+                        self.dict.guesses.len() - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
                         std::sync::atomic::Ordering::Relaxed,
                     );
-                    if cache_mut.len() > 8192 {
+                    if cache_mut.len() > 65536 {
                         cache_mut.clear();
                     }
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
@@ -621,22 +627,28 @@ impl<'a> Solver<'a> {
             is_in_set[c] = true;
         }
 
-        for &g16 in active_guesses_rc.as_ref() {
-            let g = g16 as usize;
-            active_guesses.push(g);
-            let c_idx = self.dict.guess_to_candidate[g];
-            let in_set = if c_idx != u16::MAX {
-                is_in_set[c_idx as usize]
-            } else {
-                false
-            };
-            if in_set {
-                phase1_guesses.push(g);
-            } else {
-                phase2_guesses.push(g);
+        for (block_idx, &block) in active_guesses_rc.iter().enumerate() {
+            let mut b = block;
+            while b != 0 {
+                let tz = b.trailing_zeros();
+                let g = block_idx * 64 + tz as usize;
+                
+                active_guesses.push(g);
+                let c_idx = self.dict.guess_to_candidate[g];
+                let in_set = if c_idx != u16::MAX {
+                    is_in_set[c_idx as usize]
+                } else {
+                    false
+                };
+                if in_set {
+                    phase1_guesses.push(g);
+                } else {
+                    phase2_guesses.push(g);
+                }
+                
+                b &= b - 1;
             }
         }
-
         for &c in set {
             is_in_set[c] = false;
         }
@@ -659,7 +671,34 @@ impl<'a> Solver<'a> {
         let mut valid_max_k = 0;
 
         if set.len() <= 16 {
-            for &g in &phase1_guesses {
+            #[cfg(cuda_enabled)]
+            let use_gpu1 = phase1_guesses.len() > 1000 && set.len() > 2;
+            #[cfg(not(cuda_enabled))]
+            let use_gpu1 = false;
+            if use_gpu1 {
+                #[cfg(cuda_enabled)]
+                {
+                    let ctx_guard = crate::gpu::GPU_CTX_MUTEX.lock().unwrap(); let ctx = ctx_guard.0;
+                    unsafe {
+                        let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase1_guesses.len());
+                        for i in 0..phase1_guesses.len() { in_g[i] = phase1_guesses[i] as u16; }
+                        let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
+                        for i in 0..set.len() { in_s[i] = set[i] as u16; }
+                        crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase1_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                        let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase1_guesses.len());
+                        let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase1_guesses.len());
+                        let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase1_guesses.len());
+                        for i in 0..phase1_guesses.len() {
+                            let num_non_empty = nums[i] as usize;
+                            if num_non_empty == 1 { continue; }
+                            let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase1_guesses[i];
+                            if num_non_empty > local_max_k { local_max_k = num_non_empty; }
+                            if lb_cost < beta { if num_non_empty > valid_max_k { valid_max_k = num_non_empty; } phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
+                        }
+                    }
+                }
+            } else {
+                for &g in &phase1_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
                 let mut num_non_empty = 0;
@@ -696,6 +735,7 @@ impl<'a> Solver<'a> {
                     }
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
+            }
             }
         } else {
             #[allow(clippy::chunks_exact_to_as_chunks)]
@@ -826,7 +866,35 @@ impl<'a> Solver<'a> {
 
         if best_val > local_lb {
             if set.len() <= 16 {
-                for &g in &phase2_guesses {
+                #[cfg(cuda_enabled)]
+                let use_gpu2 = phase2_guesses.len() > 100 && set.len() > 2;
+                #[cfg(not(cuda_enabled))]
+                let use_gpu2 = false;
+                if use_gpu2 {
+                    #[cfg(cuda_enabled)]
+                    {
+                        let ctx_guard = crate::gpu::GPU_CTX_MUTEX.lock().unwrap(); let ctx = ctx_guard.0;
+                        unsafe {
+                            let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase2_guesses.len());
+                            for i in 0..phase2_guesses.len() { in_g[i] = phase2_guesses[i] as u16; }
+                            let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
+                            for i in 0..set.len() { in_s[i] = set[i] as u16; }
+                            crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase2_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                            let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase2_guesses.len());
+                            let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase2_guesses.len());
+                            let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase2_guesses.len());
+                            for i in 0..phase2_guesses.len() {
+                                let num_non_empty = nums[i] as usize;
+                                if num_non_empty == 1 { continue; }
+                                let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase2_guesses[i];
+                                if num_non_empty > local_max_k { local_max_k = num_non_empty; }
+                                if lb_cost < beta && num_non_empty > valid_max_k { valid_max_k = num_non_empty; }
+                                if lb_cost < best_val { phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
+                            }
+                        }
+                    }
+                } else {
+                    for &g in &phase2_guesses {
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
                     let mut num_non_empty = 0;
@@ -864,6 +932,7 @@ impl<'a> Solver<'a> {
                         phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     }
                 }
+            }
             } else {
                 #[allow(clippy::chunks_exact_to_as_chunks)]
                 let mut chunks = phase2_guesses.chunks_exact(8);
