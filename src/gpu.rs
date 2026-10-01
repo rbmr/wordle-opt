@@ -26,10 +26,11 @@ unsafe extern "C" {
 pub fn init_gpu_once(matrix: &[u8], bounds: &[Vec<u32>], max_k: usize) {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
-        let mut flat_bounds = vec![0u32; (max_k + 1) * 2341];
-        for k in 0..=max_k {
+        let max_possible_k = 2340;
+        let mut flat_bounds = vec![0u32; (max_possible_k + 1) * 2341];
+        for k in 2..=max_possible_k {
             for c in 0..=2340 {
-                flat_bounds[k * 2341 + c] = bounds[k][c];
+                flat_bounds[k * 2341 + c] = crate::heuristic::capacity_bound(c, k);
             }
         }
         unsafe {
