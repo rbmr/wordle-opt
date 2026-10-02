@@ -34,7 +34,7 @@ fn criterion_benchmark_solve_n100(c: &mut Criterion) {
     let matrix = ResponseMatrix::new(&dict);
     let subset: Vec<usize> = (0..100).collect();
     let metrics = wordle_opt::solver::Metrics::new();
-    let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new()));
+    let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
     
     c.bench_function("solve_n100", |b| b.iter(|| {
         wordle_opt::solver::Solver::solve(black_box(&matrix), black_box(&subset), black_box(&dict), black_box(&metrics), black_box(&equiv_cache))
