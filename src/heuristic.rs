@@ -24,7 +24,15 @@ pub fn sort_guesses_by_expected_remaining(
     candidates: &[usize],
     guesses: &mut [usize],
 ) {
-    guesses.sort_by_cached_key(|&g| compute_expected_remaining(matrix, candidates, g));
+    use rayon::prelude::*;
+    let mut keys: Vec<(usize, u32)> = guesses
+        .par_iter()
+        .map(|&g| (g, compute_expected_remaining(matrix, candidates, g)))
+        .collect();
+    keys.sort_unstable_by_key(|k| k.1);
+    for (i, k) in keys.into_iter().enumerate() {
+        guesses[i] = k.0;
+    }
 }
 
 pub fn compute_max_branching_factor(
