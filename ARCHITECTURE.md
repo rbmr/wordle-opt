@@ -40,7 +40,7 @@ minimizes expected remaining candidates) runs first to produce a decent
 upper bound before the parallel exhaustive search begins, so early cutoffs
 in the main search have something real to prune against from the start.
 
-## 3a. Root Pre-Filter (`src/solver.rs::solve`)
+## 3a. Root Pre-Filter and Sorting (`src/solver.rs::solve`)
 
 After the first root guess is evaluated exactly (tightening beta), the
 remaining root candidates are filtered by their depth-1 capacity-bound
@@ -48,12 +48,17 @@ lower bound before spawning parallel tasks. Any root guess `g` with
 `lb(g, full_set) >= beta` cannot possibly improve on the current best
 and its entire subtree is skipped. `active_guesses` (the full allowed-
 guess list passed to sub-problems) is left unchanged; only the list of
-root tasks to launch is filtered. This is provably correct: each filtered
-guess still participates in sub-problem evaluations, just not as a root
-first guess. For N ≈ 100-500, this eliminates a significant fraction of
-root candidates after a tight greedy beta; for N = 2340 the lb gap to
-beta is large enough that most guesses survive (the filter has little
-effect at full scale).
+root tasks to launch is filtered.
+
+Crucially, the surviving root candidates are then **sorted by their lower
+bound** and expected-remaining score. By evaluating the candidates in this
+optimal heuristic order across `rayon` threads, the first few evaluations
+(e.g., `trace`, `raise`) instantly tighten the global `beta` bound to its
+true minimum. Once `beta` drops, all subsequent root tasks notice the new
+bound and are immediately pruned. This ensures that the search evaluates
+only the handful of viable branches while discarding the thousands of
+terrible guesses in microseconds, preventing straggler threads from wasting
+minutes on loose-bounded subtrees.
 
 ## 4. Move Ordering (`src/heuristic.rs::sort_guesses_by_expected_remaining`)
 
@@ -149,3 +154,9 @@ Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) a
 ## 8. Depth-2 Parallel Alpha-Beta (`src/parallel_depth.rs`)
 
 To mitigate the straggler problem at extreme depths (e.g. `N=2340`) where a single root guess can take over 17 hours to evaluate, the solver pushes work-stealing parallelism (`rayon`) down to the `depth=2` layer. Rather than exclusively evaluating root guesses in parallel, `parallel_depth.rs` distributes the top-level subtrees across cores while sharing a unified global beta limit to maximize hardware utilization and prevent individual hard subtrees from stalling the cluster wall clock.
+
+## 9. GPU Acceleration (CUDA)
+
+For moderately sized nodes (`set.len() > 3`), the CPU's scalar execution of 14,855 guesses takes ~150 microseconds. To drastically reduce this, `wordle-opt` offloads the node histogram counting and capacity bound calculations to the RTX 2060 GPU using a custom CUDA kernel (`src/gpu_kernel.cu`).
+- **L1 Cache Tuning**: The CUDA block size is specifically tuned to `128` threads so that the `243 * sizeof(uint16_t)` local `counts` array perfectly fits inside the RTX 2060's 64 KB L1 cache per Streaming Multiprocessor. This prevents register spilling and global memory VRAM thrashing.
+- **Blocking Sync**: The driver is configured with `cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync)` so that the CPU threads yield execution back to the OS while waiting for `cudaStreamSynchronize`. This entirely eliminates CPU spin-wait starvation, allowing the `rayon` work-stealing pool to remain fully active without dropping core utilization. 
