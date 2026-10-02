@@ -62,6 +62,7 @@ void gpu_free_context(void* ptr) {
 }
 
 void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bounds, size_t bounds_size) {
+    cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
     cudaSetDevice(0);
     cudaMalloc(&global_d_matrix, matrix_size);
     cudaMemcpy(global_d_matrix, host_matrix, matrix_size, cudaMemcpyHostToDevice);
@@ -106,7 +107,7 @@ __global__ void gpu_compute_phase1_kernel(
         if (count > 0) {
             num_non_empty++;
             expected_rem += (uint32_t)count * (uint32_t)count;
-            if (r != 242) {
+            if (r != 121) {
                 lb_cost += g_capacity_bounds[parent_max_k * 2341 + count];
             }
         }
@@ -132,7 +133,7 @@ void gpu_compute_phase1(
     cudaMemcpyAsync(ctx->d_active_guesses, ctx->h_active_guesses, num_active * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
     cudaMemcpyAsync(ctx->d_set, ctx->h_set, set_len * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
 
-    int block = 256;
+    int block = 128;
     int grid = (num_active + block - 1) / block;
 
     gpu_compute_phase1_kernel<<<grid, block, 0, ctx->stream>>>(

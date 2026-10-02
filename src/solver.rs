@@ -373,10 +373,10 @@ impl<'a> Solver<'a> {
             // so we can skip it entirely. Note: allowed_guesses (active_guesses)
             // is passed unchanged to sub-problems; this filter only affects
             // which root tasks we launch.
-            let root_candidates: Vec<usize> = active_guesses[1..]
+            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = active_guesses[1..]
                 .iter()
                 .copied()
-                .filter(|&g| {
+                .filter_map(|g| {
                     let mut counts = [0u16; 243];
                     for &c in set {
                         counts[matrix.get(g, c).0 as usize] += 1;
@@ -390,9 +390,22 @@ impl<'a> Solver<'a> {
                             })
                             .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
                             .sum::<u32>();
-                    lb < greedy_cost_to_beat
+                    let mut expected_rem = 0u32;
+                    for &cnt in &counts {
+                        if cnt > 0 {
+                            expected_rem += (cnt as u32) * (cnt as u32);
+                        }
+                    }
+                    if lb < greedy_cost_to_beat {
+                        Some((g, lb, expected_rem))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
+                
+            root_candidates_tuples.sort_unstable_by_key(|t| (t.1, t.2));
+            let root_candidates: Vec<usize> = root_candidates_tuples.into_iter().map(|t| t.0).collect();
 
             println!(
                 "\n*** Root candidates after filter: {} / {} ***",
@@ -673,36 +686,35 @@ impl<'a> Solver<'a> {
         let mut local_max_k = 0;
         let mut valid_max_k = 0;
 
-        if set.len() <= 16 {
+        #[cfg(cuda_enabled)]
+        let use_gpu1 = (phase1_guesses.len() * set.len()) > 50000;
+        #[cfg(not(cuda_enabled))]
+        let use_gpu1 = false;
+        if use_gpu1 {
             #[cfg(cuda_enabled)]
-            let use_gpu1 = phase1_guesses.len() > 1000 && set.len() > 2;
-            #[cfg(not(cuda_enabled))]
-            let use_gpu1 = false;
-            if use_gpu1 {
-                #[cfg(cuda_enabled)]
-                {
-                    crate::gpu::GPU_CTX.with(|ctx_ref| {
-                        let ctx = ctx_ref.borrow().0;
-                        unsafe {
-                            let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase1_guesses.len());
-                            for i in 0..phase1_guesses.len() { in_g[i] = phase1_guesses[i] as u16; }
-                            let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
-                            for i in 0..set.len() { in_s[i] = set[i] as u16; }
-                            crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase1_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
-                            let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase1_guesses.len());
-                            let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase1_guesses.len());
-                            let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase1_guesses.len());
-                            for i in 0..phase1_guesses.len() {
-                                let num_non_empty = nums[i] as usize;
-                                if num_non_empty == 1 { continue; }
-                                let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase1_guesses[i];
-                                if num_non_empty > local_max_k { local_max_k = num_non_empty; }
-                                if lb_cost < beta { if num_non_empty > valid_max_k { valid_max_k = num_non_empty; } phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
-                            }
+            {
+                crate::gpu::GPU_CTX.with(|ctx_ref| {
+                    let ctx = ctx_ref.borrow().0;
+                    unsafe {
+                        let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase1_guesses.len());
+                        for i in 0..phase1_guesses.len() { in_g[i] = phase1_guesses[i] as u16; }
+                        let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
+                        for i in 0..set.len() { in_s[i] = set[i] as u16; }
+                        crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase1_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                        let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase1_guesses.len());
+                        let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase1_guesses.len());
+                        let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase1_guesses.len());
+                        for i in 0..phase1_guesses.len() {
+                            let num_non_empty = nums[i] as usize;
+                            if num_non_empty == 1 { continue; }
+                            let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase1_guesses[i];
+                            if num_non_empty > local_max_k { local_max_k = num_non_empty; }
+                            if lb_cost < beta { if num_non_empty > valid_max_k { valid_max_k = num_non_empty; } phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
                         }
-                    });
-                }
-            } else {
+                    }
+                });
+            }
+        } else if set.len() <= 16 {
                 for &g in &phase1_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
@@ -740,7 +752,6 @@ impl<'a> Solver<'a> {
                     }
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
-            }
             }
         } else {
             #[allow(clippy::chunks_exact_to_as_chunks)]
@@ -870,37 +881,36 @@ impl<'a> Solver<'a> {
         }
 
         if best_val > local_lb {
-            if set.len() <= 16 {
+            #[cfg(cuda_enabled)]
+            let use_gpu2 = (phase2_guesses.len() * set.len()) > 50000;
+            #[cfg(not(cuda_enabled))]
+            let use_gpu2 = false;
+            if use_gpu2 {
                 #[cfg(cuda_enabled)]
-                let use_gpu2 = phase2_guesses.len() > 100 && set.len() > 2;
-                #[cfg(not(cuda_enabled))]
-                let use_gpu2 = false;
-                if use_gpu2 {
-                    #[cfg(cuda_enabled)]
-                    {
-                    crate::gpu::GPU_CTX.with(|ctx_ref| {
-                        let ctx = ctx_ref.borrow().0;
-                        unsafe {
-                            let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase2_guesses.len());
-                            for i in 0..phase2_guesses.len() { in_g[i] = phase2_guesses[i] as u16; }
-                            let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
-                            for i in 0..set.len() { in_s[i] = set[i] as u16; }
-                            crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase2_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
-                            let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase2_guesses.len());
-                            let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase2_guesses.len());
-                            let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase2_guesses.len());
-                            for i in 0..phase2_guesses.len() {
-                                let num_non_empty = nums[i] as usize;
-                                if num_non_empty == 1 { continue; }
-                                let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase2_guesses[i];
-                                if num_non_empty > local_max_k { local_max_k = num_non_empty; }
-                                if lb_cost < beta && num_non_empty > valid_max_k { valid_max_k = num_non_empty; }
-                                if lb_cost < best_val { phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
-                            }
+                {
+                crate::gpu::GPU_CTX.with(|ctx_ref| {
+                    let ctx = ctx_ref.borrow().0;
+                    unsafe {
+                        let in_g = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_active_guesses(ctx), phase2_guesses.len());
+                        for i in 0..phase2_guesses.len() { in_g[i] = phase2_guesses[i] as u16; }
+                        let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
+                        for i in 0..set.len() { in_s[i] = set[i] as u16; }
+                        crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase2_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                        let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase2_guesses.len());
+                        let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase2_guesses.len());
+                        let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase2_guesses.len());
+                        for i in 0..phase2_guesses.len() {
+                            let num_non_empty = nums[i] as usize;
+                            if num_non_empty == 1 { continue; }
+                            let lb_cost = lbs[i]; let expected_rem = exps[i]; let g = phase2_guesses[i];
+                            if num_non_empty > local_max_k { local_max_k = num_non_empty; }
+                            if lb_cost < beta && num_non_empty > valid_max_k { valid_max_k = num_non_empty; }
+                            if lb_cost < best_val { phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty)); }
                         }
-                    });
                     }
-                } else {
+                });
+                }
+            } else if set.len() <= 16 {
                     for &g in &phase2_guesses {
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
@@ -939,7 +949,6 @@ impl<'a> Solver<'a> {
                         phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     }
                 }
-            }
             } else {
                 #[allow(clippy::chunks_exact_to_as_chunks)]
                 let mut chunks = phase2_guesses.chunks_exact(8);
