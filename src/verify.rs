@@ -18,7 +18,7 @@ fn solve_both(dict: &Dictionary, matrix: &ResponseMatrix, subset: &[usize]) -> (
         subset,
         dict,
         &metrics,
-        &std::array::from_fn(|_| std::sync::RwLock::new(std::collections::HashMap::new())),
+        &std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default())),
     );
     (naive_cost, opt_cost)
 }
