@@ -161,7 +161,6 @@ mod tests {
     use crate::matrix::ResponseMatrix;
     use crate::cache::GlobalCache;
     use std::sync::RwLock;
-    use std::collections::HashMap;
 
     #[test]
     fn test_parallel_depth2_runs() {
@@ -169,7 +168,7 @@ mod tests {
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let global_cache = GlobalCache::new(1024);
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| RwLock::new(HashMap::new()));
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| RwLock::new(rustc_hash::FxHashMap::default()));
         let beta = AtomicU32::new(100);
         let active_guesses: Vec<usize> = vec![0, 1, 2];
         let initial_candidates: Vec<usize> = vec![0, 1];
