@@ -5,6 +5,12 @@ use crate::matrix::ResponseMatrix;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
+/// Global lock-striped cache for exact equivalence deduping.
+///
+/// Reduces the O(G log G) sorting overhead that would otherwise be required 
+/// to find equivalence classes at every node.
+/// The hash key represents the `c_mask` (characters present in remaining candidates).
+/// The mapped value is the exact deduplicated projection of all valid guesses.
 pub type EquivCache =
     [std::sync::RwLock<std::collections::HashMap<u64, std::sync::Arc<Vec<u64>>>>; 64];
 

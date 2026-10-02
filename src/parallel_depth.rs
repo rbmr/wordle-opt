@@ -6,6 +6,12 @@ use crate::solver::EquivCache;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 
+/// Executes a fully parallel depth-2 alpha-beta search across the top-level branches.
+///
+/// Uses work-stealing (Rayon) over the provided root candidates. A single global `beta`
+/// is shared between threads, meaning optimal ordering of `active_guesses` (i.e. sorting
+/// by lower bound) allows early threads to tighten the global `beta`, immediately
+/// starving and pruning subsequent threads evaluating worse guesses.
 #[allow(clippy::too_many_arguments)]
 pub fn solve_parallel_depth2<'a>(
     matrix: &'a ResponseMatrix,
