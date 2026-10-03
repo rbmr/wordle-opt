@@ -211,6 +211,13 @@ benchmark iteration that's the actual day-to-day work.
 - Keep the working tree clean: commit or discard changes before moving to
   new work, and delete one-off/scratch files as soon as you're done with
   them rather than leaving them untracked.
+- Push to `origin/main` regularly - don't let commits sit local-only on
+  `assistant`. A commit that only exists on `assistant` is one disk
+  failure away from being lost, and anyone checking GitHub sees a stale
+  state that doesn't match what's actually been done. Push after each
+  commit, or at minimum before moving on to a different task. (This has
+  happened: 11 commits - including a correctness fix to `build.rs` -
+  sat unpushed for over a day.)
 - Commit messages: terse, professional, describe what changed and why -
   no AI branding, no narrating your own process. The existing git history
   on this repo (`git log --oneline`) is a good model to match.
