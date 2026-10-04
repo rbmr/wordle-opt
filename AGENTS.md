@@ -88,6 +88,14 @@ overshot). Concretely, from here on:
   met without checking the actual exit code / actual live process /
   actual log output.** "I started it" and "it is running" are different
   claims - verify the second one before asserting it, every time.
+- **Every timing/cost claim must trace to captured tool output.** Before
+  posting a result, find the exact output line (e.g. `Wall time: ...` /
+  `Optimal total cost: ...` from a *completed* run) and quote the command
+  and that line in the report. A `[progress]` line is not a result, a
+  process that was `Killed`/cancelled is not a result, and numbers that
+  only exist in your own reasoning are not a result. (A prior session
+  reported a 69s full run and closed milestone issues on figures that
+  never appeared in any output; it was retracted on issue #1.)
 - **Never extrapolate an ETA from small-N data and report it as if it were
   measured.** If you're extrapolating, say so explicitly, give your
   confidence level, and say what evidence would firm it up. A number
