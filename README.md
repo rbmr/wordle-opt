@@ -20,8 +20,8 @@ aggressively while guaranteeing the final answer is still exactly optimal:
   beat the current best.
 - **Equivalence-class guess pruning**: guesses that partition the current
   candidate set identically to a guess already tried are skipped, since they
-  can't produce a different outcome. This is radically accelerated by an 
-  `FxHashMap` cache over the `c_mask` bitsets.
+  can't produce a different outcome. The projection per `c_mask` is memoized in an
+  `FxHashMap` cache.
 - **A lock-free transposition table** (`src/cache.rs::GlobalCache`): a
   fixed-size array of `AtomicU64` slots, each packing a 45-bit Zobrist hash,
   an 18-bit cost value, and an exact/lower-bound flag, shared across threads
@@ -31,13 +31,13 @@ aggressively while guaranteeing the final answer is still exactly optimal:
 - **Parallelism via `rayon`** at the root: the buckets of the first root
   guess, then the remaining root guesses, are evaluated in parallel with a
   shared atomic beta so threads prune against each other's progress. Root
-  candidates are explicitly sorted by `lb` bounds prior to execution, 
-  allowing early worker threads to globally prune later branches.
+  candidates are sorted by `lb` bounds prior to execution so promising
+  guesses tighten the shared beta earlier (benefit at full scale unproven).
 - **CUDA GPU Acceleration**: Core capacity bound matrices and `phase1` /
   `phase2` filtering logic are offloaded to an RTX 2060 GPU (`gpu_kernel.cu`).
-  L1-cache tuning and OS-level `cudaDeviceScheduleBlockingSync` block-waits 
-  prevent CPU starvation, bringing massive wide-branch sweeps down from
-  hours to seconds.
+  L1-cache tuning and OS-level `cudaDeviceScheduleBlockingSync` block-waits
+  are intended to prevent CPU starvation. The end-to-end effect at N=2340
+  has not been verified; no full run has completed yet.
 
 ## Usage
 

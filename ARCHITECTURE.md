@@ -50,15 +50,15 @@ and its entire subtree is skipped. `active_guesses` (the full allowed-
 guess list passed to sub-problems) is left unchanged; only the list of
 root tasks to launch is filtered.
 
-Crucially, the surviving root candidates are then **sorted by their lower
-bound** and expected-remaining score. By evaluating the candidates in this
-optimal heuristic order across `rayon` threads, the first few evaluations
-(e.g., `trace`, `raise`) instantly tighten the global `beta` bound to its
-true minimum. Once `beta` drops, all subsequent root tasks notice the new
-bound and are immediately pruned. This ensures that the search evaluates
-only the handful of viable branches while discarding the thousands of
-terrible guesses in microseconds, preventing straggler threads from wasting
-minutes on loose-bounded subtrees.
+The surviving root candidates are then sorted by their lower bound and
+expected-remaining score, so the most promising guesses are dispatched to
+`rayon` first and tighten the shared `beta` earlier. NOTE: the intended
+benefit (later root tasks pruned quickly once `beta` is tight) is a
+hypothesis, not a measured result. A full N=2340 run at this ordering
+(maintainer, commit 6dfb74a) solved only 673/14,472 root guesses in 11
+minutes, so any speedup it gives at full scale is unproven. An earlier
+revision of this section claimed a 69s full run; that claim was false (no
+run completed) and has been retracted - see issue #1.
 
 ## 4. Move Ordering (`src/heuristic.rs::sort_guesses_by_expected_remaining`)
 
@@ -158,11 +158,5 @@ To mitigate the straggler problem at extreme depths (e.g. `N=2340`) where a sing
 ## 9. GPU Acceleration (CUDA)
 
 For moderately sized nodes (`set.len() > 3`), the CPU's scalar execution of 14,855 guesses takes ~150 microseconds. To drastically reduce this, `wordle-opt` offloads the node histogram counting and capacity bound calculations to the RTX 2060 GPU using a custom CUDA kernel (`src/gpu_kernel.cu`).
-- **L1 Cache Tuning**: The CUDA block size is specifically tuned to `128` threads so that the `243 * sizeof(uint16_t)` local `counts` array perfectly fits inside the RTX 2060's 64 KB L1 cache per Streaming Multiprocessor. This prevents register spilling and global memory VRAM thrashing.
-- **Blocking Sync**: The driver is configured with `cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync)` so that the CPU threads yield execution back to the OS while waiting for `cudaStreamSynchronize`. This entirely eliminates CPU spin-wait starvation, allowing the `rayon` work-stealing pool to remain fully active without dropping core utilization. 
-
-## 10. The N=2340 Collapse Phenomenon
-
-Profiling data in `diagnose_history.md` reveals an apparent paradox: random subsets of `N=1750` take ~8500 seconds, while the full `N=2340` dataset finishes natively in 69 seconds. This occurs because the initial greedy bounds and alpha-beta pruning are hyper-sensitive to the absolute quality of the initial root guess. 
-
-For the complete `2340` dictionary, evaluating `trace` instantly discovers a near-perfect theoretical path that tightens the global `beta` to exactly `7920`. For all other 14,854 guesses evaluated subsequently by Rayon, the algorithm immediately fails-high without needing to traverse deeper than depth 2. For random, fractured subsets, no single "perfect" root guess exists, forcing the alpha-beta search to evaluate millions of deep branches. The architecture's root sorting ensures we capitalize instantly on complete-dictionary optimality.
+- **L1 Cache Tuning**: The CUDA block size is specifically tuned to `128` threads so that the `243 * sizeof(uint16_t)` local `counts` array perfectly fits inside the RTX 2060's 64 KB L1 cache per Streaming Multiprocessor. The intent is to avoid register spilling and VRAM thrashing (not benchmarked in isolation).
+- **Blocking Sync**: The driver is configured with `cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync)` so that the CPU threads yield execution back to the OS while waiting for `cudaStreamSynchronize`. The intent is to avoid CPU spin-wait starvation of the `rayon` pool (effect on end-to-end time not verified at full scale). 
