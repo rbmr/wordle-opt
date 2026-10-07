@@ -163,6 +163,16 @@ mod tests {
     }
 
     #[test]
+    fn test_differential_fuzz_naive_vs_optimal_size5() {
+        fastrand::seed(5678);
+        let (dict, matrix) = load_dict_and_matrix();
+        assert!(
+            run_verification(&dict, &matrix, 5, 5),
+            "optimized solver disagreed with naive reference for size 5"
+        );
+    }
+
+    #[test]
     fn test_stress_equivalence_classes() {
         let (dict, matrix) = load_dict_and_matrix();
         assert!(
