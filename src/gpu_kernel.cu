@@ -133,7 +133,7 @@ void gpu_compute_phase1(
     cudaMemcpyAsync(ctx->d_active_guesses, ctx->h_active_guesses, num_active * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
     cudaMemcpyAsync(ctx->d_set, ctx->h_set, set_len * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
 
-    int block = 128;
+    int block = 64;
     int grid = (num_active + block - 1) / block;
 
     gpu_compute_phase1_kernel<<<grid, block, 0, ctx->stream>>>(
