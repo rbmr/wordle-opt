@@ -121,14 +121,9 @@ __global__ void gpu_compute_phase1_kernel(
 extern "C" {
 void gpu_compute_phase1(
     ThreadContext* ctx,
-    const uint16_t* host_active_guesses,
     int num_active,
-    const uint16_t* host_set,
     int set_len,
-    int parent_max_k,
-    uint32_t* host_out_expected_rem,
-    uint32_t* host_out_lb_cost,
-    uint8_t* host_out_num_non_empty
+    int parent_max_k
 ) {
     cudaMemcpyAsync(ctx->d_active_guesses, ctx->h_active_guesses, num_active * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
     cudaMemcpyAsync(ctx->d_set, ctx->h_set, set_len * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
