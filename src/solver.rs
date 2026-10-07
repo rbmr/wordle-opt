@@ -34,6 +34,8 @@ pub struct Metrics {
     pub pruned_by_equivalence: AtomicUsize,
     pub cache_hits: AtomicUsize,
     pub cache_misses: AtomicUsize,
+    pub equiv_cache_hits: AtomicUsize,
+    pub equiv_cache_misses: AtomicUsize,
     /// Number of root-level first guesses fully evaluated (for progress reporting).
     pub root_guesses_done: AtomicUsize,
 }
@@ -54,6 +56,8 @@ impl Metrics {
             pruned_by_equivalence: AtomicUsize::new(0),
             cache_hits: AtomicUsize::new(0),
             cache_misses: AtomicUsize::new(0),
+            equiv_cache_hits: AtomicUsize::new(0),
+            equiv_cache_misses: AtomicUsize::new(0),
             root_guesses_done: AtomicUsize::new(0),
         }
     }
@@ -623,6 +627,9 @@ impl<'a> Solver<'a> {
         let active_guesses_rc = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
             if let Some(cached) = cache.get(&set_hash) {
+                self.metrics
+                    .equiv_cache_hits
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 Some(std::sync::Arc::clone(cached))
             } else {
                 None
@@ -684,10 +691,13 @@ impl<'a> Solver<'a> {
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
                 // Check again in case another thread computed it while we were working
                 if let Some(cached) = cache_mut.get(&set_hash) {
+                    self.metrics
+                        .equiv_cache_hits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     std::sync::Arc::clone(cached)
                 } else {
                     self.metrics
-                        .cache_misses
+                        .equiv_cache_misses
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     self.metrics.pruned_by_equivalence.fetch_add(
                         self.dict.guesses.len() - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
@@ -704,7 +714,7 @@ impl<'a> Solver<'a> {
                 }
             } else {
                 self.metrics
-                    .cache_misses
+                    .equiv_cache_misses
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 self.metrics.pruned_by_equivalence.fetch_add(
                     self.dict.guesses.len() - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
@@ -1456,6 +1466,24 @@ mod tests {
             "non-deterministic results across repeated runs on identical input: {:?}",
             results
         );
+    }
+    #[test]
+    fn test_equiv_cache_metrics_populated() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        // Use a small set that will definitely trigger some EquivCache hits/misses.
+        // N=100 might not trigger hits if it's too small, but misses will definitely happen.
+        let candidates: Vec<usize> = (0..100).collect();
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
+        let _cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
+        
+        let hits = metrics.equiv_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let misses = metrics.equiv_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        
+        // At least we should have some cache misses since it's empty initially.
+        assert!(misses > 0, "Expected some EquivCache misses, got 0");
     }
 }
 #[cfg(test)]
