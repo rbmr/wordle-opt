@@ -70,6 +70,24 @@ static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 /// - Equivalence-class guess projection (skips guesses that are
 ///   indistinguishable given the current candidate set)
 /// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
+
+pub struct SolverScratch {
+    pub scratch_is_in_set: [Vec<bool>; 32],
+    pub scratch_guesses: [Vec<usize>; 32],
+    pub scratch_sorted_sets: [Vec<usize>; 32],
+    pub scratch_phase1_guesses: [Vec<usize>; 32],
+    pub scratch_phase2_guesses: [Vec<usize>; 32],
+    pub scratch_phase1_tuples: [Vec<(usize, u32, u32, usize)>; 32],
+    pub scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
+    pub scratch_hash_table: [Vec<u64>; 32],
+    pub scratch_added_indices: [Vec<usize>; 32],
+    pub scratch_projs: [Vec<u64>; 32],
+}
+
+thread_local! {
+    static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = std::cell::RefCell::new(None);
+}
+
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
@@ -94,6 +112,25 @@ pub struct Solver<'a> {
     scratch_hash_table: [Vec<u64>; 32],
     scratch_added_indices: [Vec<usize>; 32],
     scratch_projs: [Vec<u64>; 32],
+}
+
+
+impl<'a> Drop for Solver<'a> {
+    fn drop(&mut self) {
+        let scratch = Box::new(SolverScratch {
+            scratch_is_in_set: std::mem::replace(&mut self.scratch_is_in_set, std::array::from_fn(|_| Vec::new())),
+            scratch_guesses: std::mem::replace(&mut self.scratch_guesses, std::array::from_fn(|_| Vec::new())),
+            scratch_sorted_sets: std::mem::replace(&mut self.scratch_sorted_sets, std::array::from_fn(|_| Vec::new())),
+            scratch_phase1_guesses: std::mem::replace(&mut self.scratch_phase1_guesses, std::array::from_fn(|_| Vec::new())),
+            scratch_phase2_guesses: std::mem::replace(&mut self.scratch_phase2_guesses, std::array::from_fn(|_| Vec::new())),
+            scratch_phase1_tuples: std::mem::replace(&mut self.scratch_phase1_tuples, std::array::from_fn(|_| Vec::new())),
+            scratch_phase2_tuples: std::mem::replace(&mut self.scratch_phase2_tuples, std::array::from_fn(|_| Vec::new())),
+            scratch_hash_table: std::mem::replace(&mut self.scratch_hash_table, std::array::from_fn(|_| Vec::new())),
+            scratch_added_indices: std::mem::replace(&mut self.scratch_added_indices, std::array::from_fn(|_| Vec::new())),
+            scratch_projs: std::mem::replace(&mut self.scratch_projs, std::array::from_fn(|_| Vec::new())),
+        });
+        THREAD_SCRATCH.with(|ts| *ts.borrow_mut() = Some(scratch));
+    }
 }
 
 impl<'a> Solver<'a> {
@@ -216,6 +253,21 @@ impl<'a> Solver<'a> {
         global_beta: &'a AtomicU32,
         equiv_cache: &'a EquivCache,
     ) -> Self {
+        let scratch = THREAD_SCRATCH.with(|ts| ts.borrow_mut().take()).unwrap_or_else(|| {
+            Box::new(SolverScratch {
+                scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
+                scratch_guesses: std::array::from_fn(|_| Vec::new()),
+                scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
+                scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
+                scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
+                scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
+                scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
+                scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
+                scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
+                scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
+            })
+        });
+
         Self {
             matrix,
             max_k,
@@ -227,16 +279,16 @@ impl<'a> Solver<'a> {
             equiv_cache,
             current_cost_so_far: 0,
 
-            scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
-            scratch_guesses: std::array::from_fn(|_| Vec::new()),
-            scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
-            scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
-            scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
-            scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
-            scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
-            scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
-            scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
-            scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
+            scratch_is_in_set: scratch.scratch_is_in_set,
+            scratch_guesses: scratch.scratch_guesses,
+            scratch_sorted_sets: scratch.scratch_sorted_sets,
+            scratch_phase1_guesses: scratch.scratch_phase1_guesses,
+            scratch_phase2_guesses: scratch.scratch_phase2_guesses,
+            scratch_phase1_tuples: scratch.scratch_phase1_tuples,
+            scratch_phase2_tuples: scratch.scratch_phase2_tuples,
+            scratch_hash_table: scratch.scratch_hash_table,
+            scratch_added_indices: scratch.scratch_added_indices,
+            scratch_projs: scratch.scratch_projs,
         }
     }
 
