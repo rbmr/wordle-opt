@@ -585,6 +585,15 @@ impl<'a> Solver<'a> {
                     }
                 }
 
+                // Fast theoretical-minimum short circuits:
+                // An in-set guess has an absolute theoretical minimum cost of 2*c_len - 1.
+                // An out-of-set guess has an absolute theoretical minimum cost of 2*c_len.
+                // Therefore, if we find an in-set guess achieving 2*c_len - 1 (num_distinct == c_len - 1), 
+                // it is perfectly optimal and we can return it immediately.
+                // If we find an in-set guess achieving 2*c_len (num_distinct == c_len - 2), we can safely 
+                // record it as the best possible fallback (best_inside) because no out-of-set guess could 
+                // possibly beat 2*c_len anyway. We don't return immediately in case another in-set guess 
+                // can achieve 2*c_len - 1.
                 if num_distinct == c_len - 1 {
                     return (2 * c_len - 1) as u32;
                 }
