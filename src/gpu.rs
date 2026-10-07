@@ -6,14 +6,9 @@ unsafe extern "C" {
     pub fn gpu_init(matrix: *const u8, matrix_size: usize, bounds: *const u32, bounds_size: usize);
     pub fn gpu_compute_phase1(
         ctx: *mut std::ffi::c_void,
-        active_guesses: *const u16,
         num_active: i32,
-        set: *const u16,
         set_len: i32,
-        parent_max_k: i32,
-        out_expected_rem: *mut u32,
-        out_lb_cost: *mut u32,
-        out_num_non_empty: *mut u8
+        parent_max_k: i32
     );
     pub fn gpu_get_h_active_guesses(ctx: *mut std::ffi::c_void) -> *mut u16;
     pub fn gpu_get_h_set(ctx: *mut std::ffi::c_void) -> *mut u16;
