@@ -14,7 +14,12 @@ pub struct ResponseMatrix {
     pub candidate_masks: Vec<u32>,
     pub zobrist: Vec<u64>,
     pub data: Vec<Response>,
-    pub data_c_g: Vec<Response>, // Transposed matrix: [candidate][guess]
+    /// Transposed matrix: `data_c_g[candidate * num_guesses + guess]`.
+    ///
+    /// This layout provides coalesced, cache-friendly memory access when looping over all guesses
+    /// for a fixed candidate. This is critical for the `is_equivalent` check which compares two
+    /// candidates across all possible guesses.
+    pub data_c_g: Vec<Response>,
 }
 
 impl ResponseMatrix {
