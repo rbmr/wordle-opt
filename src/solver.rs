@@ -991,7 +991,7 @@ impl<'a> Solver<'a> {
                         for i in 0..phase2_guesses.len() { in_g[i] = phase2_guesses[i] as u16; }
                         let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
                         for i in 0..set.len() { in_s[i] = set[i] as u16; }
-                        crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase2_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                        crate::gpu::gpu_compute_phase1(ctx, phase2_guesses.len() as i32, set.len() as i32, parent_max_k as i32);
                         let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase2_guesses.len());
                         let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase2_guesses.len());
                         let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase2_guesses.len());
@@ -1488,7 +1488,7 @@ mod tests {
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let _cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         
-        let hits = metrics.equiv_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        let _hits = metrics.equiv_cache_hits.load(std::sync::atomic::Ordering::Relaxed);
         let misses = metrics.equiv_cache_misses.load(std::sync::atomic::Ordering::Relaxed);
         
         // At least we should have some cache misses since it's empty initially.
