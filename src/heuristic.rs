@@ -1,6 +1,10 @@
 #![allow(clippy::needless_range_loop)]
 use crate::matrix::ResponseMatrix;
 
+/// Computes a heuristic score for a guess based on the sum of squares of bucket sizes.
+///
+/// A lower score is better, as it indicates the guess splits the candidates more evenly
+/// across the 243 possible response patterns.
 pub fn compute_expected_remaining(
     matrix: &ResponseMatrix,
     candidates: &[usize],
@@ -19,6 +23,7 @@ pub fn compute_expected_remaining(
     score
 }
 
+/// Sorts a slice of guesses in-place by their `expected_remaining` heuristic score.
 pub fn sort_guesses_by_expected_remaining(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
@@ -27,6 +32,10 @@ pub fn sort_guesses_by_expected_remaining(
     guesses.sort_by_cached_key(|&g| compute_expected_remaining(matrix, candidates, g));
 }
 
+/// Computes the maximum number of distinct response patterns (branches)
+/// that ANY guess can generate across the given candidate set.
+///
+/// This provides the `max_k` value used to calculate capacity bounds.
 pub fn compute_max_branching_factor(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
@@ -152,6 +161,13 @@ mod expected_remaining_tests {
     }
 }
 
+/// Computes a lower bound on the cost when the root guess is a Phase 2 guess
+/// (i.e. not in the remaining candidate set).
+///
+/// A Phase 2 guess cannot possibly hit the correct word at depth 1.
+/// Thus, all `n` candidates must be resolved at depth 2 or deeper.
+/// `root_k` is the maximum branching factor of the root guess,
+/// while `max_k` is the maximum branching factor for all subsequent depths.
 pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if n == 0 {
         return 0;
@@ -175,6 +191,12 @@ pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     cost
 }
 
+/// Computes a lower bound for a Phase 1 guess where the root branching factor
+/// (`root_k`) is restricted compared to the global max branching factor (`max_k`).
+///
+/// Since it is a Phase 1 guess, 1 candidate can be a WIN at depth 1.
+/// The remaining branches at depth 1 are at most `root_k - 1`.
+/// All deeper levels have branching factor `max_k - 1`.
 pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if n == 0 {
         return 0;
