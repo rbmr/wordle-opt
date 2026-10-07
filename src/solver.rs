@@ -66,15 +66,6 @@ impl Metrics {
 /// Sentinel used by non-root Solver instances; never tightened, so never causes spurious abort.
 static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 
-/// The optimal Wordle solver using Branch and Bound.
-///
-/// Implements aggressive search space pruning through:
-/// - Exact capacity lower bounds (see `heuristic::capacity_bound`)
-/// - Expected-remaining-candidate guess ordering heuristic
-/// - Equivalence-class guess projection (skips guesses that are
-///   indistinguishable given the current candidate set)
-/// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
-
 pub struct SolverScratch {
     pub scratch_is_in_set: [Vec<bool>; 32],
     pub scratch_guesses: [Vec<usize>; 32],
@@ -89,8 +80,17 @@ pub struct SolverScratch {
 }
 
 thread_local! {
-    static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = std::cell::RefCell::new(None);
+    static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
 }
+
+/// The optimal Wordle solver using Branch and Bound.
+///
+/// Implements aggressive search space pruning through:
+/// - Exact capacity lower bounds (see `heuristic::capacity_bound`)
+/// - Expected-remaining-candidate guess ordering heuristic
+/// - Equivalence-class guess projection (skips guesses that are
+///   indistinguishable given the current candidate set)
+/// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
 
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
@@ -787,7 +787,7 @@ impl<'a> Solver<'a> {
                         for i in 0..phase1_guesses.len() { in_g[i] = phase1_guesses[i] as u16; }
                         let in_s = std::slice::from_raw_parts_mut(crate::gpu::gpu_get_h_set(ctx), set.len());
                         for i in 0..set.len() { in_s[i] = set[i] as u16; }
-                        crate::gpu::gpu_compute_phase1(ctx, std::ptr::null(), phase1_guesses.len() as i32, std::ptr::null(), set.len() as i32, parent_max_k as i32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+                        crate::gpu::gpu_compute_phase1(ctx, phase1_guesses.len() as i32, set.len() as i32, parent_max_k as i32);
                         let exps = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_expected_rem(ctx), phase1_guesses.len());
                         let lbs = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_lb_cost(ctx), phase1_guesses.len());
                         let nums = std::slice::from_raw_parts(crate::gpu::gpu_get_h_out_num_non_empty(ctx), phase1_guesses.len());
