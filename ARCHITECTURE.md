@@ -142,8 +142,8 @@ aspirational documentation of what used to be true.
 ## Equivalence Caching and Mathematical Bounds (Added 2026-09)
 
 To eliminate the `O(G log G)` sorting overhead of finding equivalence classes at every node, `wordle-opt` implements a lock-striped globally shared `EquivCache`. 
-- **The Key (`c_mask`)**: The cache uses a 26-bit integer `c_mask` representing the union of all characters present in the remaining candidates.
-- **The Projection (`proj`)**: It maps `c_mask` to a deduplicated list of allowed guesses. The deduplication works by filtering out characters in a guess that do not appear in `c_mask`. If two guesses have identical characters at the identical positions for all characters present in `c_mask`, they are guaranteed to produce the exact same response against the current candidate set. This is a mathematically exact mapping.
+- **The Key (`set_hash`)**: The cache uses a 64-bit Zobrist hash of the exact candidate set (`set_hash`).
+- **The Projection (`proj`)**: It maps `set_hash` to a deduplicated list of allowed guesses. The deduplication works by computing a 64-bit Zobrist hash of the actual responses each guess produces against the current candidate set. If two guesses produce the exact same response hashes across the candidate set, they are mathematically guaranteed to partition the set identically and are treated as equivalent.
 
 Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) and **Phase 2** (non-candidate guesses):
 - `valid_max_k` (the maximum branching factor among Phase 1 guesses) restricts the capacity bounds of trees rooted in a Phase 1 guess.

@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 ///
 /// Reduces the O(G log G) sorting overhead that would otherwise be required 
 /// to find equivalence classes at every node.
-/// The hash key represents the `c_mask` (characters present in remaining candidates).
-/// The mapped value is the exact deduplicated projection of all valid guesses.
+/// The hash key represents the `set_hash` (a 64-bit Zobrist hash of the exact candidate set).
+/// The mapped value is the exact deduplicated projection of all valid guesses,
+/// deduplicated by a Zobrist hash of the responses they produce.
 pub type EquivCache =
     [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 64];
 
