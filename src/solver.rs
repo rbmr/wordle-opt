@@ -253,7 +253,7 @@ impl<'a> Solver<'a> {
     ) -> u32 {
         let cache_size = if crate::is_compute_host() {
             // 512 M entries × 8 bytes each = 4 GB. Compute has 14 GB available.
-            128 * 1024 * 1024
+            512 * 1024 * 1024
         } else {
             64 * 1024 * 1024
         };
@@ -566,60 +566,69 @@ impl<'a> Solver<'a> {
             set_hash ^= self.matrix.zobrist[c];
         }
 
+        let should_cache_equiv = set.len() >= 10;
         let shard_idx = (set_hash as usize) % 64;
-        let active_guesses_rc = {
+        let active_guesses_rc = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
             if let Some(cached) = cache.get(&set_hash) {
-                std::sync::Arc::clone(cached)
+                Some(std::sync::Arc::clone(cached))
             } else {
-                drop(cache);
-                
-                // Do the heavy projection/sorting outside the write lock to prevent blocking
-                // other threads trying to access different set_hashes in the same shard.
-                let num_u64s = self.dict.guesses.len().div_ceil(64);
-                let mut active_bits = vec![0u64; num_u64s];
-                let table = &mut self.scratch_hash_table[depth];
-                let added_indices = &mut self.scratch_added_indices[depth];
-                added_indices.clear();
-                
-                let projs = &mut self.scratch_projs[depth];
-                projs.fill(0);
-                let num_guesses = self.dict.guesses.len();
-                
-                for &c in set {
-                    let c_off = c * num_guesses;
-                    let z = self.matrix.zobrist[c];
-                    for g in 0..num_guesses {
-                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
-                        projs[g] ^= z.wrapping_mul(r as u64 + 1);
-                    }
-                }
-                
-                for g in 0..num_guesses {
-                    let mut proj = projs[g];
-                    if proj == 0 { proj = 1; }
-                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
-                    loop {
-                        let slot = table[idx];
-                        if slot == 0 {
-                            table[idx] = proj;
-                            active_bits[g / 64] |= 1 << (g % 64);
-                            added_indices.push(idx);
-                            break;
-                        }
-                        if slot == proj {
-                            break;
-                        }
-                        idx = (idx + 1) & 32767;
-                    }
-                }
-                
-                for &idx in added_indices.iter() {
-                    table[idx] = 0;
-                }
-                
-                let rc = std::sync::Arc::new(active_bits);
+                None
+            }
+        } else {
+            None
+        };
 
+        let active_guesses_rc = if let Some(rc) = active_guesses_rc {
+            rc
+        } else {
+            // Do the heavy projection/sorting outside the write lock to prevent blocking
+            // other threads trying to access different set_hashes in the same shard.
+            let num_u64s = self.dict.guesses.len().div_ceil(64);
+            let mut active_bits = vec![0u64; num_u64s];
+            let table = &mut self.scratch_hash_table[depth];
+            let added_indices = &mut self.scratch_added_indices[depth];
+            added_indices.clear();
+            
+            let projs = &mut self.scratch_projs[depth];
+            projs.fill(0);
+            let num_guesses = self.dict.guesses.len();
+            
+            for &c in set {
+                let c_off = c * num_guesses;
+                let z = self.matrix.zobrist[c];
+                for g in 0..num_guesses {
+                    let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
+                    projs[g] ^= z.wrapping_mul(r as u64 + 1);
+                }
+            }
+            
+            for g in 0..num_guesses {
+                let mut proj = projs[g];
+                if proj == 0 { proj = 1; }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
+                loop {
+                    let slot = table[idx];
+                    if slot == 0 {
+                        table[idx] = proj;
+                        active_bits[g / 64] |= 1 << (g % 64);
+                        added_indices.push(idx);
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & 32767;
+                }
+            }
+            
+            for &idx in added_indices.iter() {
+                table[idx] = 0;
+            }
+            
+            let rc = std::sync::Arc::new(active_bits);
+
+            if should_cache_equiv {
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
                 // Check again in case another thread computed it while we were working
                 if let Some(cached) = cache_mut.get(&set_hash) {
@@ -641,6 +650,15 @@ impl<'a> Solver<'a> {
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
                     rc
                 }
+            } else {
+                self.metrics
+                    .cache_misses
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.metrics.pruned_by_equivalence.fetch_add(
+                    self.dict.guesses.len() - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                rc
             }
         };
 
