@@ -503,17 +503,17 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
     .unwrap();
     writeln!(
         file,
-        "| Size | Seed | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn | EquivMiss |"
+        "| Size | Seed | MaxK | Depth | Cost | Time(s) | States | Guesses | CacheHit | EquivPrn | BndsPrn | EquivMiss | EHits | EMiss |"
     )
     .unwrap();
     writeln!(
         file,
-        "|------|------|------|-------|------|---------|--------|---------|----------|----------|---------|"
+        "|------|------|------|-------|------|---------|--------|---------|----------|----------|---------|-----------|-------|-------|"
     )
     .unwrap();
 
     println!(
-        "{:<6} | {:<20} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
+        "{:<6} | {:<20} | {:<6} | {:<6} | {:<10} | {:<10} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9} | {:<6} | {:<6}",
         "Size",
         "Seed",
         "MaxK",
@@ -525,11 +525,13 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
         "CacheHit",
         "EquivPrn",
         "BndsPrn",
-        "EquivMiss"
+        "EquivMiss",
+        "EHits",
+        "EMiss"
     );
     println!(
-        "{:-<6}-+-{:-<20}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}",
-        "", "", "", "", "", "", "", "", "", "", "", ""
+        "{:-<6}-+-{:-<20}-+-{:-<6}-+-{:-<6}-+-{:-<10}-+-{:-<10}-+-{:-<11}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<9}-+-{:-<6}-+-{:-<6}",
+        "", "", "", "", "", "", "", "", "", "", "", "", "", ""
     );
 
     for &s in sizes {
@@ -569,9 +571,15 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
             let equiv_misses = metrics
                 .cache_misses
                 .load(std::sync::atomic::Ordering::Relaxed);
+            let e_hits = metrics
+                .equiv_cache_hits
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let e_misses = metrics
+                .equiv_cache_misses
+                .load(std::sync::atomic::Ordering::Relaxed);
 
             println!(
-                "{:<6} | {:<20} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9}",
+                "{:<6} | {:<20} | {:<6} | {:<6} | {:<10} | {:<10.3} | {:<11} | {:<9} | {:<9} | {:<9} | {:<9} | {:<9} | {:<6} | {:<6}",
                 size,
                 seed,
                 max_k,
@@ -583,11 +591,13 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
                 cache_hits,
                 equiv_pruned,
                 bounds_pruned,
-                equiv_misses
+                equiv_misses,
+                e_hits,
+                e_misses
             );
             writeln!(
                 file,
-                "| {} | {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {:.3} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 size,
                 seed,
                 max_k,
@@ -599,7 +609,9 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
                 cache_hits,
                 equiv_pruned,
                 bounds_pruned,
-                equiv_misses
+                equiv_misses,
+                e_hits,
+                e_misses
             )
             .unwrap();
         }
