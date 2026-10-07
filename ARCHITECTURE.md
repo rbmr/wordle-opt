@@ -14,6 +14,12 @@ structure - it's a fixed-size `Vec<AtomicU64>`, each slot packing a 45-bit
 Zobrist hash, an 18-bit cost value, and a 1-bit exact/lower-bound flag, read
 and written with relaxed atomics and no locking.
 
+To combat severe cache thrashing (the "depth cliff") at large scales where 
+frequent deep-node evaluation overwrites valuable shallow-node results, 
+`GlobalCache` implements a **Lock-Free Two-Tier Replacement Policy**:
+- **Slot 0 (Always-Replace):** Stores the most recently visited node.
+- **Slot 1 (Depth-Preferred):** Preserves the harder/deeper subtrees (those with a higher cost value) and protects them from being evicted by shallow exploration.
+
 `insert()` has a known, deliberately-accepted TOCTOU race: a concurrent
 writer's update can occasionally be lost. This does not affect correctness
 - alpha-beta search with a transposition table is correct even when entries
@@ -144,6 +150,7 @@ aspirational documentation of what used to be true.
 To eliminate the `O(G log G)` sorting overhead of finding equivalence classes at every node, `wordle-opt` implements a lock-striped globally shared `EquivCache`. 
 - **The Key (`set_hash`)**: The cache uses a 64-bit Zobrist hash of the exact candidate set (`set_hash`).
 - **The Projection (`proj`)**: It maps `set_hash` to a deduplicated list of allowed guesses. The deduplication works by computing a 64-bit Zobrist hash of the actual responses each guess produces against the current candidate set. If two guesses produce the exact same response hashes across the candidate set, they are mathematically guaranteed to partition the set identically and are treated as equivalent.
+- **Deep Node Bypass**: Small sets (`c_len < 10`) are extremely fast to compute on the fly (~50µs) and are rarely re-searched. To prevent millions of deep nodes from polluting the cache and evicting highly reusable shallow sets (which are critical for MTDF zero-window re-searches), `EquivCache` completely bypasses insertion for small sets.
 
 Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) and **Phase 2** (non-candidate guesses):
 - `valid_max_k` (the maximum branching factor among Phase 1 guesses) restricts the capacity bounds of trees rooted in a Phase 1 guess.
