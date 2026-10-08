@@ -1132,13 +1132,12 @@ impl<'a> Solver<'a> {
         for &c in set {
             let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
             unsafe {
-                *counts.get_unchecked_mut(r) += 1;
-            }
-        }
-        for r in 0..243 {
-            if counts[r] > 0 {
-                non_empty_indices[num_non_empty] = r as u8;
-                num_non_empty += 1;
+                let cnt = counts.get_unchecked_mut(r);
+                if *cnt == 0 {
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                    num_non_empty += 1;
+                }
+                *cnt += 1;
             }
         }
 
