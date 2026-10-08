@@ -33,7 +33,27 @@ impl Response {
     pub const fn new(r0: u8, r1: u8, r2: u8, r3: u8, r4: u8) -> Self {
         Response(r0 + r1 * 3 + r2 * 9 + r3 * 27 + r4 * 81)
     }
+}
 
+impl std::fmt::Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut val = self.0;
+        let mut s = String::with_capacity(5);
+        for _ in 0..5 {
+            let c = match val % 3 {
+                0 => 'B',
+                1 => 'G',
+                2 => 'Y',
+                _ => unreachable!(),
+            };
+            s.push(c);
+            val /= 3;
+        }
+        write!(f, "{}", s)
+    }
+}
+
+impl Response {
     pub fn compute(secret: &Word, guess: &Word) -> Self {
         let mut r = [0u8; 5]; // 0 = black
         let mut used = [false; 5];
@@ -149,5 +169,12 @@ mod extra_core_tests {
         let c = &Word(*b"WORLD");
         let score = Response::compute(g, c).0;
         assert!(score < 243);
+    }
+
+    #[test]
+    fn test_response_display() {
+        assert_eq!(Response::WIN.to_string(), "GGGGG");
+        assert_eq!(Response::new(0, 0, 0, 0, 0).to_string(), "BBBBB");
+        assert_eq!(Response::new(0, 1, 2, 0, 1).to_string(), "BGYBG");
     }
 }
