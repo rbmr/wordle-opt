@@ -5,12 +5,16 @@ pub mod dict;
 pub mod heuristic;
 pub mod matrix;
 pub mod naive;
+pub mod policy;
+pub mod policy_stats;
 pub mod solver;
 pub mod verify;
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
+use crate::policy::{BuildOptions, PolicyTree, Strategy};
 use crate::solver::{Metrics, Solver};
+use std::collections::HashMap;
 use std::env;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -426,7 +430,11 @@ fn run_benchmark_random(
 /// Draws one random subset of `size` distinct candidate indices (no
 /// replacement) from `rng`, sorted. Shared by `benchmark-random` and
 /// `diagnose` so both draw samples the same way.
-fn sample_random_subset(rng: &mut fastrand::Rng, n_candidates: usize, size: usize) -> Vec<usize> {
+pub(crate) fn sample_random_subset(
+    rng: &mut fastrand::Rng,
+    n_candidates: usize,
+    size: usize,
+) -> Vec<usize> {
     let mut subset = Vec::with_capacity(size);
     while subset.len() < size {
         let idx = rng.usize(0..n_candidates);
@@ -779,10 +787,329 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     writeln!(file).unwrap();
 }
 
+/// Minimal `--key value` / `--key=value` / `--flag` argument parser. Positional
+/// arguments (used by `validate <file>`) are collected separately.
+struct Flags {
+    values: HashMap<String, String>,
+    positional: Vec<String>,
+}
+
+impl Flags {
+    fn parse(args: &[String]) -> Self {
+        let mut values = HashMap::new();
+        let mut positional = Vec::new();
+        let mut i = 0;
+        while i < args.len() {
+            let a = &args[i];
+            if let Some(key) = a.strip_prefix("--") {
+                let (k, v) = match key.split_once('=') {
+                    Some((k, v)) => (k.to_string(), v.to_string()),
+                    None => {
+                        if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                            i += 1;
+                            (key.to_string(), args[i].clone())
+                        } else {
+                            (key.to_string(), "true".to_string())
+                        }
+                    }
+                };
+                values.insert(k, v);
+            } else {
+                positional.push(a.clone());
+            }
+            i += 1;
+        }
+        Self { values, positional }
+    }
+
+    fn get(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(String::as_str)
+    }
+
+    fn get_or<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
+        self.get(key).unwrap_or(default)
+    }
+}
+
+/// Builds a `Dictionary` from `--guesses`/`--candidates` (defaulting to the
+/// shipped lists), optionally reduced to a smaller candidate set:
+/// - `--max-candidates N` takes the first `N` candidates (the same
+///   deterministic first-N convention the golden tests use), or
+/// - `--max-candidates N --sample-seed S` takes `N` candidates drawn from the
+///   reproducible stream `subset_rng(S, N)` - a representative spread rather
+///   than one alphabetically-adjacent slice.
+fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> Dictionary {
+    let guesses = flags.get_or("guesses", "words/guesses.txt");
+    let candidates = flags.get_or("candidates", "words/candidates.txt");
+    let full = Dictionary::load(guesses, candidates);
+    if max_candidates == 0 || max_candidates >= full.candidates.len() {
+        return full;
+    }
+    let idx: Vec<usize> = match flags.get("sample-seed").and_then(|v| v.parse::<u64>().ok()) {
+        Some(seed) => {
+            let mut rng = subset_rng(seed, max_candidates);
+            sample_random_subset(&mut rng, full.candidates.len(), max_candidates)
+        }
+        None => (0..max_candidates).collect(),
+    };
+    let subset: Vec<crate::core::Word> = idx.iter().map(|&i| full.candidates[i]).collect();
+    Dictionary::from_words(full.guesses.clone(), subset)
+}
+
+/// `wordle-opt solve` - capture a fully determined policy tree for the chosen
+/// strategy and write it (compact or readable JSON), with an optional
+/// per-node Parquet/NDJSON trace.
+fn run_solve_cli(args: &[String]) {
+    let flags = Flags::parse(args);
+
+    let Some(output) = flags.get("output") else {
+        eprintln!("solve: --output <path> is required");
+        std::process::exit(2);
+    };
+    let Some(strategy) = flags.get("strategy").and_then(Strategy::parse) else {
+        eprintln!(
+            "solve: --strategy must be one of: {}",
+            Strategy::all()
+                .iter()
+                .map(|s| s.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        std::process::exit(2);
+    };
+    let format = flags.get_or("format", "compact");
+    if format != "compact" && format != "readable" {
+        eprintln!("solve: --format must be 'compact' or 'readable'");
+        std::process::exit(2);
+    }
+    let max_candidates: usize = flags
+        .get("max-candidates")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let cache_entries: usize = flags
+        .get("cache-entries")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1 << 22);
+    let progress = !flags.values.contains_key("no-progress");
+    let collect_stats = flags.get("stats").is_some();
+    let stats_format = flags.get_or("stats-format", "parquet");
+
+    let dict = load_dict_from_flags(&flags, max_candidates);
+    let n = dict.candidates.len();
+    println!(
+        "solve: strategy={} candidates={} guesses={}",
+        strategy.name(),
+        n,
+        dict.guesses.len()
+    );
+    if strategy == Strategy::Optimal && !is_compute_host() && n > 500 {
+        eprintln!(
+            "WARNING: building an optimal policy tree for N={n} off the compute host will be very slow; \
+             run it on `compute` (or use --max-candidates for an example)."
+        );
+    }
+
+    println!("Computing response matrix...");
+    let matrix = ResponseMatrix::new(&dict);
+    let root: Vec<usize> = (0..n).collect();
+
+    let opts = BuildOptions {
+        collect_samples: collect_stats,
+        progress,
+        cache_entries,
+        ..Default::default()
+    };
+    let start = Instant::now();
+    let (tree, stats) =
+        match crate::policy::build_policy_tree(&matrix, &dict, strategy, &root, &opts) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("solve: {e}");
+                std::process::exit(1);
+            }
+        };
+    let elapsed = start.elapsed();
+
+    // Serialize.
+    let serialized = match format {
+        "readable" => match tree.to_readable(&dict) {
+            Ok(r) => r.to_json(),
+            Err(e) => {
+                eprintln!("solve: {e}");
+                std::process::exit(1);
+            }
+        },
+        _ => tree.to_compact_json(),
+    };
+    if let Err(e) = std::fs::write(output, &serialized) {
+        eprintln!("solve: cannot write {output}: {e}");
+        std::process::exit(1);
+    }
+
+    // Self-validate the written bytes (round-trip through the reader).
+    let report = match validate_bytes(&serialized, Some(&dict)) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("solve: internal error: written tree failed validation: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    println!("=== POLICY TREE COMPLETE ===");
+    println!("Strategy: {}", strategy.name());
+    println!("Format: {}", format);
+    println!("Candidates: {}", n);
+    println!("Nodes: {}", tree.node_count());
+    println!("Edges: {}", tree.edge_count());
+    println!("Leaves: {}", report.leaves);
+    println!("Max depth: {}", report.max_depth);
+    println!("Total cost: {}", report.total_cost);
+    println!("Mean guesses: {:.6}", report.mean_guesses);
+    println!("Build time: {:.3}s", elapsed.as_secs_f64());
+    println!(
+        "Dictionary hash: {}",
+        crate::policy::hash_hex(tree.dictionary_hash)
+    );
+    println!("Wrote: {output} ({} bytes)", serialized.len());
+    println!("Validation: OK (edge iff possible at every node)");
+
+    if let Some(stats_path) = flags.get("stats") {
+        let meta = crate::policy_stats::StatsMeta {
+            strategy: strategy.name().to_string(),
+            dictionary_hash: crate::policy::hash_hex(tree.dictionary_hash),
+            commit: git_commit_hash(),
+            num_guesses: dict.guesses.len() as u32,
+            num_candidates: n as u32,
+            root_candidates: n as u32,
+        };
+        let res = match stats_format {
+            "ndjson" | "json" => {
+                crate::policy_stats::write_ndjson(std::path::Path::new(stats_path), &stats, &meta)
+            }
+            "parquet" => {
+                crate::policy_stats::write_parquet(std::path::Path::new(stats_path), &stats, &meta)
+            }
+            other => {
+                eprintln!("solve: --stats-format must be 'parquet' or 'ndjson' (got {other})");
+                std::process::exit(2);
+            }
+        };
+        match res {
+            Ok(()) => println!(
+                "Stats: wrote {} progress sample(s) to {stats_path} ({stats_format})",
+                stats.samples.len()
+            ),
+            Err(e) => {
+                eprintln!("solve: failed to write stats: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+/// Parses `bytes` as either policy-tree format and validates it. For the
+/// readable format the dictionary is embedded, so `fallback` is ignored.
+fn validate_bytes(
+    bytes: &str,
+    fallback: Option<&Dictionary>,
+) -> Result<crate::policy::ValidationReport, crate::policy::PolicyError> {
+    let peek: serde_json::Value = serde_json::from_str(bytes)?;
+    let format = peek.get("format").and_then(|v| v.as_str()).unwrap_or("");
+    match format {
+        crate::policy::FORMAT_READABLE => {
+            let file = crate::policy::ReadableTreeFile::from_json(bytes)?;
+            let dict = file.embedded_dictionary();
+            let matrix = ResponseMatrix::new(&dict);
+            let tree = file.to_tree()?;
+            tree.validate(&matrix, &dict)
+        }
+        crate::policy::FORMAT_COMPACT => {
+            let dict = fallback.ok_or_else(|| {
+                crate::policy::PolicyError::BadHeader(
+                    "compact trees need --guesses/--candidates to validate".into(),
+                )
+            })?;
+            let matrix = ResponseMatrix::new(dict);
+            let tree = PolicyTree::from_compact_json(bytes)?;
+            tree.validate(&matrix, dict)
+        }
+        other => Err(crate::policy::PolicyError::BadHeader(format!(
+            "unrecognized tree format {other:?}"
+        ))),
+    }
+}
+
+/// `wordle-opt validate <tree.json>` - validates a serialized policy tree.
+fn run_validate_cli(args: &[String]) {
+    let flags = Flags::parse(args);
+    let Some(path) = flags.positional.first() else {
+        eprintln!(
+            "validate: usage: wordle-opt validate <tree.json> [--guesses P] [--candidates P] [--max-candidates N]"
+        );
+        std::process::exit(2);
+    };
+    let bytes = match std::fs::read_to_string(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("validate: cannot read {path}: {e}");
+            std::process::exit(1);
+        }
+    };
+    let peek: serde_json::Value = match serde_json::from_str(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("validate: {path} is not valid JSON: {e}");
+            std::process::exit(1);
+        }
+    };
+    let format = peek.get("format").and_then(|v| v.as_str()).unwrap_or("");
+    let max_candidates: usize = flags
+        .get("max-candidates")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let dict = if format == crate::policy::FORMAT_COMPACT {
+        Some(load_dict_from_flags(&flags, max_candidates))
+    } else {
+        None
+    };
+    match validate_bytes(&bytes, dict.as_ref()) {
+        Ok(r) => {
+            println!("=== POLICY TREE VALID ===");
+            println!("File: {path}");
+            println!(
+                "Strategy: {}",
+                peek.get("strategy").and_then(|v| v.as_str()).unwrap_or("?")
+            );
+            println!(
+                "Dictionary hash: {}",
+                peek.get("dictionary_hash")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?")
+            );
+            println!("Nodes: {}", r.nodes);
+            println!("Edges: {}", r.edges);
+            println!("Leaves: {}", r.leaves);
+            println!("Max depth: {}", r.max_depth);
+            println!("Total cost: {}", r.total_cost);
+            println!("Mean guesses: {:.6}", r.mean_guesses);
+            println!("Depth histogram: {:?}", r.depth_histogram);
+        }
+        Err(e) => {
+            eprintln!("INVALID: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 // Agent integrating IDA*
 /// Command line interface entrypoint for solving, benchmarking, and verifying the optimal strategy.
 pub fn run_cli() {
     let args: Vec<String> = env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("solve") => return run_solve_cli(&args[2..]),
+        Some("validate") => return run_validate_cli(&args[2..]),
+        _ => {}
+    }
 
     println!("Loading dictionary...");
     let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
@@ -959,7 +1286,7 @@ pub fn run_cli() {
         }
     } else {
         println!(
-            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID>>"
+            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID> | solve --output <path> --strategy <optimal|min-remaining|max-freq> [--guesses P] [--candidates P] [--max-candidates N] [--format compact|readable] [--stats <path>] [--stats-format parquet|ndjson] [--no-progress] | validate <tree.json>>"
         );
     }
 }
