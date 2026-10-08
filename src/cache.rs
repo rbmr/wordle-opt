@@ -47,7 +47,7 @@ impl GlobalCache {
         }
 
         let slot1_old = self.entries[base_index + 1].load(Ordering::Relaxed);
-        
+
         if slot1_old != 0 {
             let old_hash45 = slot1_old >> HASH_SHIFT;
             if old_hash45 == hash45 {
@@ -68,9 +68,9 @@ impl GlobalCache {
                 if value >= old_value {
                     // New one is harder/deeper, so it replaces slot 1.
                     self.entries[base_index + 1].store(packed, Ordering::Relaxed);
-                    // The old slot 1 could theoretically be demoted to slot 0, 
-                    // but it's simpler and thread-safer to just overwrite it and 
-                    // let the new entry go to slot 1. The always-replace slot 0 
+                    // The old slot 1 could theoretically be demoted to slot 0,
+                    // but it's simpler and thread-safer to just overwrite it and
+                    // let the new entry go to slot 1. The always-replace slot 0
                     // is written below to keep latest.
                     // Wait, we don't need to write to slot 0 if we replaced slot 1?
                     // Let's just return.
@@ -91,8 +91,12 @@ impl GlobalCache {
             if old_hash45 == hash45 {
                 let old_exact = (slot0_old & EXACT_BIT) != 0;
                 let old_value = (slot0_old & VALUE_MASK) as u32;
-                if old_exact && !is_exact { return; }
-                if !old_exact && !is_exact && value < old_value { return; }
+                if old_exact && !is_exact {
+                    return;
+                }
+                if !old_exact && !is_exact && value < old_value {
+                    return;
+                }
             }
         }
         self.entries[base_index].store(packed, Ordering::Relaxed);
@@ -153,14 +157,14 @@ mod tests {
         let cache = GlobalCache::new(1024);
         let hash1 = 0x1000000000000001;
         let hash2 = 0x2000000000000001; // collision
-        
+
         cache.insert(hash1, 10, true);
         // Both hashes are placed in slot 1 initially since it's empty
         // Wait, hash1 goes to slot 1.
         // hash2 comes, slot 1 has hash1 (value 10). hash2 has value 20 (harder).
         // hash2 overwrites slot 1.
         cache.insert(hash2, 20, true);
-        
+
         let (val, _) = cache.get(hash2).unwrap();
         assert_eq!(val, 20);
 
@@ -174,7 +178,7 @@ mod tests {
         assert_eq!(val, 20);
         let (val, _) = cache.get(hash3).unwrap();
         assert_eq!(val, 5);
-        
+
         // hash4 comes, value 6 (easier than hash2). Goes to slot 0, overwriting hash3.
         let hash4 = 0x4000000000000001;
         cache.insert(hash4, 6, true);
@@ -197,3 +201,9 @@ mod tests {
         }
     }
 }
+
+    #[test]
+    #[should_panic(expected = "GlobalCache size must be a power of two, got 1000")]
+    fn test_cache_size_not_power_of_two() {
+        let _cache = GlobalCache::new(1000);
+    }
