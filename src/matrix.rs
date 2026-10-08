@@ -154,16 +154,25 @@ mod extra_tests {
         let guesses = vec![Word::new("abcde"), Word::new("fghij")];
         let candidates = vec![Word::new("abcde"), Word::new("xyzab"), Word::new("fghij")];
         let dict = Dictionary {
-            guess_chars: guesses.iter().map(|w| {
-                [w.0[0]-b'a', w.0[1]-b'a', w.0[2]-b'a', w.0[3]-b'a', w.0[4]-b'a']
-            }).collect(),
+            guess_chars: guesses
+                .iter()
+                .map(|w| {
+                    [
+                        w.0[0] - b'a',
+                        w.0[1] - b'a',
+                        w.0[2] - b'a',
+                        w.0[3] - b'a',
+                        w.0[4] - b'a',
+                    ]
+                })
+                .collect(),
             guesses,
             candidates,
             candidate_to_guess: vec![0, 2, 1],
             guess_to_candidate: vec![0, 2],
         };
         let matrix = ResponseMatrix::new(&dict);
-        
+
         for g in 0..matrix.num_guesses {
             for c in 0..matrix.num_candidates {
                 let r1 = matrix.data[g * matrix.num_candidates + c];
