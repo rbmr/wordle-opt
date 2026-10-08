@@ -75,7 +75,96 @@ cargo run --release -- full
 # Differential correctness fuzzer: compares the optimized solver against
 # an unoptimized naive reference (src/naive.rs) on random subsets
 cargo run --release -- verify
+
+# Capture a fully determined strategy as a policy tree (see "Policy trees")
+cargo run --release -- solve --strategy optimal --output tree.json
+
+# Validate any policy tree file
+cargo run --release -- validate tree.json
 ```
+
+## Policy trees
+
+A policy is a map from the set of remaining candidates to a guess. Because it
+is deterministic, the whole game under that policy is a static decision tree:
+**nodes are guesses**, **edges are responses**, and a node is terminal when its
+guess is the answer. `src/policy.rs` stores and validates such trees; the
+compact representation does not store candidate sets at all - they are implied
+by the path of responses, which is what makes it compact.
+
+Two serializations are defined:
+
+- **compact** (default): a flat arena of numeric indices (guess index,
+  response index, child index) plus the dictionary hash. Small and fast.
+- **readable** (`--format readable`): nested
+  `{"guess": "trace", "children": {"bgybg": ...}}` with the word lists
+  embedded, so the file is fully self-contained and can be validated (and
+  rendered by the viewer) with no other files.
+
+Both carry a **dictionary hash** - an FNV-1a digest of the sorted guess and
+candidate lists - so a tree can never be silently applied to the wrong
+dictionary.
+
+### `solve`
+
+```bash
+wordle-opt solve \
+  --guesses words/guesses.txt \
+  --candidates words/candidates.txt \
+  --output tree.json \
+  --strategy optimal        # optimal | min-remaining | max-freq
+```
+
+Optional flags:
+
+- `--format compact|readable` (default `compact`).
+- `--max-candidates N` - build for the first `N` candidates only (the same
+  deterministic convention the golden tests use). Add `--sample-seed S` to
+  instead draw a reproducible, representative `N`-candidate spread.
+- `--stats progress.parquet [--stats-format parquet|ndjson]` - export a small
+  **progress time series** (one row per sampled interval: nodes built, frontier
+  size, depth, cache hits, ...). Sampling is periodic and clock-gated, never
+  per node, so it cannot measurably slow a build; it is off unless `--stats`
+  is given. The Parquet file is written with `SNAPPY` compression and loads
+  directly into pandas/polars/duckdb for plotting.
+- `--no-progress` - silence the periodic stderr progress line.
+- `--cache-entries N` - transposition-table size (power of two).
+
+`solve` self-validates the tree it writes (round-tripping through the reader)
+and prints a summary. Building an `optimal` tree requires an exact solve of
+every reachable state, so for large candidate sets it is far more expensive
+than a single `full` solve - it is meant to be generated on the compute host.
+
+### `validate`
+
+```bash
+wordle-opt validate tree.json
+```
+
+Recomputes every node's candidate set from the root and checks the defining
+invariant: **at each node, an edge for a response exists if and only if that
+response is possible** for some still-reachable candidate, and each edge leads
+to exactly the subtree for the candidates that produce it. It also verifies the
+tree is a tree (each node reachable once), that leaves are wins, that every
+candidate terminates, and that the dictionary hash matches. Readable trees are
+self-contained; compact trees need `--guesses`/`--candidates`.
+
+## Interactive viewer
+
+`site/` is a dependency-free static viewer, published to GitHub Pages by
+`.github/workflows/pages.yml`. It loads a readable policy tree (bundled example
+or your own file), **validates it in the browser** against the same
+edge-iff-possible rule, summarises it (nodes, depth, mean guesses), and renders
+it as a collapsible tree. Three examples are bundled, all built on the same
+500-candidate subset so they are directly comparable:
+
+| example | mean guesses |
+|---|---|
+| `optimal` | 2.898 |
+| `min-remaining` | 3.048 |
+| `max-freq` | 3.354 |
+
+See `site/examples/README.md` for the exact commands that generated them.
 
 ### Running on a remote compute host
 
