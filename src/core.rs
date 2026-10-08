@@ -1,5 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Represents a 5-letter word in the Wordle dictionary.
 pub struct Word(pub [u8; 5]);
 
 impl Word {
@@ -18,6 +19,11 @@ impl std::fmt::Display for Word {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Represents the feedback from a guess against a secret word, encoded as a base-3 integer.
+///
+/// 0 = Black (letter not in secret)
+/// 1 = Green (letter in correct position)
+/// 2 = Yellow (letter in wrong position)
 pub struct Response(pub u8);
 
 impl Response {
