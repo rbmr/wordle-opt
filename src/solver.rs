@@ -91,7 +91,6 @@ thread_local! {
 /// - Equivalence-class guess projection (skips guesses that are
 ///   indistinguishable given the current candidate set)
 /// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
-
 pub struct Solver<'a> {
     pub metrics: &'a Metrics,
     pub max_k: usize,
