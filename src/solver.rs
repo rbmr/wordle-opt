@@ -1675,4 +1675,16 @@ mod solver_cache_tests {
         let cache = crate::cache::GlobalCache::new(1024);
         assert_eq!(cache.get(0), None);
     }
+
+    #[test]
+    fn test_solve_empty_candidates() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let candidates = vec![];
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
+        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
+        assert_eq!(cost, 0);
+    }
 }
