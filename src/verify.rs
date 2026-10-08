@@ -24,7 +24,7 @@ fn solve_both(dict: &Dictionary, matrix: &ResponseMatrix, subset: &[usize]) -> (
 }
 
 /// Runs `iterations` random subsets (size `3..=max_size`) through
-/// [`solve_both`] and reports any mismatch. Returns `true` iff every
+/// `solve_both` and reports any mismatch. Returns `true` iff every
 /// iteration agreed.
 pub fn run_verification(
     dict: &Dictionary,
@@ -86,7 +86,7 @@ pub fn run_verification(
 }
 
 /// Solves a fixed subset of words sharing heavily overlapping letters
-/// (repeated e/r/a/s) through [`solve_both`]. This is a targeted case for
+/// (repeated e/r/a/s) through `solve_both`. This is a targeted case for
 /// equivalence-class guess pruning, which is easy to get subtly wrong
 /// specifically when many guesses partition the candidate set identically -
 /// exactly the situation repetitive letters create. Returns `true` iff the
