@@ -77,6 +77,7 @@ pub struct SolverScratch {
     pub scratch_hash_table: [Vec<u64>; 32],
     pub scratch_added_indices: [Vec<usize>; 32],
     pub scratch_projs: [Vec<u64>; 32],
+    pub scratch_active_bits: [Vec<u64>; 32],
 }
 
 thread_local! {
@@ -115,6 +116,7 @@ pub struct Solver<'a> {
     scratch_hash_table: [Vec<u64>; 32],
     scratch_added_indices: [Vec<usize>; 32],
     scratch_projs: [Vec<u64>; 32],
+    scratch_active_bits: [Vec<u64>; 32],
 }
 
 impl<'a> Drop for Solver<'a> {
@@ -158,6 +160,10 @@ impl<'a> Drop for Solver<'a> {
             ),
             scratch_projs: std::mem::replace(
                 &mut self.scratch_projs,
+                std::array::from_fn(|_| Vec::new()),
+            ),
+            scratch_active_bits: std::mem::replace(
+                &mut self.scratch_active_bits,
                 std::array::from_fn(|_| Vec::new()),
             ),
         });
@@ -299,6 +305,7 @@ impl<'a> Solver<'a> {
                     scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
                     scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
                     scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
+                    scratch_active_bits: std::array::from_fn(|_| vec![0u64; 233]),
                 })
             });
 
@@ -323,6 +330,7 @@ impl<'a> Solver<'a> {
             scratch_hash_table: scratch.scratch_hash_table,
             scratch_added_indices: scratch.scratch_added_indices,
             scratch_projs: scratch.scratch_projs,
+            scratch_active_bits: scratch.scratch_active_bits,
         }
     }
 
@@ -669,7 +677,8 @@ impl<'a> Solver<'a> {
 
         let should_cache_equiv = set.len() >= 10;
         let shard_idx = (set_hash as usize) % 64;
-        let active_guesses_rc = if should_cache_equiv {
+        let mut active_bits_scratch = std::mem::take(&mut self.scratch_active_bits[depth]);
+        let rc_opt = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
             if let Some(cached) = cache.get(&set_hash) {
                 self.metrics
@@ -683,13 +692,15 @@ impl<'a> Solver<'a> {
             None
         };
 
-        let active_guesses_rc = if let Some(rc) = active_guesses_rc {
-            rc
+        let slice_ptr: *const [u64];
+        let _keep_alive = if let Some(rc) = &rc_opt {
+            slice_ptr = rc.as_slice() as *const _;
+            None
         } else {
-            // Do the heavy projection/sorting outside the write lock to prevent blocking
-            // other threads trying to access different set_hashes in the same shard.
             let num_u64s = self.dict.guesses.len().div_ceil(64);
-            let mut active_bits = vec![0u64; num_u64s];
+            active_bits_scratch.clear();
+            active_bits_scratch.resize(num_u64s, 0);
+
             let table = &mut self.scratch_hash_table[depth];
             let added_indices = &mut self.scratch_added_indices[depth];
             added_indices.clear();
@@ -721,7 +732,7 @@ impl<'a> Solver<'a> {
                     let slot = table[idx];
                     if slot == 0 {
                         table[idx] = proj;
-                        active_bits[g / 64] |= 1 << (g % 64);
+                        active_bits_scratch[g / 64] |= 1 << (g % 64);
                         added_indices.push(idx);
                         break;
                     }
@@ -736,11 +747,9 @@ impl<'a> Solver<'a> {
                 table[idx] = 0;
             }
 
-            let rc = std::sync::Arc::new(active_bits);
-
-            if should_cache_equiv {
+            let rc_new = if should_cache_equiv {
+                let rc = std::sync::Arc::new(active_bits_scratch.clone());
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
-                // Check again in case another thread computed it while we were working
                 if let Some(cached) = cache_mut.get(&set_hash) {
                     self.metrics
                         .equiv_cache_hits
@@ -771,12 +780,22 @@ impl<'a> Solver<'a> {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 self.metrics.pruned_by_equivalence.fetch_add(
                     self.dict.guesses.len()
-                        - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
+                        - active_bits_scratch.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
                     std::sync::atomic::Ordering::Relaxed,
                 );
-                rc
+                std::sync::Arc::new(vec![]) // dummy
+            };
+            
+            if should_cache_equiv {
+                slice_ptr = rc_new.as_slice() as *const _;
+                Some(rc_new)
+            } else {
+                slice_ptr = active_bits_scratch.as_slice() as *const _;
+                None
             }
         };
+
+        let active_guesses_slice = unsafe { &*slice_ptr };
 
         // Fast set-membership check
         let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
@@ -784,7 +803,7 @@ impl<'a> Solver<'a> {
             is_in_set[c] = true;
         }
 
-        for (block_idx, &block) in active_guesses_rc.iter().enumerate() {
+        for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
             let mut b = block;
             while b != 0 {
                 let tz = b.trailing_zeros();
@@ -810,6 +829,8 @@ impl<'a> Solver<'a> {
             is_in_set[c] = false;
         }
         self.scratch_is_in_set[depth] = is_in_set;
+        self.scratch_active_bits[depth] = active_bits_scratch;
+
 
         self.metrics
             .pruned_by_equivalence
@@ -1186,8 +1207,8 @@ impl<'a> Solver<'a> {
         // Fast slice partition using counting sort
         let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
         sorted_set.clear();
-        sorted_set.clear();
-        sorted_set.resize(set.len(), 0);
+        sorted_set.reserve(set.len());
+        unsafe { sorted_set.set_len(set.len()); }
 
         let mut offsets = [0u16; 243];
         let mut curr = 0;
