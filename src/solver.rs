@@ -812,7 +812,7 @@ impl<'a> Solver<'a> {
             .fetch_add(0, std::sync::atomic::Ordering::Relaxed);
 
         let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
-        let mut counts = [0u16; 2048];
+        let mut counts = [0u16; 243];
         let mut non_empty = [0u8; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
@@ -886,7 +886,7 @@ impl<'a> Solver<'a> {
                     }
                 });
             }
-        } else if set.len() <= 16 {
+        }  else {
             for &g in &phase1_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
@@ -900,121 +900,6 @@ impl<'a> Solver<'a> {
                             num_non_empty += 1;
                         }
                         *counts.get_unchecked_mut(r) += 1;
-                    }
-                }
-                if num_non_empty == 1 {
-                    counts[non_empty[0] as usize] = 0;
-                    continue;
-                }
-                for i in 0..num_non_empty {
-                    let r_idx = non_empty[i] as usize;
-                    let count = counts[r_idx];
-                    counts[r_idx] = 0;
-                    expected_rem += (count as u32) * (count as u32);
-                    if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                    }
-                }
-                if num_non_empty > local_max_k {
-                    local_max_k = num_non_empty;
-                }
-                if lb_cost < beta {
-                    if num_non_empty > valid_max_k {
-                        valid_max_k = num_non_empty;
-                    }
-                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                }
-            }
-        } else {
-            #[allow(clippy::chunks_exact_to_as_chunks)]
-            let mut chunks = phase1_guesses.chunks_exact(8);
-            for chunk in chunks.by_ref() {
-                let g0 = chunk[0];
-                let g1 = chunk[1];
-                let g2 = chunk[2];
-                let g3 = chunk[3];
-                let g4 = chunk[4];
-                let g5 = chunk[5];
-                let g6 = chunk[6];
-                let g7 = chunk[7];
-                let g0_off = g0 * self.matrix.num_candidates;
-                let g1_off = g1 * self.matrix.num_candidates;
-                let g2_off = g2 * self.matrix.num_candidates;
-                let g3_off = g3 * self.matrix.num_candidates;
-                let g4_off = g4 * self.matrix.num_candidates;
-                let g5_off = g5 * self.matrix.num_candidates;
-                let g6_off = g6 * self.matrix.num_candidates;
-                let g7_off = g7 * self.matrix.num_candidates;
-                for &c in set {
-                    let r0 = unsafe { self.matrix.data.get_unchecked(g0_off + c).0 as usize };
-                    let r1 = unsafe { self.matrix.data.get_unchecked(g1_off + c).0 as usize };
-                    let r2 = unsafe { self.matrix.data.get_unchecked(g2_off + c).0 as usize };
-                    let r3 = unsafe { self.matrix.data.get_unchecked(g3_off + c).0 as usize };
-                    let r4 = unsafe { self.matrix.data.get_unchecked(g4_off + c).0 as usize };
-                    let r5 = unsafe { self.matrix.data.get_unchecked(g5_off + c).0 as usize };
-                    let r6 = unsafe { self.matrix.data.get_unchecked(g6_off + c).0 as usize };
-                    let r7 = unsafe { self.matrix.data.get_unchecked(g7_off + c).0 as usize };
-                    unsafe {
-                        *counts.get_unchecked_mut(r0) += 1;
-                        *counts.get_unchecked_mut(256 + r1) += 1;
-                        *counts.get_unchecked_mut(512 + r2) += 1;
-                        *counts.get_unchecked_mut(768 + r3) += 1;
-                        *counts.get_unchecked_mut(1024 + r4) += 1;
-                        *counts.get_unchecked_mut(1280 + r5) += 1;
-                        *counts.get_unchecked_mut(1536 + r6) += 1;
-                        *counts.get_unchecked_mut(1792 + r7) += 1;
-                    }
-                }
-                for (idx, &g) in chunk.iter().enumerate() {
-                    let offset = idx * 256;
-                    let mut num_non_empty = 0;
-                    for r in 0..243 {
-                        if counts[offset + r] > 0 {
-                            non_empty[num_non_empty] = r as u8;
-                            num_non_empty += 1;
-                        }
-                    }
-                    if num_non_empty == 1 {
-                        counts[offset + non_empty[0] as usize] = 0;
-                        continue;
-                    }
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
-                    for i in 0..num_non_empty {
-                        let r_idx = non_empty[i] as usize;
-                        let count = counts[offset + r_idx];
-                        counts[offset + r_idx] = 0;
-                        expected_rem += (count as u32) * (count as u32);
-                        if r_idx != crate::core::Response::WIN.0 as usize {
-                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                        }
-                    }
-                    if num_non_empty > local_max_k {
-                        local_max_k = num_non_empty;
-                    }
-                    if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
-                        phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                    }
-                }
-            }
-            for &g in chunks.remainder() {
-                let mut expected_rem = 0u32;
-                let mut lb_cost = c_len as u32;
-                let g_off = g * self.matrix.num_candidates;
-                for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                    unsafe {
-                        *counts.get_unchecked_mut(r) += 1;
-                    }
-                }
-                let mut num_non_empty = 0;
-                for r in 0..243 {
-                    if counts[r] > 0 {
-                        non_empty[num_non_empty] = r as u8;
-                        num_non_empty += 1;
                     }
                 }
                 if num_non_empty == 1 {
