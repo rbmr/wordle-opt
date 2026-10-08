@@ -698,12 +698,16 @@ impl<'a> Solver<'a> {
             projs.fill(0);
             let num_guesses = self.dict.guesses.len();
 
-            for &c in set {
-                let c_off = c * num_guesses;
-                let z = self.matrix.zobrist[c];
-                for g in 0..num_guesses {
-                    let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
-                    projs[g] ^= z.wrapping_mul(r as u64 + 1);
+            let chunk_size = 512;
+            for chunk_start in (0..num_guesses).step_by(chunk_size) {
+                let chunk_end = (chunk_start + chunk_size).min(num_guesses);
+                for &c in set {
+                    let c_off = c * num_guesses;
+                    let z = self.matrix.zobrist[c];
+                    for g in chunk_start..chunk_end {
+                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
+                        projs[g] ^= z.wrapping_mul(r as u64 + 1);
+                    }
                 }
             }
 
