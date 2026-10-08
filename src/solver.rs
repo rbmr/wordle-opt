@@ -716,6 +716,11 @@ impl<'a> Solver<'a> {
             let projs = &mut self.scratch_projs[depth];
             projs.fill(0);
 
+            let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
+            let table_size = (active_count * 2).next_power_of_two().clamp(256, 32768) as usize;
+            let mask = table_size - 1;
+            let shift = 64 - table_size.trailing_zeros();
+
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
@@ -736,7 +741,7 @@ impl<'a> Solver<'a> {
                         if g >= num_guesses { break; }
                         let mut proj = projs[g];
                         if proj == 0 { proj = 1; }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
+                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                         loop {
                             let slot = table[idx];
                             if slot == 0 {
@@ -746,7 +751,7 @@ impl<'a> Solver<'a> {
                                 break;
                             }
                             if slot == proj { break; }
-                            idx = (idx + 1) & 32767;
+                            idx = (idx + 1) & mask;
                         }
                     }
                 } else if block != 0 {
@@ -756,7 +761,7 @@ impl<'a> Solver<'a> {
                         let g = block_idx * 64 + tz as usize;
                         let mut proj = projs[g];
                         if proj == 0 { proj = 1; }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
+                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                         loop {
                             let slot = table[idx];
                             if slot == 0 {
@@ -766,7 +771,7 @@ impl<'a> Solver<'a> {
                                 break;
                             }
                             if slot == proj { break; }
-                            idx = (idx + 1) & 32767;
+                            idx = (idx + 1) & mask;
                         }
                         b &= b - 1;
                     }
