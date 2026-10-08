@@ -1,17 +1,17 @@
-use crate::solver::{Solver, Metrics};
-use crate::matrix::ResponseMatrix;
-use crate::dict::Dictionary;
 use crate::cache::GlobalCache;
+use crate::dict::Dictionary;
+use crate::matrix::ResponseMatrix;
 use crate::solver::EquivCache;
+use crate::solver::{Metrics, Solver};
 use rayon::prelude::*;
-use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// Executes a fully parallel depth-2 alpha-beta search across the top-level branches.
 ///
 /// This approach splits the initial set of root guesses into independently evaluated
 /// buckets at depth 2 (since depth 1 handles WIN conditions). Uses Rayon's work-stealing
 /// `par_iter` to dynamically distribute these buckets across available CPU cores.
-/// 
+///
 /// A single global `beta` (an `AtomicU32`) is shared between threads, meaning optimal ordering
 /// of `active_guesses` (i.e. sorting by expected remaining) allows early threads to quickly
 /// tighten the global `beta`. This immediately starves and prunes subsequent threads evaluating
@@ -29,10 +29,9 @@ pub fn solve_parallel_depth2<'a>(
     beta: &'a AtomicU32,
     active_guesses: &[usize],
 ) -> u32 {
-
     active_guesses.par_iter().for_each(|&g| {
         let current_beta = beta.load(Ordering::Relaxed);
-        
+
         let mut counts = [0u16; 243];
         let mut non_empty_indices = [0u8; 243];
         let mut num_non_empty = 0;
@@ -125,7 +124,7 @@ pub fn solve_parallel_depth2<'a>(
                 equiv_cache,
             );
 
-            // We must subtract this bucket's existing capacity bound from cost_so_far 
+            // We must subtract this bucket's existing capacity bound from cost_so_far
             // since we are about to replace it with the true cost.
             let b_cost = cost_so_far.saturating_sub(p_lbs[r_idx]);
             let effective_beta = current_b.saturating_sub(b_cost);
@@ -138,9 +137,9 @@ pub fn solve_parallel_depth2<'a>(
 
             // The net increase to the total cost is the true value minus the capacity bound we started with.
             let net_increase = val.saturating_sub(p_lbs[r_idx]);
-            
+
             let new_cost = running_cost.fetch_add(net_increase, Ordering::Relaxed) + net_increase;
-            
+
             if new_cost >= beta.load(Ordering::Relaxed) {
                 exceeded.store(true, Ordering::Relaxed);
             }
@@ -150,7 +149,7 @@ pub fn solve_parallel_depth2<'a>(
         if !exceeded.load(Ordering::Relaxed) {
             beta.fetch_min(total, Ordering::Relaxed);
         }
-        
+
         metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
     });
 
@@ -160,10 +159,10 @@ pub fn solve_parallel_depth2<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::Metrics;
+    use crate::cache::GlobalCache;
     use crate::dict::Dictionary;
     use crate::matrix::ResponseMatrix;
-    use crate::cache::GlobalCache;
+    use crate::solver::Metrics;
     use std::sync::RwLock;
 
     #[test]
@@ -172,7 +171,8 @@ mod tests {
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let global_cache = GlobalCache::new(1024);
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| RwLock::new(rustc_hash::FxHashMap::default()));
+        let equiv_cache: [_; 64] =
+            std::array::from_fn(|_| RwLock::new(rustc_hash::FxHashMap::default()));
         let beta = AtomicU32::new(100);
         let active_guesses: Vec<usize> = vec![0, 1, 2];
         let initial_candidates: Vec<usize> = vec![0, 1];
@@ -195,3 +195,37 @@ mod tests {
         assert!(result <= 100);
     }
 }
+
+    #[test]
+    fn test_parallel_depth2_prunes_early() {
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let global_cache = GlobalCache::new(1024);
+        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
+        
+        // Beta is 0! It should do zero real work.
+        let beta = AtomicU32::new(0);
+        let active_guesses: Vec<usize> = vec![0, 1, 2];
+        let initial_candidates: Vec<usize> = vec![0, 1, 2, 3, 4, 5];
+        let max_k = 2;
+        let mut capacity_bounds_2d = vec![vec![0; 10]; 3];
+        // Populate bounds so lb >= beta (6 >= 0)
+        for k in 2..=2 {
+            for i in 0..10 { capacity_bounds_2d[k][i] = i as u32; }
+        }
+
+        let result = solve_parallel_depth2(
+            &matrix,
+            &initial_candidates,
+            &dict,
+            &metrics,
+            &equiv_cache,
+            &global_cache,
+            max_k,
+            &capacity_bounds_2d,
+            &beta,
+            &active_guesses,
+        );
+        assert_eq!(result, 0);
+    }
