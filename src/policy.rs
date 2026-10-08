@@ -799,7 +799,20 @@ impl ReadableTreeFile {
 
     /// Reconstructs a `Dictionary` from the embedded word lists. The lists are
     /// stored sorted, so the resulting indices are the tree's indices.
-    pub fn embedded_dictionary(&self) -> Dictionary {
+    ///
+    /// The engine only supports 5-letter Wordle words (`core::Word` is
+    /// `[u8; 5]`), so a tree whose words have another length is rejected with a
+    /// clear error rather than panicking.
+    pub fn embedded_dictionary(&self) -> Result<Dictionary, PolicyError> {
+        for w in self.guesses.iter().chain(self.candidates.iter()) {
+            if w.len() != 5 {
+                return Err(PolicyError::BadHeader(format!(
+                    "this build only supports 5-letter dictionaries; tree contains a {}-letter word {:?}",
+                    w.len(),
+                    w
+                )));
+            }
+        }
         let guesses = self
             .guesses
             .iter()
@@ -810,7 +823,7 @@ impl ReadableTreeFile {
             .iter()
             .map(|w| crate::core::Word::new(w))
             .collect();
-        Dictionary::from_words(guesses, candidates)
+        Ok(Dictionary::from_words(guesses, candidates))
     }
 
     /// Flattens back into the arena form. Word indices are looked up in the
@@ -818,7 +831,7 @@ impl ReadableTreeFile {
     /// uses (all of a node's children at once, then each child's subtree), so a
     /// build -> readable -> compact round-trip reproduces the exact bytes.
     pub fn to_tree(&self) -> Result<PolicyTree, PolicyError> {
-        let dict = self.embedded_dictionary();
+        let dict = self.embedded_dictionary()?;
         let mut tree = PolicyTree::new(
             &self.strategy,
             parse_hash_hex(&self.dictionary_hash)?,
@@ -1667,7 +1680,7 @@ mod tests {
         let readable = tree.to_readable(&dict).unwrap();
         let json = readable.to_json();
         let parsed = ReadableTreeFile::from_json(&json).unwrap();
-        let embedded = parsed.embedded_dictionary();
+        let embedded = parsed.embedded_dictionary().unwrap();
         let back = parsed.to_tree().unwrap();
         back.validate(&matrix, &embedded).unwrap();
         assert_eq!(back.to_compact_json(), tree.to_compact_json());
