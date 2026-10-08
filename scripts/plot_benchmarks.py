@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import sys
+from collections import defaultdict
 
 def parse_benchmark(file_path):
-    results = []
+    results = defaultdict(list)
     
     with open(file_path, 'r') as f:
         headers = []
@@ -31,7 +32,7 @@ def parse_benchmark(file_path):
                     else:
                         avg_time = float(time_str)
                         
-                    results.append((size, avg_time))
+                    results[size].append(avg_time)
                 except Exception:
                     pass
     
@@ -43,5 +44,12 @@ if __name__ == '__main__':
         sys.exit(1)
         
     results = parse_benchmark(sys.argv[1])
-    for s, t in results:
-        print(f"N={s:4d} | Time={t:10.2f}s")
+    
+    print(f"{'Size (N)':<10} | {'Count':<6} | {'Min Time':<10} | {'Avg Time':<10} | {'Max Time':<10}")
+    print("-" * 59)
+    for size in sorted(results.keys()):
+        times = results[size]
+        avg = sum(times) / len(times)
+        min_t = min(times)
+        max_t = max(times)
+        print(f"{size:<10d} | {len(times):<6d} | {min_t:<9.2f}s | {avg:<9.2f}s | {max_t:<9.2f}s")
