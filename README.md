@@ -36,8 +36,7 @@ aggressively while guaranteeing the final answer is still exactly optimal:
 - **CUDA GPU Acceleration**: Core capacity bound matrices and `phase1` /
   `phase2` filtering logic are offloaded to an RTX 2060 GPU (`gpu_kernel.cu`).
   L1-cache tuning and OS-level `cudaDeviceScheduleBlockingSync` block-waits
-  are intended to prevent CPU starvation. The full run at N=2340 successfully
-  completed in under 5 hours, demonstrating the immense combined value of these optimizations.
+  are intended to prevent CPU starvation. The end-to-end effect at N=2340 has not been verified; no full run has completed yet.
 
 ## Usage
 
