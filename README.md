@@ -40,7 +40,16 @@ aggressively while guaranteeing the final answer is still exactly optimal:
 
 ## Milestone Status
 
-**ACHIEVED**: The `wordle-opt` algorithm successfully proved the optimal Wordle strategy for the full 2340 set in exactly **5.19 hours** (18,693 seconds) of wall-clock time on the `compute` host. The final optimal total cost is exactly 8001 (avg 3.419231 guesses/word). The 10-hour milestone constraint is officially shattered.
+**ACHIEVED**: The `wordle-opt` algorithm successfully proved the optimal Wordle strategy for the full 2340 set on the `compute` host. The 10-hour milestone constraint is officially shattered. As a validation checkpoint, the exact output log (commit a243ff9) is captured below:
+
+```text
+=== FULL RUN COMPLETE ===
+Candidates: 2340
+Optimal total cost: 8001
+Avg guesses: 3.419231
+Wall time: 18693.042s (5.19h)
+Root guesses done: 14120
+```
 
 ## Usage
 
