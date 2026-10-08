@@ -202,8 +202,8 @@ mod tests {
     }
 }
 
-    #[test]
-    #[should_panic(expected = "GlobalCache size must be a power of two, got 1000")]
-    fn test_cache_size_not_power_of_two() {
-        let _cache = GlobalCache::new(1000);
-    }
+#[test]
+#[should_panic(expected = "GlobalCache size must be a power of two, got 1000")]
+fn test_cache_size_not_power_of_two() {
+    let _cache = GlobalCache::new(1000);
+}
