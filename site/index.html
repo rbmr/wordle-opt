@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Wordle Policy Tree Viewer</title>
+<title>Wordle Policy Tree</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <header>
-  <h1>Wordle Policy Tree Viewer</h1>
+  <h1>Wordle Policy Tree</h1>
   <p class="sub">
     A policy tree is a fully determined strategy: <strong>nodes are guesses</strong>,
-    <strong>edges are responses</strong>, and a leaf is a solved word. Every tree here is
-    validated in your browser against the same rule the CLI enforces &mdash;
-    <em>an edge for a response exists if and only if that response is possible</em>.
+    <strong>edges are responses</strong>, a leaf is a solved word. Load a tree, then
+    play it by entering the response you would get &mdash; invalid responses are
+    rejected, exactly as the tree's own validation requires.
   </p>
 </header>
 
@@ -29,40 +29,68 @@
       <input type="file" id="file" accept=".json,application/json" />
     </label>
   </div>
-  <div class="group">
-    <button id="expand-all">Expand all</button>
-    <button id="collapse-all">Collapse all</button>
-  </div>
-  <div class="group">
-    <label for="depth">Expand to depth</label>
-    <input type="range" id="depth" min="0" max="8" value="1" />
-    <span id="depth-val">1</span>
-  </div>
-  <div class="group">
-    <label for="search">Find</label>
-    <input type="search" id="search" placeholder="word" autocomplete="off" />
+  <div class="group modes">
+    <button id="mode-play" class="mode active">Play</button>
+    <button id="mode-tree" class="mode">Explore tree</button>
   </div>
 </div>
 
 <div id="status" class="status">Loading examples&hellip;</div>
-
 <div id="stats" class="stats" hidden></div>
 
-<div class="legend">
-  <span class="tile green">G</span> correct position
-  <span class="tile yellow">Y</span> wrong position
-  <span class="tile gray">B</span> not in word
-  <span class="sep"></span>
-  <span class="tile letter">a</span> guess letter
-</div>
+<main>
+  <!-- Play mode: traverse the policy like the game -->
+  <section id="play" class="pane">
+    <div class="board-wrap">
+      <div id="board" class="board"></div>
+    </div>
 
-<main id="tree" class="tree"></main>
+    <div id="editor" class="editor" hidden>
+      <div class="editor-label">Response for <strong id="editor-guess">?</strong></div>
+      <div id="editor-exp" class="editor-exp"></div>
+      <div class="response-tiles" id="response-tiles"></div>
+      <div class="editor-buttons">
+        <button id="clear-response">Clear</button>
+        <button id="submit-response" class="primary" disabled>Submit</button>
+        <button id="hint-response">Hint</button>
+      </div>
+      <div id="editor-hint" class="hint"></div>
+    </div>
+
+    <div id="play-done" class="done" hidden></div>
+
+    <div class="play-controls">
+      <button id="back">&#8592; Back</button>
+      <button id="reset">Restart</button>
+    </div>
+    <div id="play-msg" class="play-msg"></div>
+  </section>
+
+  <!-- Explore mode: the full tree -->
+  <section id="tree-pane" class="pane" hidden>
+    <div class="toolbar inner">
+      <div class="group">
+        <button id="expand-all">Expand all</button>
+        <button id="collapse-all">Collapse all</button>
+      </div>
+      <div class="group">
+        <label for="depth">Expand to depth</label>
+        <input type="range" id="depth" min="0" max="8" value="1" />
+        <span id="depth-val">1</span>
+      </div>
+      <div class="group">
+        <label for="search">Find</label>
+        <input type="search" id="search" placeholder="word" autocomplete="off" />
+      </div>
+    </div>
+    <div id="tree" class="tree"></div>
+  </section>
+</main>
 
 <footer>
   <p>
-    Trees are plain JSON. Generate one with
-    <code>wordle-opt solve --strategy &lt;optimal|min-remaining|max-freq&gt; --output tree.json --format readable</code>
-    and validate it with <code>wordle-opt validate tree.json</code>.
+    Trees are plain JSON: <code>wordle-opt solve --strategy &lt;optimal|min-remaining|max-freq&gt; --output tree.json --format readable</code>,
+    validated by <code>wordle-opt validate tree.json</code>.
   </p>
 </footer>
 

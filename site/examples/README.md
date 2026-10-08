@@ -35,6 +35,17 @@ self-contained: the viewer (and `wordle-opt validate <file>`) can check it with
 no other files present. The `optimal` example takes ~35 s to build; the two
 heuristics are near-instant.
 
+Each `.json` also has a sibling `.js` (`window.WordleExamples["<name>"] = ...`)
+which is what the viewer's example buttons load. It is generated from the
+`.json` and exists so the examples work when `site/index.html` is opened
+directly from disk, where `fetch()` of a sibling file is blocked by the
+browser:
+
+```bash
+node -e 'const fs=require("fs");const n=process.argv[1];const j=fs.readFileSync(n+".json","utf8").trim();
+fs.writeFileSync(n+".js","window.WordleExamples=window.WordleExamples||{};window.WordleExamples[\""+n+"\"]="+j+";\n")' optimal
+```
+
 The optimal example's total cost (1449) was independently cross-checked against
 the existing exact solver on the identical subset
 (`wordle-opt diagnose -n 500 -s 20261008` → cost 1449).
