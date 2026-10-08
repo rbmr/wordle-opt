@@ -450,6 +450,13 @@ impl<'a> Solver<'a> {
                 bucket_tasks.push(sorted_set[start..end].to_vec());
             }
 
+            let num_u64s = dict.guesses.len().div_ceil(64);
+            let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+            let rem = dict.guesses.len() % 64;
+            if rem != 0 {
+                all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+            }
+            
             bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.len()));
 
             let bucket_costs: u32 = bucket_tasks
@@ -466,7 +473,7 @@ impl<'a> Solver<'a> {
                     );
                     // For a bucket, the cost is evaluated via min_state_val.
                     // We use a very loose beta since we evaluate in parallel.
-                    solver.min_state_val(&bucket, initial_greedy_cost, 2, max_k)
+                    solver.min_state_val(&bucket, &all_guesses_bits, initial_greedy_cost, 2, max_k)
                 })
                 .sum();
 
@@ -566,7 +573,7 @@ impl<'a> Solver<'a> {
     pub fn min_state_val(
         &mut self,
         set: &[usize],
-
+        parent_active_guesses: &[u64],
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -697,17 +704,17 @@ impl<'a> Solver<'a> {
             slice_ptr = rc.as_slice() as *const _;
             None
         } else {
-            let num_u64s = self.dict.guesses.len().div_ceil(64);
+                                    let num_u64s = self.dict.guesses.len().div_ceil(64);
             active_bits_scratch.clear();
             active_bits_scratch.resize(num_u64s, 0);
 
             let table = &mut self.scratch_hash_table[depth];
             let added_indices = &mut self.scratch_added_indices[depth];
             added_indices.clear();
-
+            let num_guesses = self.dict.guesses.len();
+            
             let projs = &mut self.scratch_projs[depth];
             projs.fill(0);
-            let num_guesses = self.dict.guesses.len();
 
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
@@ -722,24 +729,47 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            for g in 0..num_guesses {
-                let mut proj = projs[g];
-                if proj == 0 {
-                    proj = 1;
-                }
-                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
-                loop {
-                    let slot = table[idx];
-                    if slot == 0 {
-                        table[idx] = proj;
-                        active_bits_scratch[g / 64] |= 1 << (g % 64);
-                        added_indices.push(idx);
-                        break;
+            for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
+                if block == u64::MAX {
+                    for tz in 0..64 {
+                        let g = block_idx * 64 + tz;
+                        if g >= num_guesses { break; }
+                        let mut proj = projs[g];
+                        if proj == 0 { proj = 1; }
+                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
+                        loop {
+                            let slot = table[idx];
+                            if slot == 0 {
+                                table[idx] = proj;
+                                active_bits_scratch[block_idx] |= 1 << tz;
+                                added_indices.push(idx);
+                                break;
+                            }
+                            if slot == proj { break; }
+                            idx = (idx + 1) & 32767;
+                        }
                     }
-                    if slot == proj {
-                        break;
+                } else if block != 0 {
+                    let mut b = block;
+                    while b != 0 {
+                        let tz = b.trailing_zeros();
+                        let g = block_idx * 64 + tz as usize;
+                        let mut proj = projs[g];
+                        if proj == 0 { proj = 1; }
+                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> 49) as usize;
+                        loop {
+                            let slot = table[idx];
+                            if slot == 0 {
+                                table[idx] = proj;
+                                active_bits_scratch[block_idx] |= 1 << tz;
+                                added_indices.push(idx);
+                                break;
+                            }
+                            if slot == proj { break; }
+                            idx = (idx + 1) & 32767;
+                        }
+                        b &= b - 1;
                     }
-                    idx = (idx + 1) & 32767;
                 }
             }
 
@@ -1007,7 +1037,7 @@ impl<'a> Solver<'a> {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 continue;
             }
-            let val = self.min_guess_val(set, _g, best_val, depth, parent_max_k);
+            let val = self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -1191,7 +1221,7 @@ impl<'a> Solver<'a> {
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         continue;
                     }
-                    let val = self.min_guess_val(set, _g, best_val, depth, local_max_k);
+                    let val = self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, local_max_k);
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -1228,6 +1258,7 @@ impl<'a> Solver<'a> {
 pub fn min_guess_val(
         &mut self,
         set: &[usize],
+        active_guesses_slice: &[u64],
         guess: usize,
 
         beta: u32,
@@ -1318,7 +1349,7 @@ pub fn min_guess_val(
                 }
 
                 self.current_cost_so_far += b;
-                let val = self.min_state_val(&p[0..p_len], effective_beta, depth + 1, parent_max_k);
+                let val = self.min_state_val(&p[0..p_len], active_guesses_slice, effective_beta, depth + 1, parent_max_k);
                 self.current_cost_so_far -= b;
 
                 if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
@@ -1435,7 +1466,7 @@ pub fn min_guess_val(
                 }
 
                 self.current_cost_so_far += b;
-                let val = self.min_state_val(p, effective_beta, depth + 1, parent_max_k);
+                let val = self.min_state_val(p, active_guesses_slice, effective_beta, depth + 1, parent_max_k);
                 self.current_cost_so_far -= b;
                 if b + val >= beta {
                     self.scratch_sorted_sets[depth] = sorted_set;

@@ -157,7 +157,13 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
 
         for _ in 0..iterations {
             let metrics = Metrics::new();
-            let start = Instant::now();
+                    let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+        }
+        let start = Instant::now();
             let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
@@ -333,7 +339,13 @@ fn run_benchmark_random(
             let subset = sample_random_subset(&mut rng, n_candidates, size);
 
             let metrics = Metrics::new();
-            let start = Instant::now();
+                    let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+        }
+        let start = Instant::now();
             let _equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
@@ -543,7 +555,13 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
             let max_k = heuristic::compute_max_branching_factor(matrix, &subset);
 
             let metrics = Metrics::new();
-            let start = Instant::now();
+                    let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+        }
+        let start = Instant::now();
             let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
@@ -646,7 +664,13 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     let _ = std::io::Write::flush(&mut std::io::stdout());
 
     let metrics = std::sync::Arc::new(Metrics::new());
-    let start = Instant::now();
+            let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+        }
+        let start = Instant::now();
 
     // Progress-reporting thread: prints status every 60 seconds.
     let metrics_clone = std::sync::Arc::clone(&metrics);
@@ -769,7 +793,13 @@ pub fn run_cli() {
     );
 
     println!("Computing response matrix...");
-    let start = Instant::now();
+            let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+        }
+        let start = Instant::now();
     let matrix = ResponseMatrix::new(&dict);
     let duration = start.elapsed();
     println!(
@@ -897,8 +927,14 @@ pub fn run_cli() {
             &mut allowed_guesses,
         );
 
+                let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+        }
         let start = Instant::now();
-        let val = solver.min_guess_val(&initial_candidates, root_guess, u32::MAX, 1, max_k);
+        let val = solver.min_guess_val(&initial_candidates, &all_guesses_bits, root_guess, u32::MAX, 1, max_k);
         println!(
             "Root Guess: {} ({}) -> Cost: {}",
             root_guess,
