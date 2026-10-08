@@ -153,10 +153,21 @@ self-contained; compact trees need `--guesses`/`--candidates`.
 
 `site/` is a dependency-free static viewer, published to GitHub Pages by
 `.github/workflows/pages.yml`. It loads a readable policy tree (bundled example
-or your own file), **validates it in the browser** against the same
-edge-iff-possible rule, summarises it (nodes, depth, mean guesses), and renders
-it as a collapsible tree. Three examples are bundled, all built on the same
-500-candidate subset so they are directly comparable:
+or your own file) and **validates it in the browser** against the same
+edge-iff-possible rule. Two views:
+
+- **Play** (default): traverse the policy like the game. The current guess is
+  shown, you enter the response you would get, and it either advances, reports
+  an impossible response, or reports a solve; Back and Restart are included.
+  Each node shows its *expected guesses remaining* (computed from the fully
+  determined subtree), and each guess is coloured by the response you entered.
+- **Explore tree**: the full collapsible tree, with the same per-node metric.
+
+The word length is taken from the tree, so it is not tied to 5 letters (there
+are 3-, 4- and 6-letter examples under `site/examples/`).
+
+Three 5-letter examples are bundled, all built on the same 500-candidate subset
+so they are directly comparable:
 
 | example | mean guesses |
 |---|---|

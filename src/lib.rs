@@ -1018,7 +1018,7 @@ fn validate_bytes(
     match format {
         crate::policy::FORMAT_READABLE => {
             let file = crate::policy::ReadableTreeFile::from_json(bytes)?;
-            let dict = file.embedded_dictionary();
+            let dict = file.embedded_dictionary()?;
             let matrix = ResponseMatrix::new(&dict);
             let tree = file.to_tree()?;
             tree.validate(&matrix, &dict)

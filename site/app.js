@@ -14,37 +14,50 @@
 // some still-reachable candidate, each edge must lead to precisely those
 // candidates, a leaf must be a win, and every candidate must terminate.
 
-const WIN = "ggggg";
-const CYCLE = [null, "b", "y", "g"];
+// The response/win string length is derived from the tree's words, so the
+// viewer is not tied to 5 letters. `n` is the word length.
+function winString(n) {
+  return "g".repeat(n);
+}
 
-// --- response computation (same two-pass rule as Rust `Response::compute`) ---
+// --- response computation (same two-pass rule as Rust `Response::compute`,
+// generalised to any word length) ---
 function response(secret, guess) {
-  const r = [0, 0, 0, 0, 0];
-  const used = [false, false, false, false, false];
-  for (let i = 0; i < 5; i++) if (guess[i] === secret[i]) { r[i] = 1; used[i] = true; }
-  for (let i = 0; i < 5; i++) {
+  const n = secret.length;
+  const r = new Array(n).fill(0);
+  const used = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) if (guess[i] === secret[i]) { r[i] = 1; used[i] = true; }
+  for (let i = 0; i < n; i++) {
     if (r[i] === 1) continue;
-    for (let j = 0; j < 5; j++) {
+    for (let j = 0; j < n; j++) {
       if (guess[i] === secret[j] && !used[j]) { r[i] = 2; used[j] = true; break; }
     }
   }
   let s = "";
-  for (let i = 0; i < 5; i++) s += r[i] === 0 ? "b" : r[i] === 1 ? "g" : "y";
+  for (let i = 0; i < n; i++) s += r[i] === 0 ? "b" : r[i] === 1 ? "g" : "y";
   return s;
 }
 
+// Numeric ordering of a response string (little-endian base 3), matching the
+// compact format's edge order. Length-agnostic.
 function responseIndex(s) {
   let mul = 1, v = 0;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < s.length; i++) {
     v += (s[i] === "b" ? 0 : s[i] === "g" ? 1 : 2) * mul;
     mul *= 3;
   }
   return v;
 }
 
+function wordLength(file) {
+  const sample = (file.candidates && file.candidates[0]) || (file.guesses && file.guesses[0]) || file.root.guess;
+  return sample.length;
+}
+
 // --- validation (shared by both views; drives the stats + badge) ---
 function validateTree(file) {
   const errors = [];
+  const WIN = winString(wordLength(file));
   const guesses = new Set(file.guesses);
   const nCandidates = file.candidates.length;
   let nodes = 0, edges = 0, leaves = 0, maxDepth = 0, wins = 0, totalCost = 0;
@@ -132,6 +145,8 @@ function escapeHtml(s) {
 const app = {
   file: null,
   report: null,
+  letters: 5,
+  win: "ggggg",
   mode: "play",
   // play state
   play: null,
@@ -161,6 +176,7 @@ function candidatesMap(file, node, candidates) {
 // out-edges understates it whenever the guess is also a candidate.
 function computeNodeStats(file) {
   const stats = new Map();
+  const WIN = winString(wordLength(file));
   function visit(node, candidates) {
     const map = candidatesMap(file, node, candidates);
     let total = candidates.length; // the node's own guess, once per candidate
@@ -181,7 +197,7 @@ function resetPlay() {
   app.play = {
     nodes: [{ node: app.file.root, candidates: app.file.candidates.map((_, i) => i) }],
     responses: [],
-    editor: [null, null, null, null, null],
+    editor: new Array(app.letters).fill(null),
     solved: false,
   };
   renderPlay();
@@ -204,10 +220,10 @@ function submitResponse() {
     setPlayMsg(`"${r.toUpperCase()}" is not possible here (${possible.length} possible response(s)).`, "bad");
     return;
   }
-  if (r === WIN) {
+  if (r === app.win) {
     p.solved = true;
     p.responses.push(r);
-    p.editor = [null, null, null, null, null];
+    p.editor = new Array(app.letters).fill(null);
     setPlayMsg(`Solved in ${p.responses.length} guess${p.responses.length === 1 ? "" : "es"}.`, "ok");
     renderPlay();
     return;
@@ -215,7 +231,7 @@ function submitResponse() {
   const child = cur.node.children[r];
   p.responses.push(r);
   p.nodes.push({ node: child, candidates: map.get(r) });
-  p.editor = [null, null, null, null, null];
+  p.editor = new Array(app.letters).fill(null);
   setPlayMsg("");
   renderPlay();
 }
@@ -226,7 +242,7 @@ function backPlay() {
   p.responses.pop();
   p.nodes.pop();
   p.solved = false;
-  p.editor = [null, null, null, null, null];
+  p.editor = new Array(app.letters).fill(null);
   setPlayMsg("");
   renderPlay();
 }
@@ -245,10 +261,10 @@ function renderPlay() {
   // Completed rows: guess coloured by the response the player entered.
   for (let i = 0; i < p.responses.length; i++) {
     const row = el("div", "row");
-    row.appendChild(tiles(p.nodes[i].node.guess, "", ""));
     const g = p.nodes[i].node.guess;
-    row.textContent = "";
-    for (let k = 0; k < 5; k++) row.appendChild(el("span", "tile " + ({ b: "gray", g: "green", y: "yellow" }[p.responses[i][k]]), g[k]));
+    for (let k = 0; k < app.letters; k++) {
+      row.appendChild(el("span", "tile " + { b: "gray", g: "green", y: "yellow" }[p.responses[i][k]], g[k]));
+    }
     board.appendChild(row);
   }
 
@@ -257,7 +273,7 @@ function renderPlay() {
   const isLeaf = Object.keys(cur.node.children).length === 0;
   const row = el("div", "row");
   const showGreen = p.solved || isLeaf;
-  for (let k = 0; k < 5; k++) {
+  for (let k = 0; k < app.letters; k++) {
     row.appendChild(el("span", "tile " + (showGreen ? "green" : "current"), cur.node.guess[k]));
   }
   board.appendChild(row);
@@ -288,7 +304,7 @@ function renderEditor() {
   const p = app.play;
   const box = document.getElementById("response-tiles");
   box.textContent = "";
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < app.letters; i++) {
     const ch = p.editor[i];
     const cls = "tile " + (ch ? { b: "gray", g: "green", y: "yellow" }[ch] : "unset");
     const t = el("span", cls, ch ? ch.toUpperCase() : "");
@@ -306,10 +322,10 @@ function renderEditor() {
 function showHint() {
   const cur = currentPlay();
   const map = candidatesMap(app.file, cur.node, cur.candidates);
-  const keys = [...map.keys()].filter((r) => r !== WIN).sort((a, b) => responseIndex(a) - responseIndex(b));
+  const keys = [...map.keys()].filter((r) => r !== app.win).sort((a, b) => responseIndex(a) - responseIndex(b));
   const hint = document.getElementById("editor-hint");
   hint.textContent = "";
-  const winPossible = map.has(WIN);
+  const winPossible = map.has(app.win);
   hint.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}${winPossible ? " (or the win)" : ""} \u2014 click one:`));
   const list = el("div", "hint-list");
   list.style.display = "flex";
@@ -452,6 +468,8 @@ function loadFile(file) {
     return;
   }
   app.file = file;
+  app.letters = wordLength(file);
+  app.win = winString(app.letters);
   const report = validateTree(file);
   app.report = report;
   app.nodeStats = computeNodeStats(file);
@@ -512,7 +530,7 @@ document.getElementById("file").addEventListener("change", (e) => {
 });
 
 document.getElementById("submit-response").addEventListener("click", submitResponse);
-document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = [null, null, null, null, null]; renderEditor(); });
+document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = new Array(app.letters).fill(null); renderEditor(); });
 document.getElementById("hint-response").addEventListener("click", showHint);
 document.getElementById("back").addEventListener("click", backPlay);
 document.getElementById("reset").addEventListener("click", resetPlay);
