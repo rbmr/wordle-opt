@@ -824,7 +824,7 @@ impl<'a> Solver<'a> {
         let mut valid_max_k = 0;
 
         #[cfg(cuda_enabled)]
-        let use_gpu1 = (phase1_guesses.len() * set.len()) > 250000;
+        let use_gpu1 = (phase1_guesses.len() * set.len()) > 50000;
         #[cfg(not(cuda_enabled))]
         let use_gpu1 = false;
         if use_gpu1 {
@@ -946,7 +946,7 @@ impl<'a> Solver<'a> {
 
         if best_val > local_lb {
             #[cfg(cuda_enabled)]
-            let use_gpu2 = (phase2_guesses.len() * set.len()) > 250000;
+            let use_gpu2 = (phase2_guesses.len() * set.len()) > 50000;
             #[cfg(not(cuda_enabled))]
             let use_gpu2 = false;
             if use_gpu2 {
