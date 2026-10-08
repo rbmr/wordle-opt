@@ -912,6 +912,51 @@ impl<'a> Solver<'a> {
                 });
             }
         }  else {
+
+            if c_len <= 8 {
+                for &g in &phase1_guesses {
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    let mut num_non_empty = 0;
+                    let mut local_counts = [(0u8, 0u8); 8];
+                    let g_off = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
+                        let mut found = false;
+                        for i in 0..num_non_empty {
+                            if local_counts[i].0 == r {
+                                local_counts[i].1 += 1;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            local_counts[num_non_empty] = (r, 1);
+                            num_non_empty += 1;
+                        }
+                    }
+                    if num_non_empty == 1 {
+                        continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = local_counts[i].0 as usize;
+                        let count = local_counts[i].1 as usize;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count];
+                        }
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if lb_cost < beta {
+                        if num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                        phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    }
+                }
+            } else {
             for &g in &phase1_guesses {
                 let mut expected_rem = 0u32;
                 let mut lb_cost = c_len as u32;
@@ -950,6 +995,8 @@ impl<'a> Solver<'a> {
                     phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                 }
             }
+            }
+
         }
         phase1_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
 
@@ -1034,6 +1081,51 @@ impl<'a> Solver<'a> {
                     });
                 }
             }  else {
+
+                if c_len <= 8 {
+                    for &g in &phase2_guesses {
+                        let mut expected_rem = 0u32;
+                        let mut lb_cost = c_len as u32;
+                        let mut num_non_empty = 0;
+                        let mut local_counts = [(0u8, 0u8); 8];
+                        let g_off = g * self.matrix.num_candidates;
+                        for &c in set {
+                            let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
+                            let mut found = false;
+                            for i in 0..num_non_empty {
+                                if local_counts[i].0 == r {
+                                    local_counts[i].1 += 1;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found {
+                                local_counts[num_non_empty] = (r, 1);
+                                num_non_empty += 1;
+                            }
+                        }
+                        if num_non_empty == 1 {
+                            continue;
+                        }
+                        for i in 0..num_non_empty {
+                            let r_idx = local_counts[i].0 as usize;
+                            let count = local_counts[i].1 as usize;
+                            expected_rem += (count as u32) * (count as u32);
+                            if r_idx != crate::core::Response::WIN.0 as usize {
+                                lb_cost += self.capacity_bounds_2d[parent_max_k][count];
+                            }
+                        }
+                        if num_non_empty > local_max_k {
+                            local_max_k = num_non_empty;
+                        }
+                        if lb_cost < beta && num_non_empty > valid_max_k {
+                            valid_max_k = num_non_empty;
+                        }
+                        if lb_cost < best_val {
+                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        }
+                    }
+                } else {
                 for &g in &phase2_guesses {
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
@@ -1072,6 +1164,8 @@ impl<'a> Solver<'a> {
                         phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     }
                 }
+                }
+
             }
             phase2_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
 
@@ -1131,7 +1225,7 @@ impl<'a> Solver<'a> {
     /// at the bucket level: if the cumulative cost of resolved buckets plus the theoretical
     /// heuristic minimum cost of the remaining unresolved buckets exceeds `beta`, evaluation
     /// is immediately aborted.
-    pub fn min_guess_val(
+pub fn min_guess_val(
         &mut self,
         set: &[usize],
         guess: usize,
@@ -1141,136 +1235,224 @@ impl<'a> Solver<'a> {
         parent_max_k: usize,
     ) -> u32 {
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        // Tighten local beta using the shared global bound from concurrent threads.
-        // min_state_val caches against the tightened beta; alpha-beta semantics guarantee
-        // any cached lower bound produced this way is <= the true sub-state cost.
         let beta = beta.min(current_global_beta);
 
-        self.metrics
-            .guesses_evaluated
-            .fetch_add(1, Ordering::Relaxed);
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
-        let mut num_non_empty = 0;
+        self.metrics.guesses_evaluated.fetch_add(1, Ordering::Relaxed);
 
+        let c_len = set.len();
         let g_offset = guess * self.matrix.num_candidates;
-        for &c in set {
-            let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-            unsafe {
-                let cnt = counts.get_unchecked_mut(r);
-                if *cnt == 0 {
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+
+        if c_len <= 8 {
+            let mut local_counts = [(0u8, 0u8); 8];
+            let mut num_non_empty = 0;
+            for &c in set {
+                let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 };
+                let mut found = false;
+                for i in 0..num_non_empty {
+                    if local_counts[i].0 == r {
+                        local_counts[i].1 += 1;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    local_counts[num_non_empty] = (r, 1);
                     num_non_empty += 1;
                 }
-                *cnt += 1;
-            }
-        }
-
-        if num_non_empty == 1 {
-            return beta;
-        }
-
-        // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
-        // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
-        // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
-        // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
-        // Benchmarks show this sorting step halves the total number of evaluated states.
-        non_empty_indices[0..num_non_empty]
-            .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
-
-        let mut cost = set.len() as u32;
-        let mut p_lbs = [0u32; 243];
-
-        for i in 0..num_non_empty {
-            let r_idx = non_empty_indices[i] as usize;
-            if r_idx == Response::WIN.0 as usize {
-                continue;
-            }
-            let p_len = counts[r_idx] as u32;
-            // self.capacity_bounds[n] == capacity_bound(n, self.max_k) for every n up to
-            // dict.candidates.len() (see solve()'s setup) - self.max_k is fixed at
-            // construction and never changes across recursion, so this is always exactly
-            // the same value capacity_bound() would compute, just without redoing the
-            // O(log n) loop on every one of this hot function's calls.
-            let lb = self.capacity_bounds_2d[parent_max_k][p_len as usize];
-            cost += lb;
-            p_lbs[r_idx] = lb;
-        }
-
-        if cost >= beta {
-            self.metrics
-                .pruned_by_bounds
-                .fetch_add(1, Ordering::Relaxed);
-            return cost;
-        }
-
-        // Fast slice partition using counting sort
-        let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
-        sorted_set.clear();
-        sorted_set.reserve(set.len());
-        unsafe { sorted_set.set_len(set.len()); }
-
-        let mut offsets = [0u16; 243];
-        let mut curr = 0;
-        for i in 0..num_non_empty {
-            let r = non_empty_indices[i] as usize;
-            offsets[r] = curr;
-            curr += counts[r];
-        }
-
-        let mut current_offsets = offsets;
-        for &c in set {
-            let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-            let pos = current_offsets[r_idx] as usize;
-            sorted_set[pos] = c;
-            current_offsets[r_idx] += 1;
-        }
-
-        for i in 0..num_non_empty {
-            let r_idx = non_empty_indices[i] as usize;
-            let p_len = counts[r_idx] as usize;
-            if r_idx == Response::WIN.0 as usize {
-                continue;
-            }
-            if p_len <= 2 {
-                continue;
             }
 
-            let start = offsets[r_idx] as usize;
-            let end = start + p_len;
-            let p = &sorted_set[start..end];
+            if num_non_empty == 1 {
+                return beta;
+            }
 
-            let b = cost - p_lbs[r_idx];
-            let new_beta = beta - b;
+            local_counts[0..num_non_empty].sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
 
-            // Also respect the global beta from concurrent threads: if another thread
-            // already found a solution cheaper than beta, tighten our local bound.
-            let effective_beta =
-                new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+            let mut cost = c_len as u32;
+            let mut p_lbs_local = [0u32; 8];
+            let mut max_p_len = 0;
 
-            if effective_beta == 0 {
-                self.scratch_sorted_sets[depth] = sorted_set;
+            for i in 0..num_non_empty {
+                let r_idx = local_counts[i].0 as usize;
+                if r_idx == Response::WIN.0 as usize {
+                    continue;
+                }
+                let p_len = local_counts[i].1 as usize;
+                if p_len > max_p_len { max_p_len = p_len; }
+                let lb = self.capacity_bounds_2d[parent_max_k][p_len];
+                cost += lb;
+                p_lbs_local[i] = lb;
+            }
+
+            if cost >= beta {
+                self.metrics.pruned_by_bounds.fetch_add(1, Ordering::Relaxed);
                 return cost;
             }
 
-            self.current_cost_so_far += b;
-            let val = self.min_state_val(p, effective_beta, depth + 1, parent_max_k);
-            self.current_cost_so_far -= b;
-            if b + val >= beta {
-                self.scratch_sorted_sets[depth] = sorted_set;
-                return b + val;
+            if max_p_len <= 2 {
+                return cost;
             }
-            // Propagate any tightening from the global beta.
-            if self.current_cost_so_far + b + val >= current_global_beta {
-                self.scratch_sorted_sets[depth] = sorted_set;
-                return b + val;
+
+            for i in 0..num_non_empty {
+                let p_len = local_counts[i].1 as usize;
+                let r_idx = local_counts[i].0 as usize;
+                if r_idx == Response::WIN.0 as usize || p_len <= 2 {
+                    continue;
+                }
+
+                let mut p = [0usize; 8];
+                let mut p_idx = 0;
+                for &c in set {
+                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    if r == r_idx {
+                        p[p_idx] = c;
+                        p_idx += 1;
+                    }
+                }
+
+                let b = cost - p_lbs_local[i];
+                let new_beta = beta - b;
+                let effective_beta = new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                if effective_beta == 0 {
+                    return cost;
+                }
+
+                self.current_cost_so_far += b;
+                let val = self.min_state_val(&p[0..p_len], effective_beta, depth + 1, parent_max_k);
+                self.current_cost_so_far -= b;
+
+                if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
+                    return b + val;
+                }
+                cost = b + val;
             }
-            cost = b + val;
+            return cost;
+        } else {
+
+            
+            let mut counts = [0u16; 243];
+            let mut non_empty_indices = [0u8; 243];
+            let mut num_non_empty = 0;
+
+            let g_offset = guess * self.matrix.num_candidates;
+            for &c in set {
+                let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                unsafe {
+                    let cnt = counts.get_unchecked_mut(r);
+                    if *cnt == 0 {
+                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                        num_non_empty += 1;
+                    }
+                    *cnt += 1;
+                }
+            }
+
+            if num_non_empty == 1 {
+                return beta;
+            }
+
+            // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
+            // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
+            // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
+            // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
+            // Benchmarks show this sorting step halves the total number of evaluated states.
+            non_empty_indices[0..num_non_empty]
+                .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
+
+            let mut cost = set.len() as u32;
+            let mut p_lbs = [0u32; 243];
+
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                if r_idx == Response::WIN.0 as usize {
+                    continue;
+                }
+                let p_len = counts[r_idx] as u32;
+                // self.capacity_bounds[n] == capacity_bound(n, self.max_k) for every n up to
+                // dict.candidates.len() (see solve()'s setup) - self.max_k is fixed at
+                // construction and never changes across recursion, so this is always exactly
+                // the same value capacity_bound() would compute, just without redoing the
+                // O(log n) loop on every one of this hot function's calls.
+                let lb = self.capacity_bounds_2d[parent_max_k][p_len as usize];
+                cost += lb;
+                p_lbs[r_idx] = lb;
+            }
+
+            if cost >= beta {
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, Ordering::Relaxed);
+                return cost;
+            }
+
+            // Fast slice partition using counting sort
+            let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
+            sorted_set.clear();
+            sorted_set.reserve(set.len());
+            unsafe { sorted_set.set_len(set.len()); }
+
+            let mut offsets = [0u16; 243];
+            let mut curr = 0;
+            for i in 0..num_non_empty {
+                let r = non_empty_indices[i] as usize;
+                offsets[r] = curr;
+                curr += counts[r];
+            }
+
+            let mut current_offsets = offsets;
+            for &c in set {
+                let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                let pos = current_offsets[r_idx] as usize;
+                sorted_set[pos] = c;
+                current_offsets[r_idx] += 1;
+            }
+
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                if r_idx == Response::WIN.0 as usize {
+                    continue;
+                }
+                if p_len <= 2 {
+                    continue;
+                }
+
+                let start = offsets[r_idx] as usize;
+                let end = start + p_len;
+                let p = &sorted_set[start..end];
+
+                let b = cost - p_lbs[r_idx];
+                let new_beta = beta - b;
+
+                // Also respect the global beta from concurrent threads: if another thread
+                // already found a solution cheaper than beta, tighten our local bound.
+                let effective_beta =
+                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                if effective_beta == 0 {
+                    self.scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
+                }
+
+                self.current_cost_so_far += b;
+                let val = self.min_state_val(p, effective_beta, depth + 1, parent_max_k);
+                self.current_cost_so_far -= b;
+                if b + val >= beta {
+                    self.scratch_sorted_sets[depth] = sorted_set;
+                    return b + val;
+                }
+                // Propagate any tightening from the global beta.
+                if self.current_cost_so_far + b + val >= current_global_beta {
+                    self.scratch_sorted_sets[depth] = sorted_set;
+                    return b + val;
+                }
+                cost = b + val;
+            }
+
+            self.scratch_sorted_sets[depth] = sorted_set;
+
+            cost
         }
-
-        self.scratch_sorted_sets[depth] = sorted_set;
-
-        cost
     }
 }
 
