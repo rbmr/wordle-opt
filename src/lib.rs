@@ -756,6 +756,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
 }
 
 // Agent integrating IDA*
+/// Command line interface entrypoint for solving, benchmarking, and verifying the optimal strategy.
 pub fn run_cli() {
     let args: Vec<String> = env::args().collect();
 
@@ -924,4 +925,3 @@ pub mod parallel_depth;
 
 #[cfg(cuda_enabled)]
 pub mod gpu;
-

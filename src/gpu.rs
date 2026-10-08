@@ -1,4 +1,3 @@
-
 #[cfg(cuda_enabled)]
 unsafe extern "C" {
     pub fn gpu_alloc_context() -> *mut std::ffi::c_void;
@@ -8,7 +7,7 @@ unsafe extern "C" {
         ctx: *mut std::ffi::c_void,
         num_active: i32,
         set_len: i32,
-        parent_max_k: i32
+        parent_max_k: i32,
     );
     pub fn gpu_get_h_active_guesses(ctx: *mut std::ffi::c_void) -> *mut u16;
     pub fn gpu_get_h_set(ctx: *mut std::ffi::c_void) -> *mut u16;
