@@ -3,6 +3,8 @@ use crate::core::Response;
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
 
+/// A reference solver that uses no caching or equivalence pruning.
+/// Used as a ground-truth baseline for differential fuzz testing.
 pub struct NaiveSolver<'a> {
     matrix: &'a ResponseMatrix,
     dict: &'a Dictionary,
