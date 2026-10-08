@@ -15,6 +15,10 @@ pub struct Dictionary {
 }
 
 impl Dictionary {
+    /// Loads a wordle dictionary from two text files containing words separated by newlines.
+    ///
+    /// Automatically normalizes words to lowercase, ignores words that aren't exactly 5 letters,
+    /// deduplicates, and importantly, guarantees that every candidate word is present in the `guesses` list.
     pub fn load<P1: AsRef<Path>, P2: AsRef<Path>>(guesses_path: P1, candidates_path: P2) -> Self {
         let mut guesses = Self::read_words(guesses_path);
         let mut candidates = Self::read_words(candidates_path);
