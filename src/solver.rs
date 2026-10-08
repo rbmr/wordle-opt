@@ -1362,7 +1362,7 @@ pub fn min_guess_val(
                 }
                 cost = b + val;
             }
-            return cost;
+            cost
         } else {
 
             
@@ -1424,8 +1424,8 @@ pub fn min_guess_val(
             // Fast slice partition using counting sort
             let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
             sorted_set.clear();
-            sorted_set.reserve(set.len());
-            unsafe { sorted_set.set_len(set.len()); }
+            sorted_set.resize(set.len(), 0);
+            
 
             let mut offsets = [0u16; 243];
             let mut curr = 0;
