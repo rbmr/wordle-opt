@@ -21,7 +21,7 @@ aggressively while guaranteeing the final answer is still exactly optimal:
 - **Equivalence-class guess pruning**: guesses that partition the current
   candidate set identically to a guess already tried are skipped, since they
   can't produce a different outcome. The projection per `c_mask` is memoized in an
-  `FxHashMap` cache.
+  `FxHashMap` cache, dynamically sized to fit tightly within the 32 KB L1 cache.
 - **A lock-free transposition table** (`src/cache.rs::GlobalCache`): a
   fixed-size array of `AtomicU64` slots, each packing a 45-bit Zobrist hash,
   an 18-bit cost value, and an exact/lower-bound flag, shared across threads
