@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Two-tier replacement policy for collisions (different states at same slot):
 ///   - Slot 0: Always-replace (latest visited node).
 ///   - Slot 1: Depth-preferred (keep the entry with the larger value / harder subtree).
-/// A lock-free transposition table implementing a Two-Tier Replacement Policy.
 ///
 /// It relies on atomic operations to avoid stalling `rayon` threads.
 /// Due to intentional relaxed atomics and TOCTOU races in insertion, updates can
