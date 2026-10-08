@@ -6,8 +6,6 @@ use std::path::Path;
 
 /// Represents a loaded Wordle dictionary containing valid guesses and possible secret candidates.
 /// Both vectors are deduplicated and sorted to enable deterministic subset caching.
-/// Stores the list of legal guess words and the possible target candidate words.
-/// Converts all strings into sorted deduplicated sequences to enable deterministic subset caching.
 pub struct Dictionary {
     pub guesses: Vec<Word>,
     pub guess_chars: Vec<[u8; 5]>,
