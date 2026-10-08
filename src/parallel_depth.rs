@@ -97,13 +97,13 @@ pub fn solve_parallel_depth2<'a>(
         bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.1.len()));
 
         let running_cost = AtomicU32::new(lb);
-                let num_u64s = dict.guesses.len().div_ceil(64);
+        let num_u64s = dict.guesses.len().div_ceil(64);
         let mut all_guesses_bits = vec![u64::MAX; num_u64s];
         let rem = dict.guesses.len() % 64;
         if rem != 0 {
             all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
         }
-        
+
         let exceeded = AtomicBool::new(false);
 
         // Rayon's par_iter allows child tasks to execute concurrently and steal work,
@@ -203,36 +203,39 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_parallel_depth2_prunes_early() {
-        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
-        let matrix = ResponseMatrix::new(&dict);
-        let metrics = Metrics::new();
-        let global_cache = GlobalCache::new(1024);
-        let equiv_cache: [_; 64] = std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        
-        // Beta is 0! It should do zero real work.
-        let beta = AtomicU32::new(0);
-        let active_guesses: Vec<usize> = vec![0, 1, 2];
-        let initial_candidates: Vec<usize> = vec![0, 1, 2, 3, 4, 5];
-        let max_k = 2;
-        let mut capacity_bounds_2d = vec![vec![0; 10]; 3];
-        // Populate bounds so lb >= beta (6 >= 0)
-        for k in 2..=2 {
-            for i in 0..10 { capacity_bounds_2d[k][i] = i as u32; }
-        }
+#[test]
+fn test_parallel_depth2_prunes_early() {
+    let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+    let matrix = ResponseMatrix::new(&dict);
+    let metrics = Metrics::new();
+    let global_cache = GlobalCache::new(1024);
+    let equiv_cache: [_; 64] =
+        std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
-        let result = solve_parallel_depth2(
-            &matrix,
-            &initial_candidates,
-            &dict,
-            &metrics,
-            &equiv_cache,
-            &global_cache,
-            max_k,
-            &capacity_bounds_2d,
-            &beta,
-            &active_guesses,
-        );
-        assert_eq!(result, 0);
+    // Beta is 0! It should do zero real work.
+    let beta = AtomicU32::new(0);
+    let active_guesses: Vec<usize> = vec![0, 1, 2];
+    let initial_candidates: Vec<usize> = vec![0, 1, 2, 3, 4, 5];
+    let max_k = 2;
+    let mut capacity_bounds_2d = vec![vec![0; 10]; 3];
+    // Populate bounds so lb >= beta (6 >= 0)
+    for k in 2..=2 {
+        for i in 0..10 {
+            capacity_bounds_2d[k][i] = i as u32;
+        }
     }
+
+    let result = solve_parallel_depth2(
+        &matrix,
+        &initial_candidates,
+        &dict,
+        &metrics,
+        &equiv_cache,
+        &global_cache,
+        max_k,
+        &capacity_bounds_2d,
+        &beta,
+        &active_guesses,
+    );
+    assert_eq!(result, 0);
+}
