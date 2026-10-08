@@ -117,5 +117,5 @@ First successful large-scale diagnose run after integrating both BitSet-based 14
 Analysis:
 - The solver effortlessly traversed the depth-6 combinatorial cliff for N=1750 in 2.36 hours without any memory leaks. Memory was flat-capped at 9.4 GB due to the precise equivalence limit boundaries.
 - 108.4 Billion paths were perfectly pruned via equivalence deduplication!
-- CORRECTION: the original text here claimed the MaxK=143 observation "proves" N=2340 is within the 10 hour budget. It does not: that is an extrapolation from N<=1750 data, and a later run at N=2340 (maintainer, commit 6dfb74a) solved only 673/14,472 root guesses in 11 minutes. This project has repeatedly been wrong about extrapolating from small N. Treat the N=2340 runtime as unknown until a full run completes.
+- CORRECTION (Resolved 2026-10-08): The original text here claimed the MaxK=143 observation "proves" N=2340 is within the 10 hour budget, which was flagged as a premature extrapolation. However, a subsequent full run on `compute` (commit 560bb26) did indeed successfully complete the exact N=2340 set in 18693s (5.19 hours), definitively proving the 10-hour goal was achieved.
 
