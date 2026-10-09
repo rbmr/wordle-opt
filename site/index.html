@@ -66,28 +66,29 @@
   </section>
 
   <section id="tree-pane" class="pane" hidden>
+    <h2 class="section-title">Statistics</h2>
     <div class="explore-stats">
       <table id="stats-table" class="stats-table"></table>
       <div id="chart" class="chart"></div>
     </div>
-    <div class="explore-tree">
-      <div class="toolbar inner">
-        <div class="group">
-          <button id="expand-all">Expand all</button>
-          <button id="collapse-all">Collapse all</button>
-        </div>
-        <div class="group">
-          <label for="depth">Expand to depth</label>
-          <input type="range" id="depth" min="0" max="8" value="1" />
-          <span id="depth-val">1</span>
-        </div>
-        <div class="group">
-          <label for="search">Find</label>
-          <input type="search" id="search" placeholder="word" autocomplete="off" />
-        </div>
+
+    <h2 class="section-title">Tree visualizer</h2>
+    <div class="toolbar inner">
+      <div class="group">
+        <button id="expand-all">Expand all</button>
+        <button id="collapse-all">Collapse all</button>
       </div>
-      <div id="tree" class="tree"></div>
+      <div class="group">
+        <label for="depth">Expand to depth</label>
+        <input type="range" id="depth" min="0" max="8" value="1" />
+        <span id="depth-val">1</span>
+      </div>
+      <div class="group">
+        <label for="search">Find</label>
+        <input type="search" id="search" placeholder="word" autocomplete="off" />
+      </div>
     </div>
+    <div id="tree" class="tree"></div>
   </section>
 </main>
 

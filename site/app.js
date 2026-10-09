@@ -5,9 +5,9 @@
 // `wordle-opt solve`), validates it, and offers two views:
 //
 //   - Play: traverse the policy like the game. The current guess is shown, you
-//     enter the response you would get, and it either advances, says the
-//     response is impossible, or reports a solve. Back/Restart included.
-//   - Explore tree: the full collapsible tree.
+//     set its response, and it either advances, says the response is
+//     impossible, or reports a solve. Back/Restart included.
+//   - Explore: the statistics and the full collapsible tree.
 //
 // The validation is deliberately the same rule the Rust validator enforces: at
 // every node, the response edges must equal exactly the responses possible for
@@ -39,7 +39,7 @@ function response(secret, guess) {
 }
 
 // Numeric ordering of a response string (little-endian base 3), matching the
-// compact format's edge order. Length-agnostic.
+// tree's edge order. Length-agnostic.
 function responseIndex(s) {
   let mul = 1, v = 0;
   for (let i = 0; i < s.length; i++) {
@@ -126,24 +126,6 @@ const el = (tag, cls, text) => {
   if (text !== undefined) e.textContent = text;
   return e;
 };
-
-function tiles(chars, kind, extraCls) {
-  const wrap = el("span", "tiles " + (kind || ""));
-  for (const ch of chars) {
-    let cls = "tile";
-    if (ch === "b") cls += " gray";
-    else if (ch === "g") cls += " green";
-    else if (ch === "y") cls += " yellow";
-    else cls += " unset";
-    if (extraCls) cls += " " + extraCls;
-    wrap.appendChild(el("span", cls, ch && ch !== " " ? ch : ""));
-  }
-  return wrap;
-}
-
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
 
 // --- app state ---
 const app = {
@@ -347,7 +329,9 @@ function toggleOptions() {
   const list = el("div", "options-list");
   for (const r of keys) {
     const row = el("div", "option-row");
-    const t = tiles(r, "", "");
+    // Show the current guess coloured by each possible response, matching the
+    // board and tree language (rather than a row of b/g/y tiles).
+    const t = wordTiles(cur.node.guess, r);
     t.style.cursor = "pointer";
     t.title = "use this response";
     t.addEventListener("click", () => {
@@ -481,24 +465,25 @@ function renderStats(file, report) {
   thead.appendChild(hr);
   table.appendChild(thead);
 
+  const line = (label, value) => {
+    const d = el("div", "stat-line");
+    d.appendChild(el("span", "sl-label", label));
+    d.appendChild(el("span", "sl-value", value));
+    return d;
+  };
+
   const inputCol = el("td");
-  for (const [k, v] of [
-    ["candidates", s.candidates.toLocaleString()],
-    ["guesses", s.guesses.toLocaleString()],
-    ["dictionary hash", file.dictionary_hash],
-  ]) {
-    inputCol.appendChild(el("div", "", `${k}: ${v}`));
-  }
+  inputCol.appendChild(line("candidates", s.candidates.toLocaleString()));
+  inputCol.appendChild(line("guesses", s.guesses.toLocaleString()));
+  inputCol.appendChild(line("dictionary hash", file.dictionary_hash));
+
   const policyCol = el("td");
-  for (const [k, v] of [
-    ["name", file.strategy],
-    ["nodes", s.nodes.toLocaleString()],
-    ["edges", s.edges.toLocaleString()],
-    ["max depth", String(s.maxDepth)],
-    ["mean guesses", s.meanGuesses.toFixed(4)],
-  ]) {
-    policyCol.appendChild(el("div", "", `${k}: ${v}`));
-  }
+  policyCol.appendChild(line("name", file.strategy));
+  policyCol.appendChild(line("nodes", s.nodes.toLocaleString()));
+  policyCol.appendChild(line("edges", s.edges.toLocaleString()));
+  policyCol.appendChild(line("max depth", String(s.maxDepth)));
+  policyCol.appendChild(line("mean guesses", s.meanGuesses.toFixed(4)));
+
   const tr = el("tr");
   tr.appendChild(inputCol);
   tr.appendChild(policyCol);
@@ -522,17 +507,21 @@ function renderChart() {
   if (counts.length === 0) return;
   const maxCount = Math.max(1, ...counts.map(([, c]) => c));
   box.appendChild(el("div", "chart-title", "Guess-count distribution"));
+  const plot = el("div", "chart-plot");
   const bars = el("div", "chart-bars");
+  const labels = el("div", "chart-labels");
   for (const [guesses, count] of counts) {
     const col = el("div", "chart-col");
     col.appendChild(el("span", "count", count.toLocaleString()));
     const bar = el("div", "bar");
     bar.style.height = Math.max(1, Math.round((count / maxCount) * 130)) + "px";
     col.appendChild(bar);
-    col.appendChild(el("span", "label", String(guesses)));
     bars.appendChild(col);
+    labels.appendChild(el("div", "chart-label", String(guesses)));
   }
-  box.appendChild(bars);
+  plot.appendChild(bars);
+  plot.appendChild(labels);
+  box.appendChild(plot);
 }
 
 function setMode(mode) {

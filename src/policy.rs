@@ -1260,7 +1260,7 @@ fn build_into(
 // ---------------------------------------------------------------------------
 
 /// Summary produced by a successful [`PolicyTree::validate`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct ValidationReport {
     pub nodes: usize,
     pub edges: usize,

@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use wordle_opt::dict::Dictionary;
 use wordle_opt::matrix::ResponseMatrix;
-use wordle_opt::solver::{Metrics, Solver};
+use wordle_opt::solver::Solver;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
