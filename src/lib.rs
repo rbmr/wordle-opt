@@ -886,7 +886,7 @@ fn run_solve_cli(args: &[String]) {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1 << 22);
     let progress = !flags.values.contains_key("no-progress");
-    let collect_stats = flags.get("stats").is_some();
+    let collect_samples = flags.get("stats").is_some();
     let stats_format = flags.get_or("stats-format", "parquet");
 
     let dict = load_dict_from_flags(&flags, max_candidates);
@@ -909,7 +909,7 @@ fn run_solve_cli(args: &[String]) {
     let root: Vec<usize> = (0..n).collect();
 
     let opts = BuildOptions {
-        collect_samples: collect_stats,
+        collect_samples,
         progress,
         cache_entries,
         ..Default::default()
