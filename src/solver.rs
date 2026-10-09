@@ -660,14 +660,9 @@ impl<'a> Solver<'a> {
             }
         }
 
-        let global_lb = self.capacity_bounds_2d[self.max_k][c_len];
-        if global_lb >= beta {
-            return global_lb;
-        }
-
         let parent_lb = self.capacity_bounds_2d[parent_max_k][c_len];
         if parent_lb >= beta {
-            return parent_lb.max(global_lb);
+            return parent_lb;
         }
 
         let mut best_val = beta;
@@ -883,11 +878,7 @@ impl<'a> Solver<'a> {
         self.scratch_is_in_set[depth] = is_in_set;
         self.scratch_active_bits[depth] = active_bits_scratch;
 
-        self.metrics
-            .pruned_by_equivalence
-            .fetch_add(0, std::sync::atomic::Ordering::Relaxed);
-
-        let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
+        let mut local_lb = parent_lb.max(cached_lower_bound);
         let mut counts = [0u16; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
