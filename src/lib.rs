@@ -645,6 +645,37 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
     writeln!(file).unwrap();
 }
 
+/// Output paths for a full run, given the environment values they depend on.
+/// They live in the home directory rather than the rsync target: the build
+/// directory is deleted and rewritten by the next deploy, and a finished
+/// run's policy tree and progress series must survive it.
+fn full_output_paths_from(
+    home: Option<std::ffi::OsString>,
+    out: Option<String>,
+    stats: Option<String>,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let home = home
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let out = out
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join("optimal-2340.json"));
+    let stats = stats
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join("optimal-2340-progress.parquet"));
+    (out, stats)
+}
+
+/// [`full_output_paths_from`] with the current environment:
+/// `WORDLE_OPT_POLICY_OUT` / `WORDLE_OPT_POLICY_STATS` override the defaults.
+fn full_output_paths() -> (std::path::PathBuf, std::path::PathBuf) {
+    full_output_paths_from(
+        std::env::var_os("HOME"),
+        std::env::var("WORDLE_OPT_POLICY_OUT").ok(),
+        std::env::var("WORDLE_OPT_POLICY_STATS").ok(),
+    )
+}
+
 fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     // Restored 2026-09-16: this guard was silently commented out in commit
     // ffb81d2 ("Perf: Prune branches using parent's max_k before full
@@ -675,15 +706,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     // makes day-over-day comparison possible. Both live in the home
     // directory rather than the build directory: the latter is deleted and
     // rewritten by the next deploy, and these files must survive it.
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let out_path = std::env::var("WORDLE_OPT_POLICY_OUT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| home.join("optimal-2340.json"));
-    let stats_path = std::env::var("WORDLE_OPT_POLICY_STATS")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| home.join("optimal-2340-progress.parquet"));
+    let (out_path, stats_path) = full_output_paths();
 
     let observer = std::sync::Arc::new(crate::policy::BuildObserver::default());
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1489,6 +1512,33 @@ mod tests {
         assert_eq!(last.nodes, 7);
         assert_eq!(last.states_evaluated, 1234);
         assert!(last.elapsed_s > 0.0);
+    }
+
+    /// A full run's outputs default to the home directory (not the rsync
+    /// target, which the next deploy deletes) and can be overridden.
+    #[test]
+    fn full_output_paths_default_to_home_and_honor_overrides() {
+        use std::path::PathBuf;
+        let (out, stats) = full_output_paths_from(Some("/home/robert".into()), None, None);
+        assert_eq!(out, PathBuf::from("/home/robert/optimal-2340.json"));
+        assert_eq!(
+            stats,
+            PathBuf::from("/home/robert/optimal-2340-progress.parquet")
+        );
+
+        let (out, stats) = full_output_paths_from(
+            Some("/home/robert".into()),
+            Some("/tmp/tree.json".to_string()),
+            Some("/tmp/progress.ndjson".to_string()),
+        );
+        assert_eq!(out, PathBuf::from("/tmp/tree.json"));
+        assert_eq!(stats, PathBuf::from("/tmp/progress.ndjson"));
+
+        // Without HOME the defaults are still relative, never absolute paths
+        // into someone else's directory.
+        let (out, stats) = full_output_paths_from(None, None, None);
+        assert_eq!(out, PathBuf::from("./optimal-2340.json"));
+        assert_eq!(stats, PathBuf::from("./optimal-2340-progress.parquet"));
     }
 
     /// Samples from the progress thread and the builder must come out in time
