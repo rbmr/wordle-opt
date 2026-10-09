@@ -110,6 +110,12 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 .tiles { display: inline-flex; gap: 6px; }
 
 .editor { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 14px 0; }
+/* Both states use this block (two lines while playing, the solved line after a
+   win) with the same dimensions, so nothing below it ever moves. */
+.editor-text {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; min-height: 52px;
+}
 .editor-label { color: var(--muted); }
 .editor-exp { color: var(--muted); font-size: 13px; }
 .tile.clickable { cursor: pointer; }
@@ -120,10 +126,11 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 .options-list { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 6px; }
 .option-row { display: flex; }
 
-.done {
-  text-align: center; font-size: 18px; color: var(--ok); font-weight: 600;
-  padding: 10px 0;
-}
+.solved { text-align: center; font-size: 18px; color: var(--ok); font-weight: 600; }
+/* Sits exactly where Submit was, and is deliberately wide. Same padding/font as
+   a default button so the row height (and everything below it) does not move. */
+.confetti { min-width: 280px; }
+.confetti-canvas { position: fixed; inset: 0; pointer-events: none; z-index: 60; }
 .play-controls { display: flex; gap: 8px; justify-content: center; margin: 10px 0; }
 .play-msg { text-align: center; min-height: 22px; font-size: 14px; }
 .play-msg.bad { color: var(--bad); }

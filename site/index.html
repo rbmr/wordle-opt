@@ -46,17 +46,19 @@
     </div>
 
     <div id="editor" class="editor" hidden>
-      <div class="editor-label">Click a letter of the guess above to set its response.</div>
-      <div id="editor-exp" class="editor-exp"></div>
+      <div class="editor-text">
+        <div id="editor-hint" class="editor-label">Click a letter of the guess above to set its response.</div>
+        <div id="editor-exp" class="editor-exp"></div>
+        <div id="editor-solved" class="solved" hidden></div>
+      </div>
       <div class="editor-buttons">
         <button id="clear-response">Clear</button>
         <button id="submit-response" class="primary">Submit</button>
         <button id="options-response" aria-expanded="false">Options</button>
+        <button id="confetti" class="confetti" hidden>&#127881; Confetti</button>
       </div>
       <div id="editor-options" class="options"></div>
     </div>
-
-    <div id="play-done" class="done" hidden></div>
 
     <div class="play-controls">
       <button id="back">&#8592; Back</button>
