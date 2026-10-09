@@ -1288,7 +1288,7 @@ impl<'a> Solver<'a> {
                         _g,
                         best_val,
                         depth,
-                        local_max_k,
+                        parent_max_k,
                     );
                     min_val_found = min_val_found.min(val);
                     if val < best_val {
@@ -1540,15 +1540,13 @@ impl<'a> Solver<'a> {
                     hash ^= self.matrix.zobrist[c];
                 }
 
-                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-                    if is_exact {
-                        self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                        let lb = p_lbs[r_idx];
-                        let used_val = cached_val.max(lb);
-                        cost += used_val - lb;
-                        p_lbs[r_idx] = used_val;
-                        exact_vals[r_idx] = used_val;
-                    }
+                if let Some((cached_val, true)) = self.cache.get(hash) {
+                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                    let lb = p_lbs[r_idx];
+                    let used_val = cached_val.max(lb);
+                    cost += used_val - lb;
+                    p_lbs[r_idx] = used_val;
+                    exact_vals[r_idx] = used_val;
                 }
             }
 
