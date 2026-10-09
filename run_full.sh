@@ -1,23 +1,25 @@
 #!/bin/bash
 set -e
 
-# Launches the actual full N=2340 solve on compute - a RARE, DELIBERATE
-# milestone check, not a routine step and not the project's actual goal.
-# The goal is the optimizations that get the algorithm under 10 hours, not
-# the answer a full run produces; the answer doesn't change between
-# commits, only how fast it's reached does. Compute has one shared CPU that
-# every benchmark also needs, so a `full` run and benchmark iteration are
-# mutually exclusive - don't run this reflexively after every change, and
-# don't run it just to "get to done." Only run it when diagnose/benchmark
-# data at large N gives a specific, verified reason to expect it will
-# finish in a bounded time, as a checkpoint on that evidence - see
-# ARCHITECTURE.md's "Known Scaling Behavior" and the task guidance on this
-# machine for why small-N extrapolation alone is not that evidence.
+# Launches the full N=2340 optimal policy tree build on compute - a RARE,
+# DELIBERATE milestone check, not a routine step. The run's output is the
+# complete policy JSON plus its progress time series, and the project's
+# actual goal is the optimizations that make that build fast, not the tree
+# it produces; the tree doesn't change between commits, only how fast it's
+# reached does. Compute has one shared CPU that every benchmark also needs,
+# so a `full` run and benchmark iteration are mutually exclusive - don't run
+# this reflexively after every change, and don't run it just to "get to
+# done." Only run it when diagnose/benchmark data at large N gives a
+# specific, verified reason to expect it will finish in a bounded time, as a
+# checkpoint on that evidence - see ARCHITECTURE.md's "Known Scaling
+# Behavior" and the task guidance on this machine for why small-N
+# extrapolation alone is not that evidence.
 #
-# Bounded by `timeout` at the milestone threshold itself: a run that hasn't
-# finished in 10h has already answered "under 10 hours?" with "no", so
-# there's nothing to gain by letting it run longer uncapped, and it would
-# just block benchmarking indefinitely instead.
+# Bounded by `timeout` as a safety cap, not at the milestone threshold: the
+# milestone (under 2 hours) is read off the wall time the completed run
+# reports, while killing the run early would throw away the tree it spent
+# hours building. The cap exists only so a pathological run cannot block
+# benchmarking indefinitely.
 #
 # Like deploy_and_bench.sh this syncs+builds+tests first, but unlike it,
 # it does NOT block until the solve finishes - it starts the run detached
@@ -53,7 +55,7 @@ ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bi
 echo "Running correctness tests on compute (catches a broken change before committing to a 10-hour run)..."
 ssh "$HOST" "cd wordle-opt && timeout 600 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
 
-echo "Launching full N=2340 solve on compute, detached, bounded at ${TIMEOUT_SECS}s (log: ~/$LOG)..."
+echo "Launching full N=2340 policy tree build on compute, detached, bounded at ${TIMEOUT_SECS}s (log: wordle-opt/$LOG)..."
 # Invoke the built binary directly, not `cargo run` - `cargo run` would make
 # $! the PID of the cargo wrapper process, not the actual solver, which
 # check_full.sh needs to be able to tell whether the run is still alive.

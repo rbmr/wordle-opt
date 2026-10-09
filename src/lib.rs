@@ -666,98 +666,117 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     let commit = git_commit_hash();
     let host = hostname();
     println!(
-        "Running full N={} optimal solve... commit={} host={}",
+        "Running full N={} optimal policy tree build... commit={} host={}",
         n_candidates, commit, host
     );
     let _ = std::io::Write::flush(&mut std::io::stdout());
 
-    let metrics = std::sync::Arc::new(Metrics::new());
-    let num_u64s = dict.guesses.len().div_ceil(64);
-    let mut all_guesses_bits = vec![u64::MAX; num_u64s];
-    let rem = dict.guesses.len() % 64;
-    if rem != 0 {
-        all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
-    }
+    // The policy JSON is the deliverable, and the progress series is what
+    // makes day-over-day comparison possible. Both live in the home
+    // directory rather than the build directory: the latter is deleted and
+    // rewritten by the next deploy, and these files must survive it.
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let out_path = std::env::var("WORDLE_OPT_POLICY_OUT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join("optimal-2340.json"));
+    let stats_path = std::env::var("WORDLE_OPT_POLICY_STATS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join("optimal-2340-progress.parquet"));
+
+    let opts = BuildOptions {
+        collect_samples: true,
+        progress: true,
+        // 512 M entries x 8 bytes = 4 GB, the same transposition table the
+        // cost-only full run used on the 16 GB compute host.
+        cache_entries: 512 * 1024 * 1024,
+        ..Default::default()
+    };
     let start = Instant::now();
-
-    // Progress-reporting thread: prints status every 60 seconds.
-    let metrics_clone = std::sync::Arc::clone(&metrics);
-    let start_clone = start;
-    let progress_thread = std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
-            let elapsed = start_clone.elapsed().as_secs_f64();
-            let done = metrics_clone
-                .root_guesses_done
-                .load(std::sync::atomic::Ordering::Relaxed);
-            // We don't have a direct count of total_active_guesses here, so just report done count.
-            eprintln!(
-                "[progress] elapsed={:.0}s root_guesses_done={} states={} bounds_pruned={}",
-                elapsed,
-                done,
-                metrics_clone
-                    .states_evaluated
-                    .load(std::sync::atomic::Ordering::Relaxed),
-                metrics_clone
-                    .pruned_by_bounds
-                    .load(std::sync::atomic::Ordering::Relaxed),
-            );
+    let (tree, stats) = match crate::policy::build_policy_tree(
+        matrix,
+        dict,
+        Strategy::Optimal,
+        &all_candidates,
+        &opts,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("full: {e}");
+            std::process::exit(1);
         }
-    });
-    // Thread is intentionally leaked (daemon-like); process exits when solve completes.
-    drop(progress_thread);
-
-    let equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
-        std::sync::RwLock::new(rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default())
-    });
-    let cost = Solver::solve(matrix, &all_candidates, dict, &metrics, &equiv_cache_arr);
+    };
     let elapsed = start.elapsed();
 
-    println!("\n=== FULL RUN COMPLETE ===");
+    // The solve is finished. Only now pay for the readable serialization, so
+    // it adds no meaningful overhead to the solve itself.
+    let serialized = match tree.to_readable(dict) {
+        Ok(r) => r.to_json(),
+        Err(e) => {
+            eprintln!("full: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = std::fs::write(&out_path, &serialized) {
+        eprintln!("full: cannot write {}: {e}", out_path.display());
+        std::process::exit(1);
+    }
+
+    // Self-validate the written bytes (round-trip through the reader), so a
+    // full run can never report success on a tree the validator rejects.
+    let report = match validate_bytes(&serialized) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("full: internal error: written tree failed validation: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let meta = crate::policy_stats::StatsMeta {
+        strategy: Strategy::Optimal.name().to_string(),
+        dictionary_hash: crate::policy::hash_hex(tree.dictionary_hash),
+        commit: commit.clone(),
+        num_guesses: dict.guesses.len() as u32,
+        num_candidates: n_candidates as u32,
+        root_candidates: n_candidates as u32,
+    };
+    if let Err(e) =
+        crate::policy_stats::write_parquet(std::path::Path::new(&stats_path), &stats, &meta)
+    {
+        eprintln!("full: warning: could not write progress series: {e}");
+    }
+
+    println!("\n=== FULL POLICY TREE COMPLETE ===");
+    println!("Strategy: {}", Strategy::Optimal.name());
     println!("Candidates: {}", n_candidates);
-    println!("Optimal total cost: {}", cost);
-    println!("Avg guesses: {:.6}", cost as f64 / n_candidates as f64);
+    println!("Nodes: {}", tree.node_count());
+    println!("Edges: {}", tree.edge_count());
+    println!("Leaves: {}", report.leaves);
+    println!("Max depth: {}", report.max_depth);
+    println!("Total cost: {}", report.total_cost);
+    println!("Mean guesses: {:.6}", report.mean_guesses);
     println!(
         "Wall time: {:.3}s ({:.2}h)",
         elapsed.as_secs_f64(),
         elapsed.as_secs_f64() / 3600.0
     );
+    println!("States evaluated: {}", stats.summary.states_evaluated);
+    println!("Guesses evaluated: {}", stats.summary.guesses_evaluated);
+    println!("Bounds pruned: {}", stats.summary.pruned_by_bounds);
+    println!("Equiv pruned: {}", stats.summary.pruned_by_equivalence);
+    println!("Cache hits: {}", stats.summary.cache_hits);
     println!(
-        "States evaluated: {}",
-        metrics
-            .states_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed)
+        "Dictionary hash: {}",
+        crate::policy::hash_hex(tree.dictionary_hash)
     );
+    println!("Wrote: {} ({} bytes)", out_path.display(), serialized.len());
     println!(
-        "Guesses evaluated: {}",
-        metrics
-            .guesses_evaluated
-            .load(std::sync::atomic::Ordering::Relaxed)
+        "Stats: wrote {} progress sample(s) to {} (parquet)",
+        stats.samples.len(),
+        stats_path.display()
     );
-    println!(
-        "Root guesses done: {}",
-        metrics
-            .root_guesses_done
-            .load(std::sync::atomic::Ordering::Relaxed)
-    );
-    println!(
-        "Bounds pruned: {}",
-        metrics
-            .pruned_by_bounds
-            .load(std::sync::atomic::Ordering::Relaxed)
-    );
-    println!(
-        "Equiv pruned: {}",
-        metrics
-            .pruned_by_equivalence
-            .load(std::sync::atomic::Ordering::Relaxed)
-    );
-    println!(
-        "Cache hits: {}",
-        metrics
-            .cache_hits
-            .load(std::sync::atomic::Ordering::Relaxed)
-    );
+    println!("Validation: OK (edge iff possible at every node)");
 
     // Append to benchmark history
     let mut file = OpenOptions::new()
@@ -767,7 +786,8 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         .expect("Cannot open benchmark_history.md");
     writeln!(
         file,
-        "## FULL RUN N=2340: commit={} host={} unix_time={}",
+        "## FULL RUN N={}: commit={} host={} unix_time={}",
+        n_candidates,
         commit,
         host,
         std::time::SystemTime::now()
@@ -776,13 +796,9 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
             .as_secs()
     )
     .unwrap();
-    writeln!(file, "- Optimal cost: {}", cost).unwrap();
-    writeln!(
-        file,
-        "- Avg guesses: {:.6}",
-        cost as f64 / n_candidates as f64
-    )
-    .unwrap();
+    writeln!(file, "- Policy tree nodes: {}", tree.node_count()).unwrap();
+    writeln!(file, "- Optimal total cost: {}", report.total_cost).unwrap();
+    writeln!(file, "- Avg guesses: {:.6}", report.mean_guesses).unwrap();
     writeln!(file, "- Time: {:.3}s", elapsed.as_secs_f64()).unwrap();
     writeln!(file).unwrap();
 }
