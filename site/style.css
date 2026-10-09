@@ -94,11 +94,9 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 
 .editor { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 14px 0; }
 .editor-label { color: var(--muted); }
-.editor-label strong { color: var(--fg); letter-spacing: 0.08em; text-transform: uppercase; }
 .editor-exp { color: var(--muted); font-size: 13px; }
-.response-tiles { display: inline-flex; gap: 6px; }
-.response-tiles .tile { cursor: pointer; }
-.response-tiles .tile.unset { border-style: dashed; color: var(--muted); background: #fff; }
+.tile.clickable { cursor: pointer; }
+.tile.clickable:hover { border-color: var(--fg); }
 .editor-buttons { display: flex; gap: 8px; }
 .options { color: var(--muted); font-size: 13px; min-height: 18px; text-align: center; }
 .options code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
