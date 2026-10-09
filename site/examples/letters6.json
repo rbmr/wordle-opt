@@ -1,0 +1,248 @@
+{
+  "format": "wordle-policy-tree",
+  "version": 1,
+  "strategy": "min-remaining",
+  "dictionary_hash": "0x8d125e5ee27dd265",
+  "guesses": [
+    "plague",
+    "planes",
+    "planet",
+    "plants",
+    "plates",
+    "please",
+    "pledge",
+    "plenty",
+    "plunge",
+    "pocket",
+    "poetry",
+    "points",
+    "police",
+    "policy",
+    "polish",
+    "polite",
+    "poorly",
+    "popped",
+    "portal",
+    "posted",
+    "potato",
+    "powder",
+    "powers",
+    "praise",
+    "prayer",
+    "prefer",
+    "pretty",
+    "prince",
+    "prison",
+    "profit",
+    "prompt",
+    "proper",
+    "proved",
+    "public",
+    "pulled",
+    "purple"
+  ],
+  "candidates": [
+    "plague",
+    "planes",
+    "planet",
+    "plants",
+    "plates",
+    "please",
+    "pledge",
+    "plenty",
+    "plunge",
+    "pocket",
+    "poetry",
+    "points",
+    "police",
+    "policy",
+    "polish",
+    "polite",
+    "poorly",
+    "popped",
+    "portal",
+    "posted",
+    "potato",
+    "powder",
+    "powers",
+    "praise",
+    "prayer",
+    "prefer",
+    "pretty",
+    "prince",
+    "prison",
+    "profit",
+    "prompt",
+    "proper",
+    "proved",
+    "public",
+    "pulled",
+    "purple"
+  ],
+  "root": {
+    "guess": "posted",
+    "children": {
+      "gbbbbb": {
+        "guess": "public",
+        "children": {}
+      },
+      "ggbbbb": {
+        "guess": "pocket",
+        "children": {
+          "ggbbbb": {
+            "guess": "poorly",
+            "children": {}
+          },
+          "ggybbb": {
+            "guess": "policy",
+            "children": {}
+          }
+        }
+      },
+      "ggybbb": {
+        "guess": "polish",
+        "children": {}
+      },
+      "gyybbb": {
+        "guess": "prison",
+        "children": {}
+      },
+      "ggbgbb": {
+        "guess": "portal",
+        "children": {}
+      },
+      "ggbybb": {
+        "guess": "potato",
+        "children": {}
+      },
+      "gybybb": {
+        "guess": "points",
+        "children": {
+          "gybbyb": {
+            "guess": "prompt",
+            "children": {}
+          },
+          "gyybyb": {
+            "guess": "profit",
+            "children": {}
+          }
+        }
+      },
+      "gbyybb": {
+        "guess": "plants",
+        "children": {}
+      },
+      "ggyybb": {
+        "guess": "points",
+        "children": {}
+      },
+      "gbbbgb": {
+        "guess": "plague",
+        "children": {
+          "gbbbby": {
+            "guess": "prefer",
+            "children": {}
+          },
+          "gbgbby": {
+            "guess": "prayer",
+            "children": {}
+          }
+        }
+      },
+      "gybbgb": {
+        "guess": "proper",
+        "children": {}
+      },
+      "gbybgb": {
+        "guess": "planes",
+        "children": {}
+      },
+      "gbyggb": {
+        "guess": "plates",
+        "children": {}
+      },
+      "gbbygb": {
+        "guess": "planet",
+        "children": {}
+      },
+      "ggbygb": {
+        "guess": "pocket",
+        "children": {}
+      },
+      "gbbbyb": {
+        "guess": "plague",
+        "children": {
+          "gbbbbg": {
+            "guess": "prince",
+            "children": {}
+          },
+          "gybbyg": {
+            "guess": "purple",
+            "children": {}
+          },
+          "ggbyyg": {
+            "guess": "plunge",
+            "children": {}
+          }
+        }
+      },
+      "ggbbyb": {
+        "guess": "police",
+        "children": {}
+      },
+      "gbybyb": {
+        "guess": "plague",
+        "children": {
+          "gbgbbg": {
+            "guess": "praise",
+            "children": {}
+          },
+          "ggybbg": {
+            "guess": "please",
+            "children": {}
+          }
+        }
+      },
+      "ggybyb": {
+        "guess": "powers",
+        "children": {}
+      },
+      "gbbgyb": {
+        "guess": "pretty",
+        "children": {}
+      },
+      "ggbgyb": {
+        "guess": "poetry",
+        "children": {}
+      },
+      "gbbyyb": {
+        "guess": "plenty",
+        "children": {}
+      },
+      "ggbyyb": {
+        "guess": "polite",
+        "children": {}
+      },
+      "gbbbgg": {
+        "guess": "pulled",
+        "children": {}
+      },
+      "ggbbgg": {
+        "guess": "popped",
+        "children": {}
+      },
+      "gybbgg": {
+        "guess": "proved",
+        "children": {}
+      },
+      "ggbbgy": {
+        "guess": "powder",
+        "children": {}
+      },
+      "gbbbyy": {
+        "guess": "pledge",
+        "children": {}
+      }
+    }
+  }
+}
