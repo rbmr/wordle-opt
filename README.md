@@ -166,14 +166,15 @@ edge-iff-possible rule. Two views:
 The word length is taken from the tree, so it is not tied to 5 letters (there
 are 3-, 4- and 6-letter examples under `site/examples/`).
 
-Three 5-letter examples are bundled, all built on the same 500-candidate subset
-so they are directly comparable:
+Three 5-letter examples are bundled. The two heuristics are built on the full
+2340-candidate set; the `optimal` one is a 500-candidate subset for now (a
+placeholder until the full optimal tree is generated):
 
-| example | mean guesses |
-|---|---|
-| `optimal` | 2.898 |
-| `min-remaining` | 3.048 |
-| `max-freq` | 3.354 |
+| example | candidates | mean guesses |
+|---|---:|---:|
+| `optimal` | 500 | 2.898 |
+| `min-remaining` | 2340 | 3.659 |
+| `max-freq` | 2340 | 4.079 |
 
 See `site/examples/README.md` for the exact commands that generated them.
 
