@@ -295,6 +295,11 @@ arena - so the serialization adds no meaningful overhead to the solve. On
 compute the run writes `~/optimal-2340.json` (the tree) and
 `~/optimal-2340-progress.parquet` (its progress time series). Both live in the
 home directory, not the rsync target, so the next deploy cannot delete them.
+The run also bounds its own memory: a 2 GB transposition table and a
+4,096-entry-per-shard equivalence-cache cap (each cached projection is about
+2 KB, so the historical defaults could reach tens of GB - the first attempt
+without these bounds was OOM-killed at 38 minutes). Progress lines include
+`rss_mb` so memory can be watched live.
 
 Because you only get one a day, only launch it when diagnose/benchmark data at
 large N gives a specific, verified reason to expect a bounded finish (see
