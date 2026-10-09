@@ -87,10 +87,16 @@ cargo run --release -- validate tree.json
 
 A policy is a map from the set of remaining candidates to a guess. Because it
 is deterministic, the whole game under that policy is a static decision tree:
-**nodes are guesses**, **edges are responses**, and a node is terminal when its
-guess is the answer. `src/policy.rs` stores and validates such trees. A node's
-candidate set is not stored at all, since it is implied by the path of responses
-taken to reach it, which is what makes the representation compact.
+**nodes are guesses**, **edges are responses**, and a node **wins** for the
+candidate equal to its own guess whenever that candidate is still reachable
+there. The all-green response is never an edge - it is the implicit win - so a
+leaf (no children) is a win with one candidate left. `src/policy.rs` stores and
+validates such trees. A node's candidate set is not stored at all, since it is
+implied by the path of responses taken to reach it, and consumers (the
+validator, the viewer) recompute it; that is what makes the representation
+compact. Note that a win therefore depends on the *remaining* candidates, not
+the initial list: a guess can be in the initial candidate list and still have
+been eliminated along the path, in which case it cannot win there.
 
 A tree is serialized as **readable** JSON: nested
 `{"guess": "trace", "children": {"bgybg": ...}}` with the word lists embedded,
@@ -155,7 +161,11 @@ self-contained, so no other files are needed.
 `site/` is a dependency-free static viewer, published to GitHub Pages by
 `.github/workflows/pages.yml`. It loads a readable policy tree (a bundled
 example or one of your own) and **validates it in the browser** against the same
-edge-iff-possible rule. Two views, selected once a policy is loaded:
+edge-iff-possible rule. The viewer's pure logic - response computation,
+candidate filtering, validation, per-node stats and the win rule - lives in
+`site/policy-core.js`, separate from the DOM layer in `site/app.js`, and is
+tested by `node site/policy-core.test.js` (also run by CI). Two views, selected
+once a policy is loaded:
 
 - **Play** (default): traverse the policy like the game. The current guess is
   shown, you set the response on its letters, and it either advances, reports an

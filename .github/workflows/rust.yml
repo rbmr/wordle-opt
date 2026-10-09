@@ -16,6 +16,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Run viewer logic tests
+      # site/policy-core.js is the viewer's pure logic (response computation,
+      # candidate filtering, validation, win rule). The test pins it against the
+      # Rust response fixtures and validates every bundled example tree.
+      run: node site/policy-core.test.js
+
     - name: Run tests
       # --release: several tests (the golden regression tests in particular)
       # run the real solver on real instances and are far too slow in debug

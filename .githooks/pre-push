@@ -4,3 +4,10 @@ source $HOME/.cargo/env
 cargo fmt -- --check
 cargo clippy --release -- -D warnings
 cargo test --release
+# The viewer's pure logic (site/policy-core.js) is shared with the browser and
+# has its own fixtures; skip with a note where Node is not installed.
+if command -v node >/dev/null 2>&1; then
+	node site/policy-core.test.js
+else
+	echo "note: node not found - skipping site/policy-core.test.js" >&2
+fi
