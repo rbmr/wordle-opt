@@ -7,9 +7,18 @@
 //! decision tree (see `ideas/Wordle.md`, "Storing Policies"):
 //!
 //! - **nodes are guesses** (the root is the first guess),
-//! - **edges are responses**, and
-//! - **leaves are the secret word** (a node is terminal exactly when its guess
-//!   is correct).
+//! - **edges are responses** (only the *non-win* responses: the all-green
+//!   response is never an edge), and
+//! - **wins are implicit**: a node wins for the candidate equal to its own
+//!   guess, which happens exactly when that candidate is still reachable at the
+//!   node (the all-green response is then possible). A structural leaf (no
+//!   children) is such a win with one candidate left.
+//!
+//! Because wins are implicit, a node's win state depends on its *remaining*
+//! candidate set, not on the initial one: a guess that is in the initial
+//! candidate list may have been eliminated along the path, in which case it
+//! cannot win there. Consumers must recompute the candidate set (below) rather
+//! than testing the guess against the initial list.
 //!
 //! The candidate set of a node is *not* stored - it is implied by the path of
 //! responses taken to reach it, and can always be recomputed top-down from the
@@ -702,7 +711,11 @@ impl PolicyTree {
 // ---------------------------------------------------------------------------
 
 /// Readable, self-contained policy tree. Node = guess word, children = map
-/// from response string to subtree. A leaf (empty `children`) is a win.
+/// from response string to subtree. Children hold only the *non-win* responses:
+/// a node wins iff the all-green response is possible for a remaining candidate
+/// (see the module docs for the exact rule and the trap of testing against the
+/// initial candidate list), and a leaf (empty `children`) is such a win with one
+/// candidate left.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadableTreeFile {
     pub format: String,
@@ -716,6 +729,8 @@ pub struct ReadableTreeFile {
     pub root: ReadableNode,
 }
 
+/// One node: the guess word and its *non-win* response children. The all-green
+/// response is never a child; see [`ReadableTreeFile`] for the win rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadableNode {
     pub guess: String,
