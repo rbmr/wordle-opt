@@ -168,7 +168,7 @@ fn run_benchmark(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize]) {
                 all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
             }
             let start = Instant::now();
-            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+            let equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
                 )
@@ -350,12 +350,12 @@ fn run_benchmark_random(
                 all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
             }
             let start = Instant::now();
-            let _equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+            let _equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
                 )
             });
-            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+            let equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
                 )
@@ -570,7 +570,7 @@ fn run_diagnose(matrix: &ResponseMatrix, dict: &Dictionary, sizes: &[usize], see
                 all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
             }
             let start = Instant::now();
-            let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+            let equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
                 std::sync::RwLock::new(
                     rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
                 )
@@ -707,7 +707,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     // Thread is intentionally leaked (daemon-like); process exits when solve completes.
     drop(progress_thread);
 
-    let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+    let equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
         std::sync::RwLock::new(rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default())
     });
     let cost = Solver::solve(matrix, &all_candidates, dict, &metrics, &equiv_cache_arr);
@@ -1197,7 +1197,7 @@ pub fn run_cli() {
         use std::sync::atomic::AtomicU32;
         let global_beta = AtomicU32::new(u32::MAX);
 
-        let equiv_cache_arr: [_; 64] = std::array::from_fn(|_| {
+        let equiv_cache_arr: [_; 1024] = std::array::from_fn(|_| {
             std::sync::RwLock::new(
                 rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
             )

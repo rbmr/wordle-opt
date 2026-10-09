@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 /// The hash key represents the `set_hash` (a 64-bit Zobrist hash of the exact candidate set).
 /// The mapped value is the exact deduplicated projection of all valid guesses,
 /// deduplicated by a Zobrist hash of the responses they produce.
-pub type EquivCache = [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 64];
+pub type EquivCache =
+    [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 1024];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -67,8 +68,7 @@ impl Metrics {
 static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 
 pub struct SolverScratch {
-    pub scratch_is_in_set: [Vec<bool>; 32],
-    pub scratch_guesses: [Vec<usize>; 32],
+    pub scratch_is_in_set: [Vec<u64>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
     pub scratch_phase1_guesses: [Vec<usize>; 32],
     pub scratch_phase2_guesses: [Vec<usize>; 32],
@@ -106,8 +106,7 @@ pub struct Solver<'a> {
     equiv_cache: &'a EquivCache,
     pub current_cost_so_far: u32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    pub scratch_is_in_set: [Vec<bool>; 32],
-    scratch_guesses: [Vec<usize>; 32],
+    pub scratch_is_in_set: [Vec<u64>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
     scratch_phase2_guesses: [Vec<usize>; 32],
@@ -124,10 +123,6 @@ impl<'a> Drop for Solver<'a> {
         let scratch = Box::new(SolverScratch {
             scratch_is_in_set: std::mem::replace(
                 &mut self.scratch_is_in_set,
-                std::array::from_fn(|_| Vec::new()),
-            ),
-            scratch_guesses: std::mem::replace(
-                &mut self.scratch_guesses,
                 std::array::from_fn(|_| Vec::new()),
             ),
             scratch_sorted_sets: std::mem::replace(
@@ -295,8 +290,9 @@ impl<'a> Solver<'a> {
             .with(|ts| ts.borrow_mut().take())
             .unwrap_or_else(|| {
                 Box::new(SolverScratch {
-                    scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
-                    scratch_guesses: std::array::from_fn(|_| Vec::new()),
+                    scratch_is_in_set: std::array::from_fn(|_| {
+                        vec![0u64; dict.guesses.len().div_ceil(64)]
+                    }),
                     scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
                     scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
                     scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
@@ -321,7 +317,6 @@ impl<'a> Solver<'a> {
             current_cost_so_far: 0,
 
             scratch_is_in_set: scratch.scratch_is_in_set,
-            scratch_guesses: scratch.scratch_guesses,
             scratch_sorted_sets: scratch.scratch_sorted_sets,
             scratch_phase1_guesses: scratch.scratch_phase1_guesses,
             scratch_phase2_guesses: scratch.scratch_phase2_guesses,
@@ -471,9 +466,9 @@ impl<'a> Solver<'a> {
                         &global_cache,
                         equiv_cache,
                     );
-                    // For a bucket, the cost is evaluated via min_state_val.
-                    // We use a very loose beta since we evaluate in parallel.
-                    solver.min_state_val(&bucket, &all_guesses_bits, initial_greedy_cost, 2, max_k)
+                    let bucket_greedy = Self::greedy_solve(matrix, dict, &bucket);
+                    let val = solver.min_state_val(&bucket, &all_guesses_bits, bucket_greedy, 2, max_k);
+                    val.min(bucket_greedy)
                 })
                 .sum();
 
@@ -657,33 +652,23 @@ impl<'a> Solver<'a> {
             }
         }
 
-        let global_lb = self.capacity_bounds_2d[self.max_k][c_len];
-        if global_lb >= beta {
-            return global_lb;
-        }
-
         let parent_lb = self.capacity_bounds_2d[parent_max_k][c_len];
         if parent_lb >= beta {
-            return parent_lb.max(global_lb);
+            return parent_lb;
         }
 
         let mut best_val = beta;
 
-        let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
-        active_guesses.clear();
 
         let mut phase1_guesses = std::mem::take(&mut self.scratch_phase1_guesses[depth]);
         phase1_guesses.clear();
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
 
-        let mut set_hash = 0u64;
-        for &c in set {
-            set_hash ^= self.matrix.zobrist[c];
-        }
+        let set_hash = hash;
 
         let should_cache_equiv = set.len() >= 10;
-        let shard_idx = (set_hash as usize) % 64;
+        let shard_idx = (set_hash as usize) % 1024;
         let mut active_bits_scratch = std::mem::take(&mut self.scratch_active_bits[depth]);
         let rc_opt = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
@@ -717,7 +702,7 @@ impl<'a> Solver<'a> {
             projs.fill(0);
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size = (active_count * 2).next_power_of_two().clamp(256, 32768) as usize;
+            let table_size = ((active_count + 243) * 2).next_power_of_two().clamp(1024, 32768) as usize;
             let mask = table_size - 1;
             let shift = 64 - table_size.trailing_zeros();
 
@@ -731,6 +716,35 @@ impl<'a> Solver<'a> {
                         let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
                         projs[g] ^= z.wrapping_mul(r as u64 + 1);
                     }
+                }
+            }
+
+            let mut useless_projs = [0u64; 243];
+            for r in 0..243 {
+                let mut p = 0u64;
+                let m = r as u64 + 1;
+                for &c in set {
+                    p ^= self.matrix.zobrist[c].wrapping_mul(m);
+                }
+                if p == 0 {
+                    p = 1;
+                }
+                useless_projs[r] = p;
+            }
+            for r in 0..243 {
+                let proj = useless_projs[r];
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                loop {
+                    let slot = table[idx];
+                    if slot == 0 {
+                        table[idx] = proj;
+                        added_indices.push(idx);
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
                 }
             }
 
@@ -799,7 +813,7 @@ impl<'a> Solver<'a> {
                     self.metrics
                         .equiv_cache_hits
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    std::sync::Arc::clone(cached)
+                    Some(std::sync::Arc::clone(cached))
                 } else {
                     self.metrics
                         .equiv_cache_misses
@@ -817,7 +831,7 @@ impl<'a> Solver<'a> {
                         }
                     }
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
-                    rc
+                    Some(rc)
                 }
             } else {
                 self.metrics
@@ -831,16 +845,15 @@ impl<'a> Solver<'a> {
                             .sum::<usize>(),
                     std::sync::atomic::Ordering::Relaxed,
                 );
-                std::sync::Arc::new(vec![]) // dummy
+                None
             };
 
-            if should_cache_equiv {
-                slice_ptr = rc_new.as_slice() as *const _;
-                Some(rc_new)
+            if let Some(rc_val) = &rc_new {
+                slice_ptr = rc_val.as_slice() as *const _;
             } else {
                 slice_ptr = active_bits_scratch.as_slice() as *const _;
-                None
             }
+            rc_new
         };
 
         let active_guesses_slice = unsafe { &*slice_ptr };
@@ -848,44 +861,42 @@ impl<'a> Solver<'a> {
         // Fast set-membership check
         let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
         for &c in set {
-            is_in_set[c] = true;
+            let g = self.dict.candidate_to_guess[c];
+            is_in_set[g / 64] |= 1 << (g % 64);
         }
 
         for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-            let mut b = block;
+            if block == 0 {
+                continue;
+            }
+            let p1_block = block & is_in_set[block_idx];
+            let p2_block = block & !is_in_set[block_idx];
+
+            let mut b = p1_block;
             while b != 0 {
                 let tz = b.trailing_zeros();
                 let g = block_idx * 64 + tz as usize;
+                phase1_guesses.push(g);
+                b &= b - 1;
+            }
 
-                active_guesses.push(g);
-                let c_idx = self.dict.guess_to_candidate[g];
-                let in_set = if c_idx != u16::MAX {
-                    is_in_set[c_idx as usize]
-                } else {
-                    false
-                };
-                if in_set {
-                    phase1_guesses.push(g);
-                } else {
-                    phase2_guesses.push(g);
-                }
-
+            let mut b = p2_block;
+            while b != 0 {
+                let tz = b.trailing_zeros();
+                let g = block_idx * 64 + tz as usize;
+                phase2_guesses.push(g);
                 b &= b - 1;
             }
         }
         for &c in set {
-            is_in_set[c] = false;
+            let g = self.dict.candidate_to_guess[c];
+            is_in_set[g / 64] = 0;
         }
         self.scratch_is_in_set[depth] = is_in_set;
         self.scratch_active_bits[depth] = active_bits_scratch;
 
-        self.metrics
-            .pruned_by_equivalence
-            .fetch_add(0, std::sync::atomic::Ordering::Relaxed);
-
-        let mut local_lb = global_lb.max(parent_lb).max(cached_lower_bound);
+        let mut local_lb = parent_lb.max(cached_lower_bound);
         let mut counts = [0u16; 243];
-        let mut non_empty = [0u8; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
         phase1_tuples.clear();
@@ -894,6 +905,7 @@ impl<'a> Solver<'a> {
 
         let mut local_max_k = 0;
         let mut valid_max_k = 0;
+        let mut min_val_found = u32::MAX;
 
         #[cfg(cuda_enabled)]
         let use_gpu1 = (phase1_guesses.len() * set.len()) > 50000;
@@ -948,11 +960,13 @@ impl<'a> Solver<'a> {
                             if num_non_empty > local_max_k {
                                 local_max_k = num_non_empty;
                             }
+                            if num_non_empty > valid_max_k {
+                                valid_max_k = num_non_empty;
+                            }
                             if lb_cost < beta {
-                                if num_non_empty > valid_max_k {
-                                    valid_max_k = num_non_empty;
-                                }
                                 phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                            } else {
+                                min_val_found = min_val_found.min(lb_cost);
                             }
                         }
                     }
@@ -995,11 +1009,13 @@ impl<'a> Solver<'a> {
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
             } else {
@@ -1011,42 +1027,46 @@ impl<'a> Solver<'a> {
                     for &c in set {
                         let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
                         unsafe {
-                            if *counts.get_unchecked(r) == 0 {
-                                *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
-                                num_non_empty += 1;
-                            }
                             *counts.get_unchecked_mut(r) += 1;
                         }
                     }
-                    if num_non_empty == 1 {
-                        counts[non_empty[0] as usize] = 0;
-                        continue;
-                    }
-                    for i in 0..num_non_empty {
-                        let r_idx = non_empty[i] as usize;
+                    for r_idx in 0..242 {
                         let count = counts[r_idx];
-                        counts[r_idx] = 0;
-                        expected_rem += (count as u32) * (count as u32);
-                        if r_idx != crate::core::Response::WIN.0 as usize {
+                        if count > 0 {
+                            counts[r_idx] = 0;
+                            num_non_empty += 1;
+                            expected_rem += (count as u32) * (count as u32);
                             lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
+                    }
+                    if counts[242] > 0 {
+                        let count = counts[242];
+                        counts[242] = 0;
+                        num_non_empty += 1;
+                        expected_rem += (count as u32) * (count as u32);
+                    }
+                    if num_non_empty == 1 {
+                        continue;
                     }
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
             }
         }
-        phase1_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
+        phase1_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
 
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
             if g_lb >= best_val {
+                min_val_found = min_val_found.min(g_lb);
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1054,6 +1074,7 @@ impl<'a> Solver<'a> {
             }
             let val =
                 self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
+            min_val_found = min_val_found.min(val);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -1112,15 +1133,20 @@ impl<'a> Solver<'a> {
                                 }
                                 let lb_cost = lbs[i];
                                 let expected_rem = exps[i];
+                                if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                                    continue;
+                                }
                                 let g = phase2_guesses[i];
                                 if num_non_empty > local_max_k {
                                     local_max_k = num_non_empty;
                                 }
-                                if lb_cost < beta && num_non_empty > valid_max_k {
+                                if num_non_empty > valid_max_k {
                                     valid_max_k = num_non_empty;
                                 }
                                 if lb_cost < best_val {
                                     phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                                } else {
+                                    min_val_found = min_val_found.min(lb_cost);
                                 }
                             }
                         }
@@ -1160,14 +1186,19 @@ impl<'a> Solver<'a> {
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                             }
                         }
+                        if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                            continue;
+                        }
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
                         }
-                        if lb_cost < beta && num_non_empty > valid_max_k {
+                        if num_non_empty > valid_max_k {
                             valid_max_k = num_non_empty;
                         }
                         if lb_cost < best_val {
                             phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
                         }
                     }
                 } else {
@@ -1179,39 +1210,45 @@ impl<'a> Solver<'a> {
                         for &c in set {
                             let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
                             unsafe {
-                                if *counts.get_unchecked(r) == 0 {
-                                    *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
-                                    num_non_empty += 1;
-                                }
                                 *counts.get_unchecked_mut(r) += 1;
                             }
                         }
-                        if num_non_empty == 1 {
-                            counts[non_empty[0] as usize] = 0;
-                            continue;
-                        }
-                        for i in 0..num_non_empty {
-                            let r_idx = non_empty[i] as usize;
+                        for r_idx in 0..242 {
                             let count = counts[r_idx];
-                            counts[r_idx] = 0;
-                            expected_rem += (count as u32) * (count as u32);
-                            if r_idx != crate::core::Response::WIN.0 as usize {
+                            if count > 0 {
+                                counts[r_idx] = 0;
+                                num_non_empty += 1;
+                                expected_rem += (count as u32) * (count as u32);
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                             }
+                        }
+                        if counts[242] > 0 {
+                            let count = counts[242];
+                            counts[242] = 0;
+                            num_non_empty += 1;
+                            expected_rem += (count as u32) * (count as u32);
+                        }
+                        if num_non_empty == 1 {
+                            continue;
+                        }
+                        if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                            continue;
                         }
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
                         }
-                        if lb_cost < beta && num_non_empty > valid_max_k {
+                        if num_non_empty > valid_max_k {
                             valid_max_k = num_non_empty;
                         }
                         if lb_cost < best_val {
                             phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
                         }
                     }
                 }
             }
-            phase2_tuples.sort_unstable_by_key(|&(_, exp, _, _)| exp);
+            phase2_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
 
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
             if base_lb > local_lb {
@@ -1230,6 +1267,7 @@ impl<'a> Solver<'a> {
             } else {
                 for &(_g, _, g_lb, _non_empty) in &phase2_tuples {
                     if g_lb >= best_val {
+                        min_val_found = min_val_found.min(g_lb);
                         self.metrics
                             .pruned_by_bounds
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1243,6 +1281,7 @@ impl<'a> Solver<'a> {
                         depth,
                         local_max_k,
                     );
+                    min_val_found = min_val_found.min(val);
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -1253,7 +1292,6 @@ impl<'a> Solver<'a> {
             }
         }
 
-        self.scratch_guesses[depth] = active_guesses;
 
         self.scratch_phase1_guesses[depth] = phase1_guesses;
         self.scratch_phase2_guesses[depth] = phase2_guesses;
@@ -1263,11 +1301,15 @@ impl<'a> Solver<'a> {
         let is_exact = best_val < beta;
         if is_exact {
             self.cache.insert(hash, best_val, true);
+            best_val
         } else {
-            self.cache.insert(hash, beta, false);
+            let mut final_lb = beta.max(local_lb);
+            if best_val > local_lb && min_val_found != u32::MAX {
+                final_lb = final_lb.max(min_val_found);
+            }
+            self.cache.insert(hash, final_lb, false);
+            final_lb
         }
-
-        best_val
     }
     /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
     ///
@@ -1402,12 +1444,14 @@ impl<'a> Solver<'a> {
             for &c in set {
                 let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
                 unsafe {
-                    let cnt = counts.get_unchecked_mut(r);
-                    if *cnt == 0 {
-                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                        num_non_empty += 1;
-                    }
-                    *cnt += 1;
+                    *counts.get_unchecked_mut(r) += 1;
+                }
+            }
+
+            for r_idx in 0..243 {
+                if counts[r_idx] > 0 {
+                    non_empty_indices[num_non_empty] = r_idx as u8;
+                    num_non_empty += 1;
                 }
             }
 
@@ -1540,7 +1584,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..800).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1557,7 +1601,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..100).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1572,7 +1616,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..500).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1593,7 +1637,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..750).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1608,7 +1652,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..250).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1625,7 +1669,7 @@ mod tests {
         let mut results = Vec::new();
         for _ in 0..5 {
             let metrics = Metrics::new();
-            let equiv_cache: [_; 64] =
+            let equiv_cache: [_; 1024] =
                 std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
             results.push(Solver::solve(
                 &matrix,
@@ -1649,7 +1693,7 @@ mod tests {
         // Use a small set that will definitely trigger some EquivCache hits/misses.
         // N=100 might not trigger hits if it's too small, but misses will definitely happen.
         let candidates: Vec<usize> = (0..100).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let _cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
 
@@ -1682,7 +1726,7 @@ mod solver_cache_tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates = vec![];
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(cost, 0);

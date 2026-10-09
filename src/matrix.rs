@@ -125,7 +125,6 @@ mod tests {
             guesses,
             candidates,
             candidate_to_guess: vec![0, 1],
-            guess_to_candidate: vec![u16::MAX; 2],
         };
 
         let matrix = ResponseMatrix::new(&dict);
@@ -169,7 +168,6 @@ mod extra_tests {
             guesses,
             candidates,
             candidate_to_guess: vec![0, 2, 1],
-            guess_to_candidate: vec![0, 2],
         };
         let matrix = ResponseMatrix::new(&dict);
 

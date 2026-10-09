@@ -29,6 +29,13 @@ pub fn solve_parallel_depth2<'a>(
     beta: &'a AtomicU32,
     active_guesses: &[usize],
 ) -> u32 {
+    let num_u64s = dict.guesses.len().div_ceil(64);
+    let mut all_guesses_bits = vec![u64::MAX; num_u64s];
+    let rem = dict.guesses.len() % 64;
+    if rem != 0 {
+        all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
+    }
+
     active_guesses.par_iter().for_each(|&g| {
         let current_beta = beta.load(Ordering::Relaxed);
 
@@ -97,13 +104,6 @@ pub fn solve_parallel_depth2<'a>(
         bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.1.len()));
 
         let running_cost = AtomicU32::new(lb);
-        let num_u64s = dict.guesses.len().div_ceil(64);
-        let mut all_guesses_bits = vec![u64::MAX; num_u64s];
-        let rem = dict.guesses.len() % 64;
-        if rem != 0 {
-            all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
-        }
-
         let exceeded = AtomicBool::new(false);
 
         // Rayon's par_iter allows child tasks to execute concurrently and steal work,
@@ -178,7 +178,7 @@ mod tests {
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let global_cache = GlobalCache::new(1024);
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| RwLock::new(rustc_hash::FxHashMap::default()));
         let beta = AtomicU32::new(100);
         let active_guesses: Vec<usize> = vec![0, 1, 2];
@@ -209,7 +209,7 @@ fn test_parallel_depth2_prunes_early() {
     let matrix = ResponseMatrix::new(&dict);
     let metrics = Metrics::new();
     let global_cache = GlobalCache::new(1024);
-    let equiv_cache: [_; 64] =
+    let equiv_cache: [_; 1024] =
         std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
     // Beta is 0! It should do zero real work.

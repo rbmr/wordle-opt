@@ -11,7 +11,6 @@ pub struct Dictionary {
     pub guess_chars: Vec<[u8; 5]>,
     pub candidates: Vec<Word>,
     pub candidate_to_guess: Vec<usize>,
-    pub guess_to_candidate: Vec<u16>,
 }
 
 impl Dictionary {
@@ -59,17 +58,11 @@ impl Dictionary {
             candidate_to_guess.push(guesses.binary_search(c).unwrap());
         }
 
-        let mut guess_to_candidate = vec![u16::MAX; guesses.len()];
-        for (c_idx, &g_idx) in candidate_to_guess.iter().enumerate() {
-            guess_to_candidate[g_idx] = c_idx as u16;
-        }
-
         Self {
             guesses,
             guess_chars,
             candidates,
             candidate_to_guess,
-            guess_to_candidate,
         }
     }
 

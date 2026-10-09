@@ -62,7 +62,7 @@ void gpu_free_context(void* ptr) {
 }
 
 void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bounds, size_t bounds_size) {
-    cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+    cudaSetDeviceFlags(cudaDeviceScheduleSpin);
     cudaSetDevice(0);
     cudaMalloc(&global_d_matrix, matrix_size);
     cudaMemcpy(global_d_matrix, host_matrix, matrix_size, cudaMemcpyHostToDevice);
@@ -73,6 +73,13 @@ void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bou
 
 } // extern "C"
 
+/*
+ * gpu_compute_phase1_kernel is optimized for memory coalescing.
+ * The inner loop accesses g_matrix[c * 14855 + g].
+ * For a given iteration `i`, all threads in a block read the same `c`.
+ * Since `g` is (mostly) contiguous across threads in a warp, threads will access
+ * adjacent memory addresses, resulting in coalesced memory reads.
+ */
 __global__ void gpu_compute_phase1_kernel(
     const uint16_t* active_guesses,
     int num_active,
@@ -101,16 +108,19 @@ __global__ void gpu_compute_phase1_kernel(
     uint32_t expected_rem = 0;
     uint32_t lb_cost = set_len;
     uint8_t num_non_empty = 0;
+    const uint32_t* bounds_row = g_capacity_bounds + parent_max_k * 2341;
 
-    for (int r = 0; r < 243; r++) {
+    for (int r = 0; r < 242; r++) {
         uint16_t count = counts[r];
         if (count > 0) {
             num_non_empty++;
             expected_rem += (uint32_t)count * (uint32_t)count;
-            if (r != 121) {
-                lb_cost += g_capacity_bounds[parent_max_k * 2341 + count];
-            }
+            lb_cost += bounds_row[count];
         }
+    }
+    if (counts[242] > 0) {
+        num_non_empty++;
+        expected_rem += (uint32_t)counts[242] * (uint32_t)counts[242];
     }
 
     out_expected_rem[g_idx] = expected_rem;
