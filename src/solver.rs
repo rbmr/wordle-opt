@@ -467,7 +467,8 @@ impl<'a> Solver<'a> {
                         equiv_cache,
                     );
                     let bucket_greedy = Self::greedy_solve(matrix, dict, &bucket);
-                    let val = solver.min_state_val(&bucket, &all_guesses_bits, bucket_greedy, 2, max_k);
+                    let val =
+                        solver.min_state_val(&bucket, &all_guesses_bits, bucket_greedy, 2, max_k);
                     val.min(bucket_greedy)
                 })
                 .sum();
@@ -659,7 +660,6 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-
         let mut phase1_guesses = std::mem::take(&mut self.scratch_phase1_guesses[depth]);
         phase1_guesses.clear();
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
@@ -702,7 +702,9 @@ impl<'a> Solver<'a> {
             projs.fill(0);
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size = ((active_count + 243) * 2).next_power_of_two().clamp(1024, 32768) as usize;
+            let table_size = ((active_count + 243) * 2)
+                .next_power_of_two()
+                .clamp(1024, 32768) as usize;
             let mask = table_size - 1;
             let shift = 64 - table_size.trailing_zeros();
 
@@ -1133,7 +1135,10 @@ impl<'a> Solver<'a> {
                                 }
                                 let lb_cost = lbs[i];
                                 let expected_rem = exps[i];
-                                if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                                if num_non_empty == 2
+                                    && expected_rem
+                                        == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
+                                {
                                     continue;
                                 }
                                 let g = phase2_guesses[i];
@@ -1186,7 +1191,9 @@ impl<'a> Solver<'a> {
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                             }
                         }
-                        if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                        if num_non_empty == 2
+                            && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
+                        {
                             continue;
                         }
                         if num_non_empty > local_max_k {
@@ -1231,7 +1238,9 @@ impl<'a> Solver<'a> {
                         if num_non_empty == 1 {
                             continue;
                         }
-                        if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                        if num_non_empty == 2
+                            && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
+                        {
                             continue;
                         }
                         if num_non_empty > local_max_k {
@@ -1291,7 +1300,6 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-
 
         self.scratch_phase1_guesses[depth] = phase1_guesses;
         self.scratch_phase2_guesses[depth] = phase2_guesses;
@@ -1514,6 +1522,44 @@ impl<'a> Solver<'a> {
                 current_offsets[r_idx] += 1;
             }
 
+            let mut exact_vals = [0u32; 243];
+
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
+                    continue;
+                }
+
+                let start = offsets[r_idx] as usize;
+                let end = start + p_len;
+                let p = &sorted_set[start..end];
+
+                let mut hash = 0;
+                for &c in p {
+                    hash ^= self.matrix.zobrist[c];
+                }
+
+                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                    if is_exact {
+                        self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                        let lb = p_lbs[r_idx];
+                        let used_val = cached_val.max(lb);
+                        cost += used_val - lb;
+                        p_lbs[r_idx] = used_val;
+                        exact_vals[r_idx] = used_val;
+                    }
+                }
+            }
+
+            if cost >= beta {
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, Ordering::Relaxed);
+                self.scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
@@ -1521,6 +1567,9 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 if p_len <= 2 {
+                    continue;
+                }
+                if exact_vals[r_idx] > 0 {
                     continue;
                 }
 
