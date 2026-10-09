@@ -83,18 +83,9 @@ input[type="search"].no-match { border-color: var(--bad); }
   display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start;
   margin: 0 0 8px;
 }
-.stats-table { border-collapse: separate; border-spacing: 0; font-size: 14px; }
-.stats-table th {
-  text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.06em; padding: 0 0 8px 0; border-bottom: 1px solid var(--border);
-}
-.stats-table th:first-child { padding-right: 36px; }
-.stats-table th + th { padding-left: 36px; }
-.stats-table td { vertical-align: top; padding: 6px 0 0 0; }
-.stats-table td:first-child { padding-right: 36px; }
-.stats-table td + td { padding-left: 36px; border-left: 1px solid var(--border); }
-.stat-line { display: flex; gap: 20px; justify-content: space-between; padding: 3px 0; }
-.stat-line .sl-label { color: var(--muted); }
+.stats-list { font-size: 14px; }
+.stat-line { display: flex; gap: 14px; padding: 3px 0; }
+.stat-line .sl-label { color: var(--muted); min-width: 140px; }
 .stat-line .sl-value { color: var(--fg); font-variant-numeric: tabular-nums; }
 
 main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }

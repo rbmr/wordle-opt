@@ -456,40 +456,24 @@ function applySearch() {
 
 function renderStats(file, report) {
   const s = report.stats;
-  const table = document.getElementById("stats-table");
-  table.textContent = "";
-  const thead = el("thead");
-  const hr = el("tr");
-  hr.appendChild(el("th", "", "Input"));
-  hr.appendChild(el("th", "", "Policy"));
-  thead.appendChild(hr);
-  table.appendChild(thead);
-
-  const line = (label, value) => {
+  const list = document.getElementById("stats-list");
+  list.textContent = "";
+  const rows = [
+    ["candidates", s.candidates.toLocaleString()],
+    ["guesses", s.guesses.toLocaleString()],
+    ["dictionary hash", file.dictionary_hash],
+    ["name", file.strategy],
+    ["nodes", s.nodes.toLocaleString()],
+    ["edges", s.edges.toLocaleString()],
+    ["max depth", String(s.maxDepth)],
+    ["mean guesses", s.meanGuesses.toFixed(4)],
+  ];
+  for (const [k, v] of rows) {
     const d = el("div", "stat-line");
-    d.appendChild(el("span", "sl-label", label));
-    d.appendChild(el("span", "sl-value", value));
-    return d;
-  };
-
-  const inputCol = el("td");
-  inputCol.appendChild(line("candidates", s.candidates.toLocaleString()));
-  inputCol.appendChild(line("guesses", s.guesses.toLocaleString()));
-  inputCol.appendChild(line("dictionary hash", file.dictionary_hash));
-
-  const policyCol = el("td");
-  policyCol.appendChild(line("name", file.strategy));
-  policyCol.appendChild(line("nodes", s.nodes.toLocaleString()));
-  policyCol.appendChild(line("edges", s.edges.toLocaleString()));
-  policyCol.appendChild(line("max depth", String(s.maxDepth)));
-  policyCol.appendChild(line("mean guesses", s.meanGuesses.toFixed(4)));
-
-  const tr = el("tr");
-  tr.appendChild(inputCol);
-  tr.appendChild(policyCol);
-  const tbody = el("tbody");
-  tbody.appendChild(tr);
-  table.appendChild(tbody);
+    d.appendChild(el("span", "sl-label", k));
+    d.appendChild(el("span", "sl-value", v));
+    list.appendChild(d);
+  }
 }
 
 // Bar plot of how many candidates are solved in 1, 2, 3 ... guesses.
