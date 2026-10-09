@@ -34,7 +34,8 @@ use crate::matrix::ResponseMatrix;
 use crate::solver::{EquivCache, Metrics, Solver};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// The total number of ternary responses (`3^5`).
@@ -930,6 +931,36 @@ impl From<serde_json::Error> for PolicyError {
 // Builder
 // ---------------------------------------------------------------------------
 
+/// Live counters the builder updates as it works, so a caller can watch a long
+/// build instead of seeing nothing until it finishes: the root scan alone can
+/// run for hours, and the builder's own periodic sampling only happens at node
+/// boundaries, which that scan never reaches until it completes.
+///
+/// A caller-owned `Arc<BuildObserver>` passed through [`BuildOptions`] is
+/// updated in place (the caller keeps its own handle for a progress thread).
+/// When none is passed, the builder uses a private one and the counters are
+/// simply never read.
+#[derive(Debug, Default)]
+pub struct BuildObserver {
+    /// The same instrumentation counters `Solver` uses, so live search
+    /// throughput (`states_evaluated`, `guesses_evaluated`, `cache_hits`, ...)
+    /// is visible during a long node evaluation.
+    pub metrics: Metrics,
+    /// Tree-shape counters, updated at node boundaries.
+    pub tree: LiveTreeStats,
+}
+
+/// Tree-shape counters, updated at node boundaries during a build. Before the
+/// first node completes these are the root's initial values (1 node, no edges).
+#[derive(Debug, Default)]
+pub struct LiveTreeStats {
+    pub nodes: AtomicUsize,
+    pub edges: AtomicUsize,
+    pub frontier: AtomicUsize,
+    pub depth: AtomicUsize,
+    pub leaves: AtomicUsize,
+}
+
 /// Options controlling a tree build.
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
@@ -948,6 +979,8 @@ pub struct BuildOptions {
     pub sample_every_nodes: u64,
     /// Transposition-table size (entries; must be a power of two).
     pub cache_entries: usize,
+    /// Optional caller-owned observer, updated in place while the build runs.
+    pub observer: Option<Arc<BuildObserver>>,
 }
 
 impl Default for BuildOptions {
@@ -959,6 +992,7 @@ impl Default for BuildOptions {
             sample_interval: Duration::from_secs(1),
             sample_every_nodes: 8192,
             cache_entries: 1 << 22,
+            observer: None,
         }
     }
 }
@@ -1032,7 +1066,8 @@ pub fn build_policy_tree(
             capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
         }
     }
-    let metrics = Metrics::new();
+    let observer = opts.observer.clone().unwrap_or_default();
+    let metrics = &observer.metrics;
     let global_cache = GlobalCache::new(opts.cache_entries);
     let equiv_cache: EquivCache =
         std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
@@ -1091,7 +1126,7 @@ pub fn build_policy_tree(
         policy,
         root_candidates,
         opts,
-        &metrics,
+        &observer,
     )?;
     Ok((tree, stats))
 }
@@ -1106,8 +1141,9 @@ fn build_into(
     policy: &dyn CandidatesPolicy,
     root_candidates: &[usize],
     opts: &BuildOptions,
-    metrics: &Metrics,
+    observer: &BuildObserver,
 ) -> Result<BuildStats, PolicyError> {
+    let metrics = &observer.metrics;
     let start = Instant::now();
     let mut stats = BuildStats {
         samples: Vec::new(),
@@ -1138,6 +1174,10 @@ fn build_into(
         edge_count: 0,
     });
     tree.root = root;
+    observer
+        .tree
+        .nodes
+        .store(tree.nodes.len(), Ordering::Relaxed);
     // (node index, depth, response into node, candidates)
     let mut stack: Vec<(u32, usize, i32, Vec<usize>)> =
         vec![(root, 0, -1, root_candidates.to_vec())];
@@ -1230,6 +1270,21 @@ fn build_into(
             stack.push((child_ids[i], depth + 1, r as i32, bucket));
         }
 
+        observer
+            .tree
+            .nodes
+            .store(tree.nodes.len(), Ordering::Relaxed);
+        observer
+            .tree
+            .edges
+            .store(pending_edges.len(), Ordering::Relaxed);
+        observer.tree.frontier.store(stack.len(), Ordering::Relaxed);
+        observer.tree.depth.store(depth, Ordering::Relaxed);
+        observer
+            .tree
+            .leaves
+            .store(stats.summary.leaves as usize, Ordering::Relaxed);
+
         if opts.progress && last_report.elapsed() >= opts.progress_interval {
             last_report = Instant::now();
             eprintln!(
@@ -1290,6 +1345,16 @@ fn build_into(
         n.edge_start = cursor;
         cursor += n.edge_count as u32;
     }
+
+    observer
+        .tree
+        .nodes
+        .store(tree.nodes.len(), Ordering::Relaxed);
+    observer
+        .tree
+        .edges
+        .store(tree.edges.len(), Ordering::Relaxed);
+    observer.tree.frontier.store(0, Ordering::Relaxed);
 
     let m = &mut stats.summary;
     m.nodes = tree.nodes.len() as u64;
