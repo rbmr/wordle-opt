@@ -21,7 +21,7 @@ for s in min-remaining max-freq; do
 done
 
 # optimal: the full tree, written by the `full` run on the compute host (see
-# the main README's "Running the actual full N=2340 solve"); copy it in from
+# AGENTS.md's "The `full` run: at most once a day"); copy it in from
 # ~/optimal-2340.json there.
 ```
 

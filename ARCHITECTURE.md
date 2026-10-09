@@ -104,7 +104,7 @@ apply.
 
 ## Known Scaling Behavior: depth transitions, not a smooth curve
 
-`benchmark-random` (see README's Benchmarking section) showed avg
+`benchmark-random` (see AGENTS.md's "Benchmark and diagnose tools") showed avg
 cost/candidate scaling smoothly from N=1000 to N=1500 (~3.13 -> ~3.26
 guesses/candidate) while wall-clock time jumped ~25x. Investigated with
 `diagnose` (see `diagnose_history.md`): the cause is `max_depth` - the
@@ -141,7 +141,7 @@ Every algorithmic claim here should be checkable against the code it cites
 and against `cargo test --release` (the golden regression tests in
 `src/solver.rs` pin down exact expected costs for fixed inputs) or
 `benchmark_history.md` (deterministic, commit-stamped timing and search-
-statistics data - see README.md's Benchmarking section). If a future change
+statistics data - see AGENTS.md's "Benchmark and diagnose tools"). If a future change
 makes a section here inaccurate, fix the section rather than leaving it as
 aspirational documentation of what used to be true.
 
