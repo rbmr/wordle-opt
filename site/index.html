@@ -3,44 +3,43 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Wordle Policy Tree</title>
+<title>Wordle Policy Visualizer</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <header>
-  <h1>Wordle Policy Tree</h1>
+  <h1>Wordle Policy Visualizer</h1>
   <p class="sub">
-    A policy tree is a fully determined strategy: <strong>nodes are guesses</strong>,
-    <strong>edges are responses</strong>, a leaf is a solved word. Load a tree, then
-    play it by entering the response you would get. Invalid responses are
-    rejected, exactly as the tree's own validation requires.
+    Any wordle strategy can be visualized as a tree. Every node is a guess, and
+    every edge is a response, where the leaves of the tree (with no outgoing
+    edges) correspond to a win. You can load one of the example policy trees
+    below, or load one of your own, explore it, and use it to play a game of
+    Wordle.
   </p>
 </header>
 
-<div class="toolbar">
-  <div class="group">
-    <span class="label">Examples</span>
-    <button data-example="optimal" class="example">Optimal</button>
-    <button data-example="min-remaining" class="example">Min&nbsp;remaining</button>
-    <button data-example="max-freq" class="example">Max&nbsp;frequency</button>
-  </div>
-  <div class="group">
-    <label class="filebtn">Load tree&hellip;
-      <input type="file" id="file" accept=".json,application/json" />
-    </label>
-  </div>
-  <div class="group modes">
-    <button id="mode-play" class="mode active">Play</button>
-    <button id="mode-tree" class="mode">Explore tree</button>
-  </div>
+<div class="toolbar policies" id="policy-bar">
+  <button class="policy example" data-example="optimal">Optimal</button>
+  <button class="policy example" data-example="min-remaining">Min remaining</button>
+  <button class="policy example" data-example="max-freq">Max frequency</button>
+  <button id="custom-policy" class="policy custom" hidden></button>
+  <label class="filebtn policy">Load tree
+    <input type="file" id="file" accept=".json,application/json" />
+  </label>
 </div>
 
-<div id="status" class="status">Loading examples&hellip;</div>
+<div id="select-hint" class="select-hint" hidden>please select a policy</div>
+
+<div class="toolbar modes" id="mode-bar" hidden>
+  <button id="mode-play" class="mode active">Play</button>
+  <button id="mode-tree" class="mode">Explore</button>
+</div>
+
+<div id="status" class="status" hidden></div>
 <div id="stats" class="stats" hidden></div>
 
 <main>
-  <!-- Play mode: traverse the policy like the game -->
-  <section id="play" class="pane">
+  <section id="play" class="pane" hidden>
     <div class="board-wrap">
       <div id="board" class="board"></div>
     </div>
@@ -65,7 +64,6 @@
     <div id="play-msg" class="play-msg"></div>
   </section>
 
-  <!-- Explore mode: the full tree -->
   <section id="tree-pane" class="pane" hidden>
     <div class="toolbar inner">
       <div class="group">
@@ -82,16 +80,10 @@
         <input type="search" id="search" placeholder="word" autocomplete="off" />
       </div>
     </div>
+    <div id="chart" class="chart"></div>
     <div id="tree" class="tree"></div>
   </section>
 </main>
-
-<footer>
-  <p>
-    Trees are plain JSON: <code>wordle-opt solve --strategy &lt;optimal|min-remaining|max-freq&gt; --output tree.json --format readable</code>,
-    validated by <code>wordle-opt validate tree.json</code>.
-  </p>
-</footer>
 
 <script src="app.js"></script>
 </body>

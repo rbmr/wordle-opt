@@ -12,7 +12,7 @@ pub mod verify;
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
-use crate::policy::{BuildOptions, PolicyTree, Strategy};
+use crate::policy::{BuildOptions, Strategy};
 use crate::solver::{Metrics, Solver};
 use std::collections::HashMap;
 use std::env;
@@ -857,8 +857,8 @@ fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> Dictionary {
 }
 
 /// `wordle-opt solve` - capture a fully determined policy tree for the chosen
-/// strategy and write it (compact or readable JSON), with an optional
-/// per-node Parquet/NDJSON trace.
+/// strategy and write it as readable JSON, with an optional per-node
+/// Parquet/NDJSON trace.
 fn run_solve_cli(args: &[String]) {
     let flags = Flags::parse(args);
 
@@ -877,11 +877,6 @@ fn run_solve_cli(args: &[String]) {
         );
         std::process::exit(2);
     };
-    let format = flags.get_or("format", "compact");
-    if format != "compact" && format != "readable" {
-        eprintln!("solve: --format must be 'compact' or 'readable'");
-        std::process::exit(2);
-    }
     let max_candidates: usize = flags
         .get("max-candidates")
         .and_then(|v| v.parse().ok())
@@ -930,16 +925,13 @@ fn run_solve_cli(args: &[String]) {
         };
     let elapsed = start.elapsed();
 
-    // Serialize.
-    let serialized = match format {
-        "readable" => match tree.to_readable(&dict) {
-            Ok(r) => r.to_json(),
-            Err(e) => {
-                eprintln!("solve: {e}");
-                std::process::exit(1);
-            }
-        },
-        _ => tree.to_compact_json(),
+    // Serialize (readable JSON only).
+    let serialized = match tree.to_readable(&dict) {
+        Ok(r) => r.to_json(),
+        Err(e) => {
+            eprintln!("solve: {e}");
+            std::process::exit(1);
+        }
     };
     if let Err(e) = std::fs::write(output, &serialized) {
         eprintln!("solve: cannot write {output}: {e}");
@@ -947,7 +939,7 @@ fn run_solve_cli(args: &[String]) {
     }
 
     // Self-validate the written bytes (round-trip through the reader).
-    let report = match validate_bytes(&serialized, Some(&dict)) {
+    let report = match validate_bytes(&serialized) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("solve: internal error: written tree failed validation: {e}");
@@ -957,7 +949,6 @@ fn run_solve_cli(args: &[String]) {
 
     println!("=== POLICY TREE COMPLETE ===");
     println!("Strategy: {}", strategy.name());
-    println!("Format: {}", format);
     println!("Candidates: {}", n);
     println!("Nodes: {}", tree.node_count());
     println!("Edges: {}", tree.edge_count());
@@ -1007,45 +998,31 @@ fn run_solve_cli(args: &[String]) {
     }
 }
 
-/// Parses `bytes` as either policy-tree format and validates it. For the
-/// readable format the dictionary is embedded, so `fallback` is ignored.
+/// Parses `bytes` as a readable policy tree and validates it. The dictionary is
+/// embedded in the file, so no external word lists are needed.
 fn validate_bytes(
     bytes: &str,
-    fallback: Option<&Dictionary>,
 ) -> Result<crate::policy::ValidationReport, crate::policy::PolicyError> {
     let peek: serde_json::Value = serde_json::from_str(bytes)?;
     let format = peek.get("format").and_then(|v| v.as_str()).unwrap_or("");
-    match format {
-        crate::policy::FORMAT_READABLE => {
-            let file = crate::policy::ReadableTreeFile::from_json(bytes)?;
-            let dict = file.embedded_dictionary()?;
-            let matrix = ResponseMatrix::new(&dict);
-            let tree = file.to_tree()?;
-            tree.validate(&matrix, &dict)
-        }
-        crate::policy::FORMAT_COMPACT => {
-            let dict = fallback.ok_or_else(|| {
-                crate::policy::PolicyError::BadHeader(
-                    "compact trees need --guesses/--candidates to validate".into(),
-                )
-            })?;
-            let matrix = ResponseMatrix::new(dict);
-            let tree = PolicyTree::from_compact_json(bytes)?;
-            tree.validate(&matrix, dict)
-        }
-        other => Err(crate::policy::PolicyError::BadHeader(format!(
-            "unrecognized tree format {other:?}"
-        ))),
+    if format != crate::policy::FORMAT_READABLE {
+        return Err(crate::policy::PolicyError::BadHeader(format!(
+            "expected a readable policy tree ({:?}), found {format:?}",
+            crate::policy::FORMAT_READABLE
+        )));
     }
+    let file = crate::policy::ReadableTreeFile::from_json(bytes)?;
+    let dict = file.embedded_dictionary()?;
+    let matrix = ResponseMatrix::new(&dict);
+    let tree = file.to_tree()?;
+    tree.validate(&matrix, &dict)
 }
 
 /// `wordle-opt validate <tree.json>` - validates a serialized policy tree.
 fn run_validate_cli(args: &[String]) {
     let flags = Flags::parse(args);
     let Some(path) = flags.positional.first() else {
-        eprintln!(
-            "validate: usage: wordle-opt validate <tree.json> [--guesses P] [--candidates P] [--max-candidates N]"
-        );
+        eprintln!("validate: usage: wordle-opt validate <tree.json>");
         std::process::exit(2);
     };
     let bytes = match std::fs::read_to_string(path) {
@@ -1062,17 +1039,7 @@ fn run_validate_cli(args: &[String]) {
             std::process::exit(1);
         }
     };
-    let format = peek.get("format").and_then(|v| v.as_str()).unwrap_or("");
-    let max_candidates: usize = flags
-        .get("max-candidates")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let dict = if format == crate::policy::FORMAT_COMPACT {
-        Some(load_dict_from_flags(&flags, max_candidates))
-    } else {
-        None
-    };
-    match validate_bytes(&bytes, dict.as_ref()) {
+    match validate_bytes(&bytes) {
         Ok(r) => {
             println!("=== POLICY TREE VALID ===");
             println!("File: {path}");
@@ -1286,7 +1253,7 @@ pub fn run_cli() {
         }
     } else {
         println!(
-            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID> | solve --output <path> --strategy <optimal|min-remaining|max-freq> [--guesses P] [--candidates P] [--max-candidates N] [--format compact|readable] [--stats <path>] [--stats-format parquet|ndjson] [--no-progress] | validate <tree.json>>"
+            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID> | solve --output <path> --strategy <optimal|min-remaining|max-freq> [--guesses P] [--candidates P] [--max-candidates N] [--stats <path>] [--stats-format parquet|ndjson] [--no-progress] | validate <tree.json>>"
         );
     }
 }

@@ -2,7 +2,7 @@
 // Wordle policy-tree viewer.
 //
 // Loads a *readable* policy tree (the self-contained JSON produced by
-// `wordle-opt solve --format readable`), validates it, and offers two views:
+// `wordle-opt solve`), validates it, and offers two views:
 //
 //   - Play: traverse the policy like the game. The current guess is shown, you
 //     enter the response you would get, and it either advances, says the
@@ -149,6 +149,9 @@ function escapeHtml(s) {
 const app = {
   file: null,
   report: null,
+  selected: null,
+  customName: "",
+  customTree: null,
   letters: 5,
   win: "ggggg",
   mode: "play",
@@ -204,7 +207,7 @@ function resetPlay() {
     nodes: [{ node: app.file.root, candidates: app.file.candidates.map((_, i) => i) }],
     responses: [],
     editor: new Array(app.letters).fill("b"),
-    solved: false,
+    userWin: false,
   };
   renderPlay();
 }
@@ -215,7 +218,7 @@ function currentPlay() {
 
 function submitResponse() {
   const p = app.play;
-  if (p.solved) return;
+  if (p.userWin) return;
   const r = p.editor.join("");
   const cur = currentPlay();
   const map = candidatesMap(app.file, cur.node, cur.candidates);
@@ -226,10 +229,10 @@ function submitResponse() {
     return;
   }
   if (r === app.win) {
-    p.solved = true;
-    p.responses.push(r);
-    p.editor = new Array(app.letters).fill("b");
-    setPlayMsg(`Solved in ${p.responses.length} guess${p.responses.length === 1 ? "" : "es"}.`, "ok");
+    // The current guess is the answer. Do not push a response: the guess is
+    // already on the board, so renderPlay just colours it green.
+    p.userWin = true;
+    setPlayMsg("");
     renderPlay();
     return;
   }
@@ -243,10 +246,16 @@ function submitResponse() {
 
 function backPlay() {
   const p = app.play;
+  if (p.userWin) {
+    p.userWin = false;
+    p.editor = new Array(app.letters).fill("b");
+    setPlayMsg("");
+    renderPlay();
+    return;
+  }
   if (p.responses.length === 0) return;
   p.responses.pop();
   p.nodes.pop();
-  p.solved = false;
   p.editor = new Array(app.letters).fill("b");
   setPlayMsg("");
   renderPlay();
@@ -277,7 +286,7 @@ function renderPlay() {
   // gray and cycles gray -> yellow -> green on click.
   const cur = currentPlay();
   const isLeaf = Object.keys(cur.node.children).length === 0;
-  const solved = p.solved || isLeaf;
+  const solved = p.userWin || isLeaf;
   const row = el("div", "row");
   for (let k = 0; k < app.letters; k++) {
     const ch = p.editor[k];
@@ -303,7 +312,7 @@ function renderPlay() {
   if (solved) {
     editor.hidden = true;
     done.hidden = false;
-    const n = p.solved ? p.responses.length : p.responses.length + 1;
+    const n = p.responses.length + 1;
     done.textContent = `\u2713 ${cur.node.guess.toUpperCase()}, solved in ${n} guess${n === 1 ? "" : "es"}`;
   } else {
     editor.hidden = false;
@@ -313,7 +322,7 @@ function renderPlay() {
       ? `${st.exp.toFixed(2)} expected guesses remaining \u00b7 ${st.n} candidate${st.n === 1 ? "" : "s"}`
       : "";
   }
-  document.getElementById("back").disabled = p.responses.length === 0;
+  document.getElementById("back").disabled = p.responses.length === 0 && !p.userWin;
   const opts = document.getElementById("editor-options");
   opts.hidden = true;
   opts.textContent = "";
@@ -463,7 +472,6 @@ function applySearch() {
 
 function showStats(file, report) {
   const box = document.getElementById("stats");
-  box.hidden = false;
   box.textContent = "";
   const s = report.stats;
   const items = [
@@ -484,7 +492,6 @@ function showStats(file, report) {
   box.appendChild(badge);
   const status = document.getElementById("status");
   if (report.ok) {
-    // Nothing to report on a valid tree - the stats bar carries the badge.
     status.hidden = true;
     status.textContent = "";
   } else {
@@ -494,16 +501,65 @@ function showStats(file, report) {
   }
 }
 
+// Bar plot of how many candidates are solved in 1, 2, 3 ... guesses.
+function renderChart() {
+  const box = document.getElementById("chart");
+  box.textContent = "";
+  if (!app.report) return;
+  const hist = app.report.stats.depthHistogram; // hist[d] = wins at tree depth d
+  const counts = [];
+  for (let d = 0; d < hist.length; d++) if (hist[d]) counts.push([d + 1, hist[d]]);
+  if (counts.length === 0) return;
+  const maxCount = Math.max(...counts.map(([, c]) => c));
+  const s = app.report.stats;
+  box.appendChild(
+    el("div", "chart-title", `Guess-count distribution (${s.candidates.toLocaleString()} candidates, mean ${s.meanGuesses.toFixed(3)})`)
+  );
+  const bars = el("div", "chart-bars");
+  for (const [guesses, count] of counts) {
+    const col = el("div", "chart-col");
+    col.appendChild(el("span", "count", count.toLocaleString()));
+    const bar = el("div", "bar");
+    bar.style.height = Math.max(1, Math.round((count / maxCount) * 130)) + "px";
+    col.appendChild(bar);
+    col.appendChild(el("span", "label", String(guesses)));
+    bars.appendChild(col);
+  }
+  box.appendChild(bars);
+}
+
 function setMode(mode) {
   app.mode = mode;
   document.getElementById("mode-play").classList.toggle("active", mode === "play");
   document.getElementById("mode-tree").classList.toggle("active", mode === "tree");
-  document.getElementById("play").hidden = mode !== "play";
-  document.getElementById("tree-pane").hidden = mode !== "tree";
-  if (mode === "tree") renderTree();
+  const selected = app.selected !== null;
+  document.getElementById("play").hidden = !selected || mode !== "play";
+  document.getElementById("tree-pane").hidden = !selected || mode !== "tree";
+  // Statistics are only meaningful in the explore view.
+  document.getElementById("stats").hidden = !selected || mode !== "tree";
+  if (mode === "tree" && selected) {
+    renderChart();
+    renderTree();
+  }
 }
 
-function loadFile(file) {
+// Reflects the selected policy (button highlight), the optional custom-file
+// button, and whether the play/explore controls are available at all.
+function updateSelectionUI() {
+  document.querySelectorAll("button.policy.example").forEach((b) =>
+    b.classList.toggle("active", app.selected === b.dataset.example)
+  );
+  const custom = document.getElementById("custom-policy");
+  custom.hidden = !app.customName;
+  if (app.customName) custom.textContent = app.customName;
+  custom.classList.toggle("active", app.selected === "custom");
+  const selected = app.selected !== null;
+  document.getElementById("mode-bar").hidden = !selected;
+  document.getElementById("select-hint").hidden = selected;
+  setMode(app.mode);
+}
+
+function loadFile(file, selection) {
   const status = document.getElementById("status");
   status.hidden = false;
   if (file.format !== "wordle-policy-tree") {
@@ -517,6 +573,7 @@ function loadFile(file) {
     return;
   }
   app.file = file;
+  app.selected = selection;
   app.letters = wordLength(file);
   app.win = winString(app.letters);
   const report = validateTree(file);
@@ -525,9 +582,10 @@ function loadFile(file) {
   document.getElementById("depth").max = String(Math.max(1, report.stats.maxDepth));
   showStats(file, report);
   resetPlay();
-  setMode("play");
+  app.mode = "play";
   document.getElementById("tree").textContent = "";
   app.allNodes = [];
+  updateSelectionUI();
 }
 
 // Load examples by injecting a <script> that defines the tree. This works both
@@ -539,15 +597,16 @@ function loadExample(name) {
   status.className = "status";
   status.textContent = `Loading ${name}\u2026`;
   const existing = window.WordleExamples && window.WordleExamples[name];
-  if (existing) return loadFile(existing);
+  if (existing) return loadFile(existing, name);
   const s = document.createElement("script");
   s.src = `examples/${name}.js`;
   s.onload = () => {
     const f = window.WordleExamples && window.WordleExamples[name];
-    if (f) loadFile(f);
+    if (f) loadFile(f, name);
     else { status.className = "status bad"; status.textContent = `examples/${name}.js did not define a tree.`; }
   };
   s.onerror = () => {
+    status.hidden = false;
     status.className = "status bad";
     status.innerHTML =
       `Could not load examples/${name}.js.<br>If you opened this file directly from disk, ` +
@@ -558,9 +617,12 @@ function loadExample(name) {
 }
 
 // --- wiring ---
-document.querySelectorAll("button.example").forEach((b) =>
+document.querySelectorAll("button.policy.example").forEach((b) =>
   b.addEventListener("click", () => loadExample(b.dataset.example))
 );
+document.getElementById("custom-policy").addEventListener("click", () => {
+  if (app.customTree) loadFile(app.customTree, "custom");
+});
 document.getElementById("mode-play").addEventListener("click", () => setMode("play"));
 document.getElementById("mode-tree").addEventListener("click", () => setMode("tree"));
 
@@ -569,8 +631,12 @@ document.getElementById("file").addEventListener("change", (e) => {
   if (!f) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try { loadFile(JSON.parse(reader.result)); }
-    catch (err) {
+    try {
+      const obj = JSON.parse(reader.result);
+      app.customTree = obj;
+      app.customName = f.name;
+      loadFile(obj, "custom");
+    } catch (err) {
       const status = document.getElementById("status");
       status.hidden = false;
       status.className = "status bad";
@@ -578,6 +644,7 @@ document.getElementById("file").addEventListener("change", (e) => {
     }
   };
   reader.readAsText(f);
+  e.target.value = ""; // allow selecting the same file again
 });
 
 document.getElementById("submit-response").addEventListener("click", submitResponse);
@@ -596,4 +663,5 @@ depthEl.addEventListener("input", () => {
 });
 document.getElementById("search").addEventListener("input", (e) => { app.query = e.target.value; applySearch(); });
 
+// Default to the optimal example.
 loadExample("optimal");

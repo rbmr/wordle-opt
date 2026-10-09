@@ -1,6 +1,6 @@
 #![allow(clippy::needless_range_loop)]
-//! Policy trees: compact, self-describing storage of a fully determined
-//! Wordle strategy, plus the logic to build and validate one.
+//! Policy trees: self-describing storage of a fully determined Wordle
+//! strategy, plus the logic to build and validate one.
 //!
 //! A *policy* maps a state (the set of remaining candidates) to a guess. For a
 //! fixed dictionary and a deterministic policy, the whole game is a static
@@ -19,13 +19,12 @@
 //! some candidate still reachable at that node, and each edge leads to the
 //! subtree for precisely the candidates producing that response.
 //!
-//! Two serializations are defined:
-//! - **readable** JSON: nested `{"guess": "trace", "children": {"bgybg": ...}}`
-//!   with the word lists embedded, so the file is fully self-contained
-//!   (loadable/validatable with no other files, and directly renderable by the
-//!   GitHub Pages viewer under `site/`).
-//! - **compact** JSON: a flat arena of numeric indices, plus the dictionary
-//!   hash needed to validate it against the original word lists.
+//! A tree is serialized as **readable** JSON: nested
+//! `{"guess": "trace", "children": {"bgybg": ...}}` with the word lists
+//! embedded, so the file is fully self-contained (loadable and validatable with
+//! no other files, and directly renderable by the GitHub Pages viewer under
+//! `site/`). It also carries a dictionary hash, which ties it to the exact word
+//! lists it was built from.
 
 use crate::cache::GlobalCache;
 use crate::core::Response;
@@ -45,7 +44,6 @@ pub const WIN_RESPONSE: u8 = Response::WIN.0;
 
 /// Format tags written into the JSON headers, and checked on load.
 pub const FORMAT_READABLE: &str = "wordle-policy-tree";
-pub const FORMAT_COMPACT: &str = "wordle-policy-tree-compact";
 /// Bumped whenever the on-disk shape changes in a way older readers can't
 /// handle. Readers reject a version they don't know rather than guessing.
 pub const FORMAT_VERSION: u32 = 1;
@@ -484,8 +482,8 @@ impl CandidatesPolicy for OptimalPolicy<'_> {
 // The tree
 // ---------------------------------------------------------------------------
 
-/// One node of the compact arena: a guess plus a contiguous range of edges.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// One node of the arena: a guess plus a contiguous range of edges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PolicyNode {
     /// Index into `Dictionary::guesses`.
     pub guess: u16,
@@ -496,13 +494,13 @@ pub struct PolicyNode {
 }
 
 /// One edge: a possible non-win response and the child it leads to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PolicyEdge {
     pub response: u8,
     pub child: u32,
 }
 
-/// A fully determined policy tree, stored as a flat arena (compact form).
+/// A fully determined policy tree, stored as a flat arena.
 #[derive(Debug, Clone)]
 pub struct PolicyTree {
     pub strategy: String,
@@ -535,92 +533,6 @@ impl PolicyTree {
 
     pub fn edge_count(&self) -> usize {
         self.edges.len()
-    }
-
-    /// Deterministic JSON serialization of the compact form.
-    pub fn to_compact_json(&self) -> String {
-        let file = CompactTreeFile {
-            format: FORMAT_COMPACT.to_string(),
-            version: FORMAT_VERSION,
-            strategy: self.strategy.clone(),
-            dictionary_hash: hash_hex(self.dictionary_hash),
-            num_guesses: self.num_guesses,
-            num_candidates: self.num_candidates,
-            root: self.root,
-            nodes: self
-                .nodes
-                .iter()
-                .map(|n| [n.guess as u32, n.edge_start, n.edge_count as u32])
-                .collect(),
-            edges: self
-                .edges
-                .iter()
-                .map(|e| [e.response as u32, e.child])
-                .collect(),
-        };
-        let mut s = serde_json::to_string(&file).expect("compact tree is always serializable");
-        s.push('\n');
-        s
-    }
-
-    pub fn from_compact_json(s: &str) -> Result<Self, PolicyError> {
-        let file: CompactTreeFile = serde_json::from_str(s)?;
-        if file.format != FORMAT_COMPACT {
-            return Err(PolicyError::BadHeader(format!(
-                "expected format {FORMAT_COMPACT:?}, found {:?}",
-                file.format
-            )));
-        }
-        if file.version != FORMAT_VERSION {
-            return Err(PolicyError::BadHeader(format!(
-                "unsupported version {} (this build understands {})",
-                file.version, FORMAT_VERSION
-            )));
-        }
-        let mut nodes = Vec::with_capacity(file.nodes.len());
-        for n in &file.nodes {
-            if n[0] > u16::MAX as u32 {
-                return Err(PolicyError::BadHeader(format!(
-                    "guess index {} out of range",
-                    n[0]
-                )));
-            }
-            if n[2] > u16::MAX as u32 {
-                return Err(PolicyError::BadHeader(format!(
-                    "edge count {} out of range",
-                    n[2]
-                )));
-            }
-            nodes.push(PolicyNode {
-                guess: n[0] as u16,
-                edge_start: n[1],
-                edge_count: n[2] as u16,
-            });
-        }
-        let mut edges = Vec::with_capacity(file.edges.len());
-        for e in &file.edges {
-            if e[0] >= NUM_RESPONSES as u32 {
-                return Err(PolicyError::BadHeader(format!(
-                    "response index {} out of range",
-                    e[0]
-                )));
-            }
-            edges.push(PolicyEdge {
-                response: e[0] as u8,
-                child: e[1],
-            });
-        }
-        let tree = Self {
-            strategy: file.strategy,
-            dictionary_hash: parse_hash_hex(&file.dictionary_hash)?,
-            num_guesses: file.num_guesses,
-            num_candidates: file.num_candidates,
-            root: file.root,
-            nodes,
-            edges,
-        };
-        tree.check_shape()?;
-        Ok(tree)
     }
 
     /// Structural bounds check that does not need a dictionary: indices must be
@@ -726,29 +638,11 @@ impl PolicyTree {
             children,
         })
     }
-
-    /// Reads the compact form.
-    pub fn from_compact(s: &str) -> Result<Self, PolicyError> {
-        Self::from_compact_json(s)
-    }
 }
 
 // ---------------------------------------------------------------------------
 // JSON shapes
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CompactTreeFile {
-    format: String,
-    version: u32,
-    strategy: String,
-    dictionary_hash: String,
-    num_guesses: u32,
-    num_candidates: u32,
-    root: u32,
-    nodes: Vec<[u32; 3]>,
-    edges: Vec<[u32; 2]>,
-}
 
 /// Readable, self-contained policy tree. Node = guess word, children = map
 /// from response string to subtree. A leaf (empty `children`) is a win.
@@ -829,7 +723,7 @@ impl ReadableTreeFile {
     /// Flattens back into the arena form. Word indices are looked up in the
     /// embedded lists. Node ids are assigned in the same order the builder
     /// uses (all of a node's children at once, then each child's subtree), so a
-    /// build -> readable -> compact round-trip reproduces the exact bytes.
+    /// build -> readable round-trip reproduces the exact bytes.
     pub fn to_tree(&self) -> Result<PolicyTree, PolicyError> {
         let dict = self.embedded_dictionary()?;
         let mut tree = PolicyTree::new(
@@ -931,7 +825,7 @@ pub enum PolicyError {
     },
     /// The policy returned an out-of-range guess index.
     GuessOutOfRange { guess: usize },
-    /// The dictionary has more guesses than the compact format can index.
+    /// The dictionary has more guesses than the format can index.
     TooManyGuesses { count: usize },
     /// A structural problem with the serialized tree.
     Shape(String),
@@ -958,7 +852,7 @@ impl std::fmt::Display for PolicyError {
             PolicyError::GuessOutOfRange { guess } => write!(f, "guess index {guess} out of range"),
             PolicyError::TooManyGuesses { count } => write!(
                 f,
-                "dictionary has {count} guesses, more than the compact format's {}-index limit",
+                "dictionary has {count} guesses, more than the format's {}-index limit",
                 u16::MAX
             ),
             PolicyError::Shape(m) => write!(f, "invalid policy tree: {m}"),
@@ -1180,7 +1074,7 @@ fn build_into(
         vec![(root, 0, -1, root_candidates.to_vec())];
     // Edges are collected as (parent, response, child) and laid out
     // contiguously per node (ascending id, ascending response) at the end, so
-    // the arena matches the canonical compact layout regardless of DFS order.
+    // the arena matches the canonical layout regardless of DFS order.
     let mut pending_edges: Vec<(u32, u8, u32)> = Vec::new();
 
     while let Some((node_idx, depth, _response, candidates)) = stack.pop() {
@@ -1647,7 +1541,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_roundtrip_is_deterministic() {
+    fn readable_roundtrip_is_deterministic() {
         let dict = real_dict(8);
         let matrix = ResponseMatrix::new(&dict);
         let root: Vec<usize> = (0..dict.candidates.len()).collect();
@@ -1659,11 +1553,16 @@ mod tests {
             build_policy_tree(&matrix, &dict, Strategy::MinRemaining, &root, &opts).unwrap();
         let (t2, _) =
             build_policy_tree(&matrix, &dict, Strategy::MinRemaining, &root, &opts).unwrap();
-        assert_eq!(t1.to_compact_json(), t2.to_compact_json());
+        assert_eq!(
+            t1.to_readable(&dict).unwrap().to_json(),
+            t2.to_readable(&dict).unwrap().to_json()
+        );
 
-        let parsed = PolicyTree::from_compact_json(&t1.to_compact_json()).unwrap();
-        assert_eq!(parsed.to_compact_json(), t1.to_compact_json());
-        parsed.validate(&matrix, &dict).unwrap();
+        let json = t1.to_readable(&dict).unwrap().to_json();
+        let parsed = ReadableTreeFile::from_json(&json).unwrap();
+        let back = parsed.to_tree().unwrap();
+        assert_eq!(back.to_readable(&dict).unwrap().to_json(), json);
+        back.validate(&matrix, &dict).unwrap();
     }
 
     #[test]
@@ -1683,7 +1582,10 @@ mod tests {
         let embedded = parsed.embedded_dictionary().unwrap();
         let back = parsed.to_tree().unwrap();
         back.validate(&matrix, &embedded).unwrap();
-        assert_eq!(back.to_compact_json(), tree.to_compact_json());
+        assert_eq!(
+            back.to_readable(&embedded).unwrap().to_json(),
+            tree.to_readable(&dict).unwrap().to_json()
+        );
     }
 
     #[test]

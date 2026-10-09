@@ -18,18 +18,18 @@ than the single `full` cost run.
 # heuristics: the full candidate set (about a second each)
 for s in min-remaining max-freq; do
   cargo run --release -- solve --strategy "$s" \
-    --format readable --output "site/examples/$s.json" --no-progress
+    --output "site/examples/$s.json" --no-progress
 done
 
 # optimal: placeholder 500-candidate subset, a reproducible random draw
 cargo run --release -- solve --strategy optimal \
   --max-candidates 500 --sample-seed 20261008 \
-  --format readable --output site/examples/optimal.json --no-progress
+  --output site/examples/optimal.json --no-progress
 ```
 
-`--format readable` embeds the guess and candidate lists, so each file is
-self-contained: the viewer (and `wordle-opt validate <file>`) can check it with
-no other files present.
+Each file embeds the guess and candidate lists, so it is self-contained: the
+viewer (and `wordle-opt validate <file>`) can check it with no other files
+present.
 
 Each `.json` also has a sibling `.js` (`window.WordleExamples["<name>"] = ...`)
 which is what the viewer's example buttons load. It is generated from the
@@ -83,5 +83,4 @@ intended to be generated on the compute host and will replace the
 cargo run --release -- solve --strategy optimal --output optimal-2340.json
 ```
 
-The viewer and the compact/readable formats handle trees of any size. The
-browser renderer expands lazily.
+The viewer handles trees of any size. The browser renderer expands lazily.
