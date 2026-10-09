@@ -720,17 +720,19 @@ impl<'a> Solver<'a> {
             }
 
             let mut useless_projs = [0u64; 243];
-            for &c in set {
-                let z = self.matrix.zobrist[c];
-                for r in 0..243 {
-                    useless_projs[r] ^= z.wrapping_mul(r as u64 + 1);
+            for r in 0..243 {
+                let mut p = 0u64;
+                let m = r as u64 + 1;
+                for &c in set {
+                    p ^= self.matrix.zobrist[c].wrapping_mul(m);
                 }
+                if p == 0 {
+                    p = 1;
+                }
+                useless_projs[r] = p;
             }
             for r in 0..243 {
-                let mut proj = useless_projs[r];
-                if proj == 0 {
-                    proj = 1;
-                }
+                let proj = useless_projs[r];
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
                     let slot = table[idx];
@@ -1173,13 +1175,20 @@ impl<'a> Solver<'a> {
                         if num_non_empty == 1 {
                             continue;
                         }
+                        let mut has_size_one = false;
                         for i in 0..num_non_empty {
                             let r_idx = local_counts[i].0 as usize;
                             let count = local_counts[i].1 as usize;
+                            if count == 1 {
+                                has_size_one = true;
+                            }
                             expected_rem += (count as u32) * (count as u32);
                             if r_idx != crate::core::Response::WIN.0 as usize {
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                             }
+                        }
+                        if num_non_empty == 2 && has_size_one {
+                            continue;
                         }
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
@@ -1205,11 +1214,15 @@ impl<'a> Solver<'a> {
                                 *counts.get_unchecked_mut(r) += 1;
                             }
                         }
+                        let mut has_size_one = false;
                         for r_idx in 0..242 {
                             let count = counts[r_idx];
                             if count > 0 {
                                 counts[r_idx] = 0;
                                 num_non_empty += 1;
+                                if count == 1 {
+                                    has_size_one = true;
+                                }
                                 expected_rem += (count as u32) * (count as u32);
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                             }
@@ -1218,9 +1231,15 @@ impl<'a> Solver<'a> {
                             let count = counts[242];
                             counts[242] = 0;
                             num_non_empty += 1;
+                            if count == 1 {
+                                has_size_one = true;
+                            }
                             expected_rem += (count as u32) * (count as u32);
                         }
                         if num_non_empty == 1 {
+                            continue;
+                        }
+                        if num_non_empty == 2 && has_size_one {
                             continue;
                         }
                         if num_non_empty > local_max_k {
