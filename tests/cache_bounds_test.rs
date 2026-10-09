@@ -12,5 +12,5 @@ fn test_global_cache_extreme_values() {
     assert!(res.is_some());
     let (val, exact) = res.unwrap();
     assert_eq!(val, max_val);
-    assert_eq!(exact, true);
+    assert!(exact);
 }
