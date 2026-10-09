@@ -50,7 +50,6 @@ impl Dictionary {
             candidate_to_guess.push(guesses.binary_search(c).unwrap());
         }
 
-
         Self {
             guesses,
             guess_chars,
