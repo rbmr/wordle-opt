@@ -702,7 +702,7 @@ impl<'a> Solver<'a> {
             projs.fill(0);
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size = (active_count * 2).next_power_of_two().clamp(256, 32768) as usize;
+            let table_size = ((active_count + 243) * 2).next_power_of_two().clamp(1024, 32768) as usize;
             let mask = table_size - 1;
             let shift = 64 - table_size.trailing_zeros();
 
@@ -716,6 +716,33 @@ impl<'a> Solver<'a> {
                         let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
                         projs[g] ^= z.wrapping_mul(r as u64 + 1);
                     }
+                }
+            }
+
+            let mut useless_projs = [0u64; 243];
+            for &c in set {
+                let z = self.matrix.zobrist[c];
+                for r in 0..243 {
+                    useless_projs[r] ^= z.wrapping_mul(r as u64 + 1);
+                }
+            }
+            for r in 0..243 {
+                let mut proj = useless_projs[r];
+                if proj == 0 {
+                    proj = 1;
+                }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                loop {
+                    let slot = table[idx];
+                    if slot == 0 {
+                        table[idx] = proj;
+                        added_indices.push(idx);
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
                 }
             }
 
