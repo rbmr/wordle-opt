@@ -1038,6 +1038,24 @@ fn run_solve_cli(args: &[String]) {
     let matrix = ResponseMatrix::new(&dict);
     let root: Vec<usize> = (0..n).collect();
 
+    // Optional cost-only baseline on the same candidate set: it is the exact
+    // optimum the tree's cost is checked against, and the number the tree
+    // build's time is compared with (the tree adds per-node scans on top of
+    // the same root search).
+    let baseline = if flags.values.contains_key("compare") {
+        let metrics = Metrics::new();
+        let equiv_cache: [_; 1024] = std::array::from_fn(|_| {
+            std::sync::RwLock::new(
+                rustc_hash::FxHashMap::<u64, std::sync::Arc<Vec<u64>>>::default(),
+            )
+        });
+        let start = Instant::now();
+        let cost = Solver::solve(&matrix, &root, &dict, &metrics, &equiv_cache);
+        Some((start.elapsed(), cost, metrics))
+    } else {
+        None
+    };
+
     let observer = std::sync::Arc::new(crate::policy::BuildObserver::default());
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let opts = BuildOptions {
@@ -1083,6 +1101,25 @@ fn run_solve_cli(args: &[String]) {
         "Dictionary hash: {}",
         crate::policy::hash_hex(tree.dictionary_hash)
     );
+    if let Some((baseline_elapsed, baseline_cost, baseline_metrics)) = &baseline {
+        use std::sync::atomic::Ordering;
+        let cost_only = baseline_elapsed.as_secs_f64();
+        println!(
+            "Cost-only: {:.3}s (cost {}, states {}, guesses {})",
+            cost_only,
+            baseline_cost,
+            baseline_metrics.states_evaluated.load(Ordering::Relaxed),
+            baseline_metrics.guesses_evaluated.load(Ordering::Relaxed),
+        );
+        println!("Tree/cost-only: {:.3}x", elapsed.as_secs_f64() / cost_only);
+        if *baseline_cost != stats.summary.total_cost as u32 {
+            eprintln!(
+                "solve: internal error: cost-only optimum {baseline_cost} disagrees with the tree's total {}",
+                stats.summary.total_cost
+            );
+            std::process::exit(1);
+        }
+    }
 
     // Serialize (readable JSON only).
     let serialized = match tree.to_readable(&dict) {
@@ -1404,7 +1441,7 @@ pub fn run_cli() {
         }
     } else {
         println!(
-            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID> | solve --output <path> --strategy <optimal|min-remaining|max-freq> [--guesses P] [--candidates P] [--max-candidates N] [--stats <path>] [--stats-format parquet|ndjson] [--no-progress] | validate <tree.json>>"
+            "Usage: wordle-opt <benchmark [-n N] | benchmark-random [-n N] [-k SAMPLES] | diagnose [-n N1,N2,...] [-s SEED1,SEED2,...] | full | verify | evaluate-root <GUESS_ID> | solve --output <path> --strategy <optimal|min-remaining|max-freq> [--guesses P] [--candidates P] [--max-candidates N] [--sample-seed S] [--compare] [--stats <path>] [--stats-format parquet|ndjson] [--no-progress] | validate <tree.json>>"
         );
     }
 }
