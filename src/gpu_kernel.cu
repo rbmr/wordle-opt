@@ -64,6 +64,10 @@ void gpu_free_context(void* ptr) {
 void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bounds, size_t bounds_size) {
     cudaSetDeviceFlags(cudaDeviceScheduleSpin);
     cudaSetDevice(0);
+    // Re-initialization is allowed (the process may load more than one
+    // dictionary, e.g. across tests), so release any previous buffers first.
+    if (global_d_matrix) { cudaFree(global_d_matrix); global_d_matrix = NULL; }
+    if (global_d_bounds) { cudaFree(global_d_bounds); global_d_bounds = NULL; }
     cudaMalloc(&global_d_matrix, matrix_size);
     cudaMemcpy(global_d_matrix, host_matrix, matrix_size, cudaMemcpyHostToDevice);
 
