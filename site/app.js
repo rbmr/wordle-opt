@@ -288,7 +288,7 @@ function renderPlay() {
     editor.hidden = true;
     done.hidden = false;
     const n = p.solved ? p.responses.length : p.responses.length + 1;
-    done.textContent = `\u2713 ${cur.node.guess.toUpperCase()} \u2014 solved in ${n} guess${n === 1 ? "" : "es"}`;
+    done.textContent = `\u2713 ${cur.node.guess.toUpperCase()}, solved in ${n} guess${n === 1 ? "" : "es"}`;
   } else {
     editor.hidden = false;
     done.hidden = true;
@@ -300,7 +300,10 @@ function renderPlay() {
     renderEditor();
   }
   document.getElementById("back").disabled = p.responses.length === 0;
-  document.getElementById("editor-options").textContent = "";
+  const opts = document.getElementById("editor-options");
+  opts.hidden = true;
+  opts.textContent = "";
+  document.getElementById("options-response").setAttribute("aria-expanded", "false");
 }
 
 function renderEditor() {
@@ -322,14 +325,21 @@ function renderEditor() {
   document.getElementById("submit-response").disabled = p.editor.some((x) => x === null);
 }
 
-function showOptions() {
+function toggleOptions() {
+  const box = document.getElementById("editor-options");
+  const btn = document.getElementById("options-response");
+  // Clicking again collapses it.
+  if (!box.hidden) {
+    box.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    return;
+  }
   const cur = currentPlay();
   const map = candidatesMap(app.file, cur.node, cur.candidates);
   const keys = [...map.keys()].filter((r) => r !== app.win).sort((a, b) => responseIndex(a) - responseIndex(b));
-  const box = document.getElementById("editor-options");
   box.textContent = "";
   const winPossible = map.has(app.win);
-  box.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}${winPossible ? " (or the win)" : ""} \u2014 click one:`));
+  box.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}${winPossible ? " (or the win)" : ""}. Click one:`));
   const list = el("div", "options-list");
   for (const r of keys) {
     const row = el("div", "option-row");
@@ -344,6 +354,8 @@ function showOptions() {
     list.appendChild(row);
   }
   box.appendChild(list);
+  box.hidden = false;
+  btn.setAttribute("aria-expanded", "true");
 }
 
 // --- tree view ---
@@ -448,7 +460,7 @@ function showStats(file, report) {
   } else {
     status.hidden = false;
     status.className = "status bad";
-    status.textContent = "INVALID \u2014 " + report.errors[0];
+    status.textContent = "INVALID: " + report.errors[0];
   }
 }
 
@@ -540,7 +552,7 @@ document.getElementById("file").addEventListener("change", (e) => {
 
 document.getElementById("submit-response").addEventListener("click", submitResponse);
 document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = new Array(app.letters).fill(null); renderEditor(); });
-document.getElementById("options-response").addEventListener("click", showOptions);
+document.getElementById("options-response").addEventListener("click", toggleOptions);
 document.getElementById("back").addEventListener("click", backPlay);
 document.getElementById("reset").addEventListener("click", resetPlay);
 
