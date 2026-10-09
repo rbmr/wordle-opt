@@ -226,6 +226,9 @@ benchmark iteration that's the actual day-to-day work.
   commit, or at minimum before moving on to a different task. (This has
   happened: 11 commits - including a correctness fix to `build.rs` -
   sat unpushed for over a day.)
+- **Always run exact CI gates before pushing.** You must have a pre-push hook
+  configured (`git config core.hooksPath .githooks`) containing:
+  `cargo fmt -- --check && cargo clippy --release -- -D warnings && cargo test --release`.
 - Commit messages: terse, professional, describe what changed and why -
   no AI branding, no narrating your own process. The existing git history
   on this repo (`git log --oneline`) is a good model to match.
