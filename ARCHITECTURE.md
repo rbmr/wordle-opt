@@ -157,6 +157,7 @@ Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) a
 - `valid_max_k` (the maximum branching factor among Phase 1 guesses) restricts the capacity bounds of trees rooted in a Phase 1 guess.
 - `local_max_k` (the maximum branching factor across all guesses) bounds Phase 2 guesses. 
 - A rigorous `phase2_capacity_bound` is implemented for Phase 2 guesses (since they cannot result in a WIN at depth 1, all candidates are pushed to depth 2 or deeper). The global heuristic lower bound `tight_lb` is perfectly constrained to `min(phase1_capacity_bound, phase2_capacity_bound)`.
+- **Branchless Phase Classification**: To rapidly separate Phase 1 and Phase 2 guesses inside the hot loop, a thread-local `is_in_set` boolean array is sized to the full guess domain (14,855) rather than the candidate domain (2,340). This allows direct indexing by guess ID (`is_in_set[g]`), eliminating a conditional branch (`if guess_to_candidate[g] != u16::MAX`) during the most frequent classification step.
 
 
 ## 8. Depth-2 Parallel Alpha-Beta (`src/parallel_depth.rs`)
