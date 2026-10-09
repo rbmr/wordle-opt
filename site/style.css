@@ -91,6 +91,16 @@ input[type="search"].no-match { border-color: var(--bad); }
 main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 .pane { padding-top: 16px; }
 
+.site-footer {
+  max-width: 1080px; margin: 26px auto 0; padding: 18px 24px 30px;
+  border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 13px; text-align: center;
+}
+.site-footer p { margin: 0; }
+.site-footer a { color: var(--accent); text-decoration: none; }
+.site-footer a:hover { text-decoration: underline; }
+.site-footer .heart { color: #e5484d; }
+
 /* ---- play mode ---- */
 .board-wrap { display: flex; justify-content: center; padding: 8px 0 4px; }
 .board { display: flex; flex-direction: column; gap: 6px; }
