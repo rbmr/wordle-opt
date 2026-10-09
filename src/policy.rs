@@ -472,6 +472,9 @@ impl<'a> OptimalPolicy<'a> {
                     1,
                     self.max_k,
                 );
+                self.metrics
+                    .root_guesses_done
+                    .fetch_add(1, Ordering::Relaxed);
                 if v < best_val {
                     best_val = v;
                     best_guess = *g;
@@ -514,6 +517,9 @@ impl<'a> OptimalPolicy<'a> {
                         1,
                         self.max_k,
                     );
+                    self.metrics
+                        .root_guesses_done
+                        .fetch_add(1, Ordering::Relaxed);
 
                     let packed = ((v as u64) << 32) | (idx as u64);
                     let old = global_best.fetch_min(packed, Ordering::Relaxed);
