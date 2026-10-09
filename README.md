@@ -118,15 +118,23 @@ Optional flags:
   **progress time series** (one row per sampled interval: nodes built, frontier
   size, depth, cache hits, ...). Sampling is periodic and clock-gated, never
   per node, so it cannot measurably slow a build; it is off unless `--stats`
-  is given. The Parquet file is written with `SNAPPY` compression and loads
-  directly into pandas/polars/duckdb for plotting.
+  is given. A periodic progress thread fills the series during long node
+  evaluations (the root scan can run for hours), so it covers the whole run
+  rather than only the node-boundary phase. The Parquet file is written with
+  `SNAPPY` compression and loads directly into pandas/polars/duckdb for
+  plotting.
+- `--compare` - also run the cost-only solve on the same candidate set, print
+  its time and the tree/cost-only ratio, and fail if its exact optimum
+  disagrees with the tree's total. Matched measurements on the compute host
+  put the tree build at about 1.1-1.5x the cost-only solve at N=500-1000
+  (2-5x at N<=250, where fixed per-node costs dominate), converging toward
+  parity as the root scan dominates.
 - `--no-progress` - silence the periodic stderr progress line.
 - `--cache-entries N` - transposition-table size (power of two).
 
 `solve` self-validates the tree it writes (round-tripping through the reader)
 and prints a summary. Building an `optimal` tree requires an exact solve of
-every reachable state, so for large candidate sets it is far more expensive
-than a single `full` solve - it is meant to be generated on the compute host.
+every reachable state, so it is meant to be generated on the compute host.
 
 ### `validate`
 
