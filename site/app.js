@@ -54,8 +54,9 @@ function wordLength(file) {
   return sample.length;
 }
 
-// Editor tile states, cycled on click: unset -> gray -> yellow -> green -> unset.
-const CYCLE = [null, "b", "y", "g"];
+// Response colours cycled on click: gray -> yellow -> green -> gray. Tiles
+// start gray (all black) so no clicks are wasted setting the common case.
+const CYCLE = ["b", "y", "g"];
 
 // --- validation (shared by both views; drives the stats + badge) ---
 function validateTree(file) {
@@ -188,7 +189,9 @@ function computeNodeStats(file) {
       const child = node.children[r];
       if (child) total += visit(child, cs);
     }
-    stats.set(node, { n: candidates.length, total, exp: total / candidates.length });
+    // `hasWin` is true when the node's own guess is one of its candidates, i.e.
+    // the all-green response is possible here.
+    stats.set(node, { n: candidates.length, total, exp: total / candidates.length, hasWin: map.has(WIN) });
     return total;
   }
   visit(file.root, file.candidates.map((_, i) => i));
@@ -200,7 +203,7 @@ function resetPlay() {
   app.play = {
     nodes: [{ node: app.file.root, candidates: app.file.candidates.map((_, i) => i) }],
     responses: [],
-    editor: new Array(app.letters).fill(null),
+    editor: new Array(app.letters).fill("b"),
     solved: false,
   };
   renderPlay();
@@ -213,7 +216,6 @@ function currentPlay() {
 function submitResponse() {
   const p = app.play;
   if (p.solved) return;
-  if (p.editor.some((x) => x === null)) return;
   const r = p.editor.join("");
   const cur = currentPlay();
   const map = candidatesMap(app.file, cur.node, cur.candidates);
@@ -226,7 +228,7 @@ function submitResponse() {
   if (r === app.win) {
     p.solved = true;
     p.responses.push(r);
-    p.editor = new Array(app.letters).fill(null);
+    p.editor = new Array(app.letters).fill("b");
     setPlayMsg(`Solved in ${p.responses.length} guess${p.responses.length === 1 ? "" : "es"}.`, "ok");
     renderPlay();
     return;
@@ -234,7 +236,7 @@ function submitResponse() {
   const child = cur.node.children[r];
   p.responses.push(r);
   p.nodes.push({ node: child, candidates: map.get(r) });
-  p.editor = new Array(app.letters).fill(null);
+  p.editor = new Array(app.letters).fill("b");
   setPlayMsg("");
   renderPlay();
 }
@@ -245,7 +247,7 @@ function backPlay() {
   p.responses.pop();
   p.nodes.pop();
   p.solved = false;
-  p.editor = new Array(app.letters).fill(null);
+  p.editor = new Array(app.letters).fill("b");
   setPlayMsg("");
   renderPlay();
 }
@@ -271,20 +273,34 @@ function renderPlay() {
     board.appendChild(row);
   }
 
-  // Current row.
+  // Current row: the guess itself is the response selector. Each letter starts
+  // gray and cycles gray -> yellow -> green on click.
   const cur = currentPlay();
   const isLeaf = Object.keys(cur.node.children).length === 0;
+  const solved = p.solved || isLeaf;
   const row = el("div", "row");
-  const showGreen = p.solved || isLeaf;
   for (let k = 0; k < app.letters; k++) {
-    row.appendChild(el("span", "tile " + (showGreen ? "green" : "current"), cur.node.guess[k]));
+    const ch = p.editor[k];
+    const cls = solved
+      ? "tile green"
+      : "tile clickable " + { b: "gray", g: "green", y: "yellow" }[ch];
+    const t = el("span", cls, cur.node.guess[k]);
+    if (!solved) {
+      t.title = "click to cycle the response: gray \u2192 yellow \u2192 green";
+      t.addEventListener("click", () => {
+        const idx = CYCLE.indexOf(p.editor[k]);
+        p.editor[k] = CYCLE[(idx + 1) % CYCLE.length];
+        renderPlay();
+      });
+    }
+    row.appendChild(t);
   }
   board.appendChild(row);
 
-  // Editor.
+  // Editor (buttons only - the response is set on the guess above).
   const editor = document.getElementById("editor");
   const done = document.getElementById("play-done");
-  if (p.solved || isLeaf) {
+  if (solved) {
     editor.hidden = true;
     done.hidden = false;
     const n = p.solved ? p.responses.length : p.responses.length + 1;
@@ -292,37 +308,16 @@ function renderPlay() {
   } else {
     editor.hidden = false;
     done.hidden = true;
-    document.getElementById("editor-guess").textContent = cur.node.guess.toUpperCase();
     const st = app.nodeStats.get(cur.node);
     document.getElementById("editor-exp").textContent = st
       ? `${st.exp.toFixed(2)} expected guesses remaining \u00b7 ${st.n} candidate${st.n === 1 ? "" : "s"}`
       : "";
-    renderEditor();
   }
   document.getElementById("back").disabled = p.responses.length === 0;
   const opts = document.getElementById("editor-options");
   opts.hidden = true;
   opts.textContent = "";
   document.getElementById("options-response").setAttribute("aria-expanded", "false");
-}
-
-function renderEditor() {
-  const p = app.play;
-  const box = document.getElementById("response-tiles");
-  box.textContent = "";
-  for (let i = 0; i < app.letters; i++) {
-    const ch = p.editor[i];
-    const cls = "tile " + (ch ? { b: "gray", g: "green", y: "yellow" }[ch] : "unset");
-    const t = el("span", cls, ch ? ch.toUpperCase() : "");
-    t.title = "click to cycle: unset \u2192 gray \u2192 yellow \u2192 green";
-    t.addEventListener("click", () => {
-      const idx = CYCLE.indexOf(p.editor[i]);
-      p.editor[i] = CYCLE[(idx + 1) % CYCLE.length];
-      renderEditor();
-    });
-    box.appendChild(t);
-  }
-  document.getElementById("submit-response").disabled = p.editor.some((x) => x === null);
 }
 
 function toggleOptions() {
@@ -348,7 +343,7 @@ function toggleOptions() {
     t.title = "use this response";
     t.addEventListener("click", () => {
       app.play.editor = r.split("");
-      renderEditor();
+      renderPlay();
     });
     row.appendChild(t);
     list.appendChild(row);
@@ -359,34 +354,69 @@ function toggleOptions() {
 }
 
 // --- tree view ---
-function buildNode(node, depth, edge, parentUl) {
+//
+// Each node displays the *previous* guess, coloured by the response that led
+// to it (the edge), rather than the next guess. The root has no previous guess,
+// so it shows its own (the first guess) uncoloured. A node's own guess is
+// therefore readable from its children. When the node's guess is itself a
+// candidate, the all-green response is possible and is shown as a "solved"
+// child.
+
+// A word rendered as tiles, coloured by `response` (a b/g/y string), or
+// uncoloured when `response` is null.
+function wordTiles(word, response) {
+  const wrap = el("span", "tiles word");
+  for (let k = 0; k < word.length; k++) {
+    const cls = "tile" + (response ? " " + ({ b: "gray", g: "green", y: "yellow" }[response[k]] || "") : "");
+    wrap.appendChild(el("span", cls, word[k]));
+  }
+  return wrap;
+}
+
+function buildSolved(guess, parentUl) {
+  const li = el("li", "node-item solved");
+  const row = el("div", "node");
+  row.appendChild(el("span", "toggle leaf", "\u00b7"));
+  row.appendChild(wordTiles(guess, winString(guess.length)));
+  row.appendChild(el("span", "meta", "solved"));
+  li.appendChild(row);
+  parentUl.appendChild(li);
+  const entry = { li, ul: null, depth: 0, childKeys: [], rendered: true, guess, hasChildren: false };
+  app.allNodes.push(entry);
+}
+
+function buildNode(node, depth, parentGuess, edge, parentUl) {
   const li = el("li", "node-item");
   const row = el("div", "node");
+  const st = app.nodeStats.get(node);
   const childKeys = Object.keys(node.children).sort((a, b) => responseIndex(a) - responseIndex(b));
-  const hasChildren = childKeys.length > 0;
+  const hasWin = st ? st.hasWin : false;
+  const hasChildren = childKeys.length > 0 || hasWin;
 
   const toggle = el("button", "toggle", hasChildren ? "\u25B8" : "\u00b7");
   toggle.disabled = !hasChildren;
   if (!hasChildren) toggle.classList.add("leaf");
   row.appendChild(toggle);
-  row.appendChild(edge === null ? el("span", "edge root", "start") : tiles(edge, "edge"));
-  row.appendChild(tiles(node.guess, "letter"));
-  const st = app.nodeStats.get(node);
-  const meta = st ? `${st.exp.toFixed(2)} exp \u00b7 ${st.n} cand` : hasChildren ? "branch" : "win";
-  row.appendChild(el("span", "meta", meta));
+
+  // Root: show this node's own guess uncoloured. Otherwise: show the parent's
+  // guess coloured by the response that reached this node.
+  const word = edge === null ? node.guess : parentGuess;
+  row.appendChild(wordTiles(word, edge));
+  row.appendChild(el("span", "meta", st ? `${st.exp.toFixed(2)} exp \u00b7 ${st.n} cand` : "win"));
   li.appendChild(row);
 
   const ul = el("ul", "children");
   ul.hidden = true;
   li.appendChild(ul);
-  const entry = { li, ul, depth, childKeys, rendered: false, guess: node.guess };
+  const entry = { li, ul, depth, childKeys, rendered: false, guess: node.guess, hasChildren };
   app.allNodes.push(entry);
   li._entry = entry;
 
   toggle.addEventListener("click", (e) => {
     e.stopPropagation();
     if (!entry.rendered) {
-      for (const r of entry.childKeys) buildNode(node.children[r], depth + 1, r, ul);
+      for (const r of entry.childKeys) buildNode(node.children[r], depth + 1, node.guess, r, ul);
+      if (hasWin) buildSolved(node.guess, ul);
       entry.rendered = true;
     }
     ul.hidden = !ul.hidden;
@@ -402,17 +432,17 @@ function renderTree() {
   app.allNodes = [];
   if (!app.file) return;
   const rootUl = el("ul", "children root-children");
-  buildNode(app.file.root, 0, null, rootUl);
+  buildNode(app.file.root, 0, null, null, rootUl);
   main.appendChild(rootUl);
   applySearch();
 }
 
 function setAll(expand) {
   for (const entry of [...app.allNodes]) {
-    if (expand && !entry.rendered && entry.childKeys.length) entry.li.querySelector(".toggle").click();
+    if (expand && !entry.rendered && entry.hasChildren) entry.li.querySelector(".toggle").click();
   }
   for (const entry of app.allNodes) {
-    if (!entry.childKeys.length) continue;
+    if (!entry.hasChildren || !entry.ul) continue;
     const t = entry.li.querySelector(".toggle");
     if (expand && entry.ul.hidden) t.click();
     if (!expand && !entry.ul.hidden) t.click();
@@ -551,7 +581,7 @@ document.getElementById("file").addEventListener("change", (e) => {
 });
 
 document.getElementById("submit-response").addEventListener("click", submitResponse);
-document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = new Array(app.letters).fill(null); renderEditor(); });
+document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = new Array(app.letters).fill("b"); renderPlay(); });
 document.getElementById("options-response").addEventListener("click", toggleOptions);
 document.getElementById("back").addEventListener("click", backPlay);
 document.getElementById("reset").addEventListener("click", resetPlay);
