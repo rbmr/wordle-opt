@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wordle Policy Visualizer</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <h1>Wordle Policy Visualizer</h1>
+  <p class="sub">
+    Any wordle strategy can be visualized as a tree. Every node is a guess, and
+    every edge is a response, where the leaves of the tree (with no outgoing
+    edges) correspond to a win. You can load one of the example policy trees
+    below, or load one of your own, explore it, and use it to play a game of
+    Wordle.
+  </p>
+</header>
+
+<div class="toolbar policies" id="policy-bar">
+  <button class="policy example" data-example="optimal">Optimal</button>
+  <button class="policy example" data-example="min-remaining">Min remaining</button>
+  <button class="policy example" data-example="max-freq">Max frequency</button>
+  <button id="custom-policy" class="policy custom" hidden></button>
+  <label class="filebtn policy">Load tree
+    <input type="file" id="file" accept=".json,application/json" />
+  </label>
+</div>
+
+<div id="select-hint" class="select-hint" hidden>please select a policy</div>
+
+<div id="mode-bar" class="mode-bar" hidden>
+  <div class="segmented">
+    <button id="mode-play" class="mode active">Play</button>
+    <button id="mode-tree" class="mode">Explore</button>
+  </div>
+</div>
+
+<div id="status" class="status" hidden></div>
+
+<main>
+  <section id="play" class="pane" hidden>
+    <div class="board-wrap">
+      <div id="board" class="board"></div>
+    </div>
+
+    <div id="editor" class="editor" hidden>
+      <div class="editor-label">Click a letter of the guess above to set its response.</div>
+      <div id="editor-exp" class="editor-exp"></div>
+      <div class="editor-buttons">
+        <button id="clear-response">Clear</button>
+        <button id="submit-response" class="primary">Submit</button>
+        <button id="options-response" aria-expanded="false">Options</button>
+      </div>
+      <div id="editor-options" class="options"></div>
+    </div>
+
+    <div id="play-done" class="done" hidden></div>
+
+    <div class="play-controls">
+      <button id="back">&#8592; Back</button>
+      <button id="reset">Restart</button>
+    </div>
+    <div id="play-msg" class="play-msg"></div>
+  </section>
+
+  <section id="tree-pane" class="pane" hidden>
+    <h2 class="section-title">Statistics</h2>
+    <div class="explore-stats">
+      <div id="stats-list" class="stats-list"></div>
+      <div id="chart" class="chart"></div>
+    </div>
+
+    <h2 class="section-title">Tree visualizer</h2>
+    <div class="toolbar inner">
+      <div class="group">
+        <button id="expand-all">Expand all</button>
+        <button id="collapse-all">Collapse all</button>
+      </div>
+      <div class="group">
+        <label for="depth">Expand to depth</label>
+        <input type="range" id="depth" min="0" max="8" value="1" />
+        <span id="depth-val">1</span>
+      </div>
+      <div class="group">
+        <label for="search">Find</label>
+        <input type="search" id="search" placeholder="word" autocomplete="off" />
+      </div>
+    </div>
+    <div id="tree" class="tree"></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

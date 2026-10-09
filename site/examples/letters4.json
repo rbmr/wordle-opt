@@ -1,0 +1,259 @@
+{
+  "format": "wordle-policy-tree",
+  "version": 1,
+  "strategy": "min-remaining",
+  "dictionary_hash": "0x40d50f0c51da9351",
+  "guesses": [
+    "able",
+    "ache",
+    "acid",
+    "acre",
+    "aged",
+    "ally",
+    "also",
+    "arch",
+    "area",
+    "army",
+    "atom",
+    "away",
+    "back",
+    "bald",
+    "band",
+    "bank",
+    "barn",
+    "bath",
+    "bead",
+    "beam",
+    "bean",
+    "bear",
+    "beat",
+    "belt",
+    "bird",
+    "blue",
+    "boat",
+    "bold",
+    "bone",
+    "book",
+    "born",
+    "bowl",
+    "brew",
+    "cake",
+    "calm",
+    "card"
+  ],
+  "candidates": [
+    "able",
+    "ache",
+    "acid",
+    "acre",
+    "aged",
+    "ally",
+    "also",
+    "arch",
+    "area",
+    "army",
+    "atom",
+    "away",
+    "back",
+    "bald",
+    "band",
+    "bank",
+    "barn",
+    "bath",
+    "bead",
+    "beam",
+    "bean",
+    "bear",
+    "beat",
+    "belt",
+    "bird",
+    "blue",
+    "boat",
+    "bold",
+    "bone",
+    "book",
+    "born",
+    "bowl",
+    "brew",
+    "cake",
+    "calm",
+    "card"
+  ],
+  "root": {
+    "guess": "acre",
+    "children": {
+      "bbbb": {
+        "guess": "able",
+        "children": {
+          "bybb": {
+            "guess": "book",
+            "children": {}
+          },
+          "bygb": {
+            "guess": "bold",
+            "children": {}
+          },
+          "byyb": {
+            "guess": "bowl",
+            "children": {}
+          }
+        }
+      },
+      "gbbb": {
+        "guess": "ally",
+        "children": {
+          "gbbb": {
+            "guess": "atom",
+            "children": {}
+          },
+          "ggbb": {
+            "guess": "also",
+            "children": {}
+          },
+          "gbbg": {
+            "guess": "away",
+            "children": {}
+          }
+        }
+      },
+      "ybbb": {
+        "guess": "band",
+        "children": {
+          "ggbb": {
+            "guess": "bath",
+            "children": {}
+          },
+          "gybb": {
+            "guess": "boat",
+            "children": {}
+          },
+          "gggb": {
+            "guess": "bank",
+            "children": {}
+          },
+          "ggbg": {
+            "guess": "bald",
+            "children": {}
+          }
+        }
+      },
+      "ggbb": {
+        "guess": "acid",
+        "children": {}
+      },
+      "yybb": {
+        "guess": "able",
+        "children": {
+          "yybb": {
+            "guess": "back",
+            "children": {}
+          },
+          "ybgb": {
+            "guess": "calm",
+            "children": {}
+          }
+        }
+      },
+      "bbgb": {
+        "guess": "acid",
+        "children": {
+          "bbbb": {
+            "guess": "born",
+            "children": {}
+          },
+          "bbyg": {
+            "guess": "bird",
+            "children": {}
+          }
+        }
+      },
+      "ybgb": {
+        "guess": "barn",
+        "children": {}
+      },
+      "yygb": {
+        "guess": "card",
+        "children": {}
+      },
+      "gbyb": {
+        "guess": "army",
+        "children": {}
+      },
+      "gyyb": {
+        "guess": "arch",
+        "children": {}
+      },
+      "bbbg": {
+        "guess": "able",
+        "children": {
+          "bybg": {
+            "guess": "bone",
+            "children": {}
+          },
+          "byyg": {
+            "guess": "blue",
+            "children": {}
+          }
+        }
+      },
+      "gbbg": {
+        "guess": "able",
+        "children": {}
+      },
+      "ggbg": {
+        "guess": "ache",
+        "children": {}
+      },
+      "yybg": {
+        "guess": "cake",
+        "children": {}
+      },
+      "bbby": {
+        "guess": "belt",
+        "children": {}
+      },
+      "gbby": {
+        "guess": "aged",
+        "children": {}
+      },
+      "ybby": {
+        "guess": "atom",
+        "children": {
+          "ybbb": {
+            "guess": "acid",
+            "children": {
+              "ybbb": {
+                "guess": "bean",
+                "children": {}
+              },
+              "ybbg": {
+                "guess": "bead",
+                "children": {}
+              }
+            }
+          },
+          "yybb": {
+            "guess": "beat",
+            "children": {}
+          },
+          "ybbg": {
+            "guess": "beam",
+            "children": {}
+          }
+        }
+      },
+      "bbyy": {
+        "guess": "brew",
+        "children": {}
+      },
+      "gbyy": {
+        "guess": "area",
+        "children": {}
+      },
+      "ybyy": {
+        "guess": "bear",
+        "children": {}
+      }
+    }
+  }
+}

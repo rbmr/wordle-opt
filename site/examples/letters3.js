@@ -1,0 +1,301 @@
+window.WordleExamples=window.WordleExamples||{};window.WordleExamples["letters3"]={
+  "format": "wordle-policy-tree",
+  "version": 1,
+  "strategy": "min-remaining",
+  "dictionary_hash": "0x0c08d53bd1cf9221",
+  "guesses": [
+    "bad",
+    "bag",
+    "bat",
+    "bed",
+    "bet",
+    "big",
+    "bin",
+    "bit",
+    "box",
+    "bun",
+    "bus",
+    "cab",
+    "can",
+    "cap",
+    "car",
+    "cat",
+    "cod",
+    "cog",
+    "cop",
+    "cot",
+    "cow",
+    "cry",
+    "cup",
+    "cut",
+    "dam",
+    "day",
+    "den",
+    "dew",
+    "dig",
+    "dim",
+    "din",
+    "dip",
+    "dog",
+    "dot",
+    "dry",
+    "dug"
+  ],
+  "candidates": [
+    "bad",
+    "bag",
+    "bat",
+    "bed",
+    "bet",
+    "big",
+    "bin",
+    "bit",
+    "box",
+    "bun",
+    "bus",
+    "cab",
+    "can",
+    "cap",
+    "car",
+    "cat",
+    "cod",
+    "cog",
+    "cop",
+    "cot",
+    "cow",
+    "cry",
+    "cup",
+    "cut",
+    "dam",
+    "day",
+    "den",
+    "dew",
+    "dig",
+    "dim",
+    "din",
+    "dip",
+    "dog",
+    "dot",
+    "dry",
+    "dug"
+  ],
+  "root": {
+    "guess": "bad",
+    "children": {
+      "bbb": {
+        "guess": "cop",
+        "children": {
+          "gbb": {
+            "guess": "bat",
+            "children": {
+              "bbb": {
+                "guess": "cry",
+                "children": {}
+              },
+              "bbg": {
+                "guess": "cut",
+                "children": {}
+              }
+            }
+          },
+          "ggb": {
+            "guess": "bag",
+            "children": {
+              "bbb": {
+                "guess": "bat",
+                "children": {
+                  "bbb": {
+                    "guess": "cow",
+                    "children": {}
+                  },
+                  "bbg": {
+                    "guess": "cot",
+                    "children": {}
+                  }
+                }
+              },
+              "bbg": {
+                "guess": "cog",
+                "children": {}
+              }
+            }
+          },
+          "gbg": {
+            "guess": "cup",
+            "children": {}
+          }
+        }
+      },
+      "gbb": {
+        "guess": "bin",
+        "children": {
+          "gbb": {
+            "guess": "cot",
+            "children": {
+              "bbb": {
+                "guess": "bus",
+                "children": {}
+              },
+              "bgb": {
+                "guess": "box",
+                "children": {}
+              },
+              "bbg": {
+                "guess": "bet",
+                "children": {}
+              }
+            }
+          },
+          "ggb": {
+            "guess": "bag",
+            "children": {
+              "gbb": {
+                "guess": "bit",
+                "children": {}
+              },
+              "gbg": {
+                "guess": "big",
+                "children": {}
+              }
+            }
+          },
+          "gbg": {
+            "guess": "bun",
+            "children": {}
+          }
+        }
+      },
+      "bgb": {
+        "guess": "bat",
+        "children": {
+          "bgb": {
+            "guess": "bin",
+            "children": {
+              "bbb": {
+                "guess": "cap",
+                "children": {
+                  "ggb": {
+                    "guess": "car",
+                    "children": {}
+                  }
+                }
+              },
+              "bbg": {
+                "guess": "can",
+                "children": {}
+              }
+            }
+          },
+          "bgg": {
+            "guess": "cat",
+            "children": {}
+          }
+        }
+      },
+      "ggb": {
+        "guess": "bag",
+        "children": {
+          "ggb": {
+            "guess": "bat",
+            "children": {}
+          }
+        }
+      },
+      "ygb": {
+        "guess": "cab",
+        "children": {}
+      },
+      "bbg": {
+        "guess": "cod",
+        "children": {}
+      },
+      "gbg": {
+        "guess": "bed",
+        "children": {}
+      },
+      "bby": {
+        "guess": "big",
+        "children": {
+          "bbb": {
+            "guess": "bet",
+            "children": {
+              "bbb": {
+                "guess": "dry",
+                "children": {}
+              },
+              "bgb": {
+                "guess": "bin",
+                "children": {
+                  "bbb": {
+                    "guess": "dew",
+                    "children": {}
+                  },
+                  "bbg": {
+                    "guess": "den",
+                    "children": {}
+                  }
+                }
+              },
+              "bbg": {
+                "guess": "dot",
+                "children": {}
+              }
+            }
+          },
+          "bgb": {
+            "guess": "bin",
+            "children": {
+              "bgb": {
+                "guess": "cap",
+                "children": {
+                  "bbb": {
+                    "guess": "dim",
+                    "children": {}
+                  },
+                  "bbg": {
+                    "guess": "dip",
+                    "children": {}
+                  }
+                }
+              },
+              "bgg": {
+                "guess": "din",
+                "children": {}
+              }
+            }
+          },
+          "bbg": {
+            "guess": "box",
+            "children": {
+              "bbb": {
+                "guess": "dug",
+                "children": {}
+              },
+              "bgb": {
+                "guess": "dog",
+                "children": {}
+              }
+            }
+          },
+          "bgg": {
+            "guess": "dig",
+            "children": {}
+          }
+        }
+      },
+      "bgy": {
+        "guess": "cry",
+        "children": {
+          "bbb": {
+            "guess": "dam",
+            "children": {}
+          },
+          "bbg": {
+            "guess": "day",
+            "children": {}
+          }
+        }
+      }
+    }
+  }
+};

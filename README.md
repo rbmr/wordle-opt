@@ -75,7 +75,107 @@ cargo run --release -- full
 # Differential correctness fuzzer: compares the optimized solver against
 # an unoptimized naive reference (src/naive.rs) on random subsets
 cargo run --release -- verify
+
+# Capture a fully determined strategy as a policy tree (see "Policy trees")
+cargo run --release -- solve --strategy optimal --output tree.json
+
+# Validate any policy tree file
+cargo run --release -- validate tree.json
 ```
+
+## Policy trees
+
+A policy is a map from the set of remaining candidates to a guess. Because it
+is deterministic, the whole game under that policy is a static decision tree:
+**nodes are guesses**, **edges are responses**, and a node is terminal when its
+guess is the answer. `src/policy.rs` stores and validates such trees. A node's
+candidate set is not stored at all, since it is implied by the path of responses
+taken to reach it, which is what makes the representation compact.
+
+A tree is serialized as **readable** JSON: nested
+`{"guess": "trace", "children": {"bgybg": ...}}` with the word lists embedded,
+so the file is fully self-contained and can be validated (and rendered by the
+viewer) with no other files. It also carries a **dictionary hash**, an FNV-1a
+digest of the sorted guess and candidate lists, so a tree can never be silently
+applied to the wrong dictionary.
+
+### `solve`
+
+```bash
+wordle-opt solve \
+  --guesses words/guesses.txt \
+  --candidates words/candidates.txt \
+  --output tree.json \
+  --strategy optimal        # optimal | min-remaining | max-freq
+```
+
+Optional flags:
+
+- `--max-candidates N` - build for the first `N` candidates only (the same
+  deterministic convention the golden tests use). Add `--sample-seed S` to
+  instead draw a reproducible, representative `N`-candidate spread.
+- `--stats progress.parquet [--stats-format parquet|ndjson]` - export a small
+  **progress time series** (one row per sampled interval: nodes built, frontier
+  size, depth, cache hits, ...). Sampling is periodic and clock-gated, never
+  per node, so it cannot measurably slow a build; it is off unless `--stats`
+  is given. The Parquet file is written with `SNAPPY` compression and loads
+  directly into pandas/polars/duckdb for plotting.
+- `--no-progress` - silence the periodic stderr progress line.
+- `--cache-entries N` - transposition-table size (power of two).
+
+`solve` self-validates the tree it writes (round-tripping through the reader)
+and prints a summary. Building an `optimal` tree requires an exact solve of
+every reachable state, so for large candidate sets it is far more expensive
+than a single `full` solve - it is meant to be generated on the compute host.
+
+### `validate`
+
+```bash
+wordle-opt validate tree.json
+```
+
+Recomputes every node's candidate set from the root and checks the defining
+invariant: **at each node, an edge for a response exists if and only if that
+response is possible** for some still-reachable candidate, and each edge leads
+to exactly the subtree for the candidates that produce it. It also verifies the
+tree is a tree (each node reachable once), that leaves are wins, that every
+candidate terminates, and that the dictionary hash matches. The tree is
+self-contained, so no other files are needed.
+
+## Interactive viewer
+
+`site/` is a dependency-free static viewer, published to GitHub Pages by
+`.github/workflows/pages.yml`. It loads a readable policy tree (a bundled
+example or one of your own) and **validates it in the browser** against the same
+edge-iff-possible rule. Two views, selected once a policy is loaded:
+
+- **Play** (default): traverse the policy like the game. The current guess is
+  shown, you set the response on its letters, and it either advances, reports an
+  impossible response, or reports a solve. Back and Restart are included. Each
+  node shows its *expected guesses remaining* (computed from the fully
+  determined subtree).
+- **Explore**: two stacked blocks, the stats (a two-column table of the input
+  files and the policy, next to a bar plot of the guess-count distribution) and
+  the tree explorer (the full collapsible tree with expand/collapse, expand to
+  depth, and find).
+
+Invalid trees are rejected on load, so anything that is loaded can be assumed
+valid.
+
+The word length is taken from the tree, so it is not tied to 5 letters (there
+are 3-, 4- and 6-letter examples under `site/examples/`).
+
+Three 5-letter examples are bundled. The two heuristics are built on the full
+2340-candidate set; the `optimal` one is a 500-candidate subset for now (a
+placeholder until the full optimal tree is generated):
+
+| example | candidates | mean guesses |
+|---|---:|---:|
+| `optimal` | 500 | 2.898 |
+| `min-remaining` | 2340 | 3.659 |
+| `max-freq` | 2340 | 4.079 |
+
+See `site/examples/README.md` for the exact commands that generated them.
 
 ### Running on a remote compute host
 

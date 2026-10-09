@@ -19,9 +19,17 @@ impl Dictionary {
     /// Automatically normalizes words to lowercase, ignores words that aren't exactly 5 letters,
     /// deduplicates, and importantly, guarantees that every candidate word is present in the `guesses` list.
     pub fn load<P1: AsRef<Path>, P2: AsRef<Path>>(guesses_path: P1, candidates_path: P2) -> Self {
-        let mut guesses = Self::read_words(guesses_path);
-        let mut candidates = Self::read_words(candidates_path);
+        let guesses = Self::read_words(guesses_path);
+        let candidates = Self::read_words(candidates_path);
+        Self::from_words(guesses, candidates)
+    }
 
+    /// Builds a dictionary from in-memory word lists, applying the same
+    /// normalization as [`Dictionary::load`]: lowercase is assumed, both lists
+    /// are sorted and deduplicated, and every candidate is guaranteed to also
+    /// be present in the guess list. Used to reconstruct the dictionary
+    /// embedded in a readable policy tree.
+    pub fn from_words(mut guesses: Vec<Word>, mut candidates: Vec<Word>) -> Self {
         guesses.sort();
         guesses.dedup();
         candidates.sort();
