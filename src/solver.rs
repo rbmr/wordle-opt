@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 /// The hash key represents the `set_hash` (a 64-bit Zobrist hash of the exact candidate set).
 /// The mapped value is the exact deduplicated projection of all valid guesses,
 /// deduplicated by a Zobrist hash of the responses they produce.
-pub type EquivCache = [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 1024];
+pub type EquivCache =
+    [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 1024];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -67,7 +68,7 @@ impl Metrics {
 static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 
 pub struct SolverScratch {
-    pub scratch_is_in_set: [Vec<bool>; 32],
+    pub scratch_is_in_set: [Vec<u64>; 32],
     pub scratch_guesses: [Vec<usize>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
     pub scratch_phase1_guesses: [Vec<usize>; 32],
@@ -106,7 +107,7 @@ pub struct Solver<'a> {
     equiv_cache: &'a EquivCache,
     pub current_cost_so_far: u32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
-    pub scratch_is_in_set: [Vec<bool>; 32],
+    pub scratch_is_in_set: [Vec<u64>; 32],
     scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
@@ -295,7 +296,9 @@ impl<'a> Solver<'a> {
             .with(|ts| ts.borrow_mut().take())
             .unwrap_or_else(|| {
                 Box::new(SolverScratch {
-                    scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.guesses.len()]),
+                    scratch_is_in_set: std::array::from_fn(|_| {
+                        vec![0u64; dict.guesses.len().div_ceil(64)]
+                    }),
                     scratch_guesses: std::array::from_fn(|_| Vec::new()),
                     scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
                     scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
@@ -677,10 +680,7 @@ impl<'a> Solver<'a> {
         let mut phase2_guesses = std::mem::take(&mut self.scratch_phase2_guesses[depth]);
         phase2_guesses.clear();
 
-        let mut set_hash = 0u64;
-        for &c in set {
-            set_hash ^= self.matrix.zobrist[c];
-        }
+        let set_hash = hash;
 
         let should_cache_equiv = set.len() >= 10;
         let shard_idx = (set_hash as usize) % 1024;
@@ -848,28 +848,37 @@ impl<'a> Solver<'a> {
         let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
         for &c in set {
             let g = self.dict.candidate_to_guess[c];
-            is_in_set[g] = true;
+            is_in_set[g / 64] |= 1 << (g % 64);
         }
 
         for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-            let mut b = block;
+            if block == 0 {
+                continue;
+            }
+            let p1_block = block & is_in_set[block_idx];
+            let p2_block = block & !is_in_set[block_idx];
+
+            let mut b = p1_block;
             while b != 0 {
                 let tz = b.trailing_zeros();
                 let g = block_idx * 64 + tz as usize;
-
                 active_guesses.push(g);
-                if is_in_set[g] {
-                    phase1_guesses.push(g);
-                } else {
-                    phase2_guesses.push(g);
-                }
+                phase1_guesses.push(g);
+                b &= b - 1;
+            }
 
+            let mut b = p2_block;
+            while b != 0 {
+                let tz = b.trailing_zeros();
+                let g = block_idx * 64 + tz as usize;
+                active_guesses.push(g);
+                phase2_guesses.push(g);
                 b &= b - 1;
             }
         }
         for &c in set {
             let g = self.dict.candidate_to_guess[c];
-            is_in_set[g] = false;
+            is_in_set[g / 64] = 0;
         }
         self.scratch_is_in_set[depth] = is_in_set;
         self.scratch_active_bits[depth] = active_bits_scratch;
