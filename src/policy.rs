@@ -1585,16 +1585,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn optimal_tree_cost_matches_solver() {
-        let dict = real_dict(10);
+    /// Builds the exact optimal tree for the deterministic first-N candidate
+    /// subset (the same convention the golden solver tests in `solver.rs`
+    /// use), validates it, and returns the report plus what the caller needs
+    /// to re-derive the solver's optimum for the same subset.
+    fn build_and_validate_optimal_tree(n: usize) -> (Dictionary, ResponseMatrix, ValidationReport) {
+        let dict = real_dict(n);
         let matrix = ResponseMatrix::new(&dict);
-        let root: Vec<usize> = (0..dict.candidates.len()).collect();
-        let metrics = Metrics::new();
-        let equiv: EquivCache =
-            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        let solver_cost = Solver::solve(&matrix, &root, &dict, &metrics, &equiv);
-
+        let root: Vec<usize> = (0..n).collect();
         let opts = BuildOptions {
             progress: false,
             ..Default::default()
@@ -1602,11 +1600,31 @@ mod tests {
         let (tree, stats) =
             build_policy_tree(&matrix, &dict, Strategy::Optimal, &root, &opts).unwrap();
         let report = tree.validate(&matrix, &dict).unwrap();
-        assert_eq!(
-            report.total_cost, solver_cost as u64,
-            "optimal policy tree total cost must equal the solver's optimal cost"
-        );
-        assert_eq!(stats.summary.total_cost, solver_cost as u64);
+        assert_eq!(report.wins, n as u64);
+        assert_eq!(stats.summary.total_cost, report.total_cost);
+        (dict, matrix, report)
+    }
+
+    /// The exact correctness criterion for an optimal tree: it must be valid
+    /// (every candidate terminates, and an edge exists iff its response is
+    /// possible) and its total cost must equal the solver's exact optimal
+    /// cost. Together those imply optimality, since no strategy can beat the
+    /// solver's optimum. Checked at a non-trivial size as well as a tiny one,
+    /// because a depth-3 tree exercises partitioning the tiny case does not.
+    #[test]
+    fn optimal_tree_cost_matches_solver() {
+        for n in [10, 100] {
+            let (dict, matrix, report) = build_and_validate_optimal_tree(n);
+            let root: Vec<usize> = (0..n).collect();
+            let metrics = Metrics::new();
+            let equiv: EquivCache =
+                std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
+            let solver_cost = Solver::solve(&matrix, &root, &dict, &metrics, &equiv);
+            assert_eq!(
+                report.total_cost, solver_cost as u64,
+                "optimal policy tree total cost must equal the solver's optimal cost at N={n}"
+            );
+        }
     }
 
     #[test]
