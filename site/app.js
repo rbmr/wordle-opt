@@ -61,7 +61,17 @@ function resetPlay() {
     editor: new Array(app.letters).fill("b"),
     userWin: false,
   };
+  autoFillIfSingleCandidate();
   renderPlay();
+}
+
+// With one candidate left, the all-green response is the only possible one, so
+// pre-fill it as a convenience. It is still just a response: the win happens
+// only when Submit is clicked, and the letters stay clickable so an impossible
+// response can still be tried (Submit then reports it as usual).
+function autoFillIfSingleCandidate() {
+  const p = app.play;
+  if (currentPlay().candidates.length === 1) p.editor = app.win.split("");
 }
 
 function currentPlay() {
@@ -81,17 +91,21 @@ function submitResponse() {
     return;
   }
   if (r === app.win) {
-    // The current guess is the answer. Do not push a response: the guess is
-    // already on the board, so renderPlay just colours it green.
+    // The all-green response wins: this is a state of its own, reached only by
+    // submitting it. Do not push a response - the guess is already on the
+    // board, so renderPlay colours it green and the solved line counts it.
     p.userWin = true;
     setPlayMsg("");
     renderPlay();
+    // The confetti button now sits exactly where Submit was; fire from there.
+    launchConfetti(document.getElementById("confetti"));
     return;
   }
   const child = cur.node.children[r];
   p.responses.push(r);
   p.nodes.push({ node: child, candidates: map.get(r) });
   p.editor = new Array(app.letters).fill("b");
+  autoFillIfSingleCandidate();
   setPlayMsg("");
   renderPlay();
 }
@@ -99,16 +113,20 @@ function submitResponse() {
 function backPlay() {
   const p = app.play;
   if (p.userWin) {
+    // Leave the win state: keep the winning guess on the board with the
+    // all-green response still filled in, so a typo can be corrected.
     p.userWin = false;
-    p.editor = new Array(app.letters).fill("b");
+    p.editor = app.win.split("");
     setPlayMsg("");
     renderPlay();
     return;
   }
   if (p.responses.length === 0) return;
-  p.responses.pop();
+  // Restore the response that was submitted for this guess, so Back is an edit
+  // of the previous answer rather than starting it over.
+  const r = p.responses.pop();
   p.nodes.pop();
-  p.editor = new Array(app.letters).fill("b");
+  p.editor = r.split("");
   setPlayMsg("");
   renderPlay();
 }
@@ -135,18 +153,18 @@ function renderPlay() {
   }
 
   // Current row: the guess itself is the response selector. Each letter starts
-  // gray and cycles gray -> yellow -> green on click.
+  // gray and cycles gray -> yellow -> green on click. In the win state the row
+  // is shown all green and the letters are no longer clickable.
   const cur = currentPlay();
-  const isLeaf = Object.keys(cur.node.children).length === 0;
-  const solved = p.userWin || isLeaf;
+  const won = p.userWin;
   const row = el("div", "row");
   for (let k = 0; k < app.letters; k++) {
     const ch = p.editor[k];
-    const cls = solved
+    const cls = won
       ? "tile green"
       : "tile clickable " + { b: "gray", g: "green", y: "yellow" }[ch];
     const t = el("span", cls, cur.node.guess[k]);
-    if (!solved) {
+    if (!won) {
       t.title = "click to cycle the response: gray \u2192 yellow \u2192 green";
       t.addEventListener("click", () => {
         const idx = CYCLE.indexOf(p.editor[k]);
@@ -158,19 +176,38 @@ function renderPlay() {
   }
   board.appendChild(row);
 
-  // Editor (buttons only - the response is set on the guess above).
+  // Editor. Playing and won use the same two blocks (text, then buttons) with
+  // the same dimensions, so the controls below never move and the confetti
+  // button lands exactly where Submit was.
   const editor = document.getElementById("editor");
-  const done = document.getElementById("play-done");
-  if (solved) {
-    editor.hidden = true;
-    done.hidden = false;
+  const hint = document.getElementById("editor-hint");
+  const exp = document.getElementById("editor-exp");
+  const solved = document.getElementById("editor-solved");
+  const clear = document.getElementById("clear-response");
+  const submit = document.getElementById("submit-response");
+  const options = document.getElementById("options-response");
+  const confetti = document.getElementById("confetti");
+  editor.hidden = false;
+  if (won) {
+    hint.hidden = true;
+    exp.hidden = true;
+    solved.hidden = false;
     const n = p.responses.length + 1;
-    done.textContent = `\u2713 ${cur.node.guess.toUpperCase()}, solved in ${n} guess${n === 1 ? "" : "es"}`;
+    solved.textContent = `\u2713 ${cur.node.guess.toUpperCase()}, solved in ${n} guess${n === 1 ? "" : "es"}`;
+    clear.hidden = true;
+    submit.hidden = true;
+    options.hidden = true;
+    confetti.hidden = false;
   } else {
-    editor.hidden = false;
-    done.hidden = true;
+    hint.hidden = false;
+    exp.hidden = false;
+    solved.hidden = true;
+    clear.hidden = false;
+    submit.hidden = false;
+    options.hidden = false;
+    confetti.hidden = true;
     const st = app.nodeStats.get(cur.node);
-    document.getElementById("editor-exp").textContent = st
+    exp.textContent = st
       ? `${st.exp.toFixed(2)} expected guesses remaining \u00b7 ${st.n} candidate${st.n === 1 ? "" : "s"}`
       : "";
   }
@@ -178,7 +215,64 @@ function renderPlay() {
   const opts = document.getElementById("editor-options");
   opts.hidden = true;
   opts.textContent = "";
-  document.getElementById("options-response").setAttribute("aria-expanded", "false");
+  options.setAttribute("aria-expanded", "false");
+}
+
+// --- confetti ---
+// A tiny dependency-free burst, launched from the centre of `originEl` (the
+// confetti button, which sits where Submit was). Clicking it repeatedly just
+// spawns more bursts.
+function launchConfetti(originEl) {
+  const rect = originEl.getBoundingClientRect();
+  const canvas = el("canvas", "confetti-canvas");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  const colors = ["#e5484d", "#f5a524", "#46a758", "#3b82f6", "#a855f7", "#ec4899"];
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const parts = [];
+  for (let i = 0; i < 150; i++) {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.8;
+    const speed = 5 + Math.random() * 10;
+    parts.push({
+      x: cx,
+      y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      w: 3 + Math.random() * 2,
+      h: 4 + Math.random() * 3,
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.35,
+      color: colors[(Math.random() * colors.length) | 0],
+    });
+  }
+  let frames = 0;
+  function frame() {
+    frames++;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = Math.max(0, 1 - frames / 160);
+    let onScreen = 0;
+    for (const q of parts) {
+      q.vy += 0.3;
+      q.vx *= 0.995;
+      q.x += q.vx;
+      q.y += q.vy;
+      q.rot += q.vr;
+      if (q.y < canvas.height + 40) onScreen++;
+      ctx.save();
+      ctx.translate(q.x, q.y);
+      ctx.rotate(q.rot);
+      ctx.fillStyle = q.color;
+      ctx.fillRect(-q.w / 2, -q.h / 2, q.w, q.h);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    if (onScreen > 0 && frames < 200) requestAnimationFrame(frame);
+    else canvas.remove();
+  }
+  requestAnimationFrame(frame);
 }
 
 function toggleOptions() {
@@ -192,10 +286,12 @@ function toggleOptions() {
   }
   const cur = currentPlay();
   const map = candidatesMap(app.file, cur.node, cur.candidates);
-  const keys = [...map.keys()].filter((r) => r !== app.win).sort((a, b) => responseIndex(a) - responseIndex(b));
+  // Every possible response, including the all-green one when the win is
+  // available here: picking it just fills it in like any other response, and
+  // Submit is still what actually wins.
+  const keys = [...map.keys()].sort((a, b) => responseIndex(a) - responseIndex(b));
   box.textContent = "";
-  const winPossible = map.has(app.win);
-  box.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}${winPossible ? " (or the win)" : ""}. Click one:`));
+  box.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}. Click one:`));
   const list = el("div", "options-list");
   for (const r of keys) {
     const row = el("div", "option-row");
@@ -506,6 +602,7 @@ document.getElementById("file").addEventListener("change", (e) => {
 document.getElementById("submit-response").addEventListener("click", submitResponse);
 document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = new Array(app.letters).fill("b"); renderPlay(); });
 document.getElementById("options-response").addEventListener("click", toggleOptions);
+document.getElementById("confetti").addEventListener("click", (e) => launchConfetti(e.currentTarget));
 document.getElementById("back").addEventListener("click", backPlay);
 document.getElementById("reset").addEventListener("click", resetPlay);
 
