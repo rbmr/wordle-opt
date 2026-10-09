@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 /// The hash key represents the `set_hash` (a 64-bit Zobrist hash of the exact candidate set).
 /// The mapped value is the exact deduplicated projection of all valid guesses,
 /// deduplicated by a Zobrist hash of the responses they produce.
-pub type EquivCache = [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 64];
+pub type EquivCache = [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 1024];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -683,7 +683,7 @@ impl<'a> Solver<'a> {
         }
 
         let should_cache_equiv = set.len() >= 10;
-        let shard_idx = (set_hash as usize) % 64;
+        let shard_idx = (set_hash as usize) % 1024;
         let mut active_bits_scratch = std::mem::take(&mut self.scratch_active_bits[depth]);
         let rc_opt = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
@@ -1540,7 +1540,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..800).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1557,7 +1557,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..100).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1572,7 +1572,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..500).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1593,7 +1593,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..750).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1608,7 +1608,7 @@ mod tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates: Vec<usize> = (0..250).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(
@@ -1625,7 +1625,7 @@ mod tests {
         let mut results = Vec::new();
         for _ in 0..5 {
             let metrics = Metrics::new();
-            let equiv_cache: [_; 64] =
+            let equiv_cache: [_; 1024] =
                 std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
             results.push(Solver::solve(
                 &matrix,
@@ -1649,7 +1649,7 @@ mod tests {
         // Use a small set that will definitely trigger some EquivCache hits/misses.
         // N=100 might not trigger hits if it's too small, but misses will definitely happen.
         let candidates: Vec<usize> = (0..100).collect();
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let _cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
 
@@ -1682,7 +1682,7 @@ mod solver_cache_tests {
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let candidates = vec![];
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(cost, 0);

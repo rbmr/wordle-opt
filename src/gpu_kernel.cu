@@ -73,6 +73,13 @@ void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bou
 
 } // extern "C"
 
+/*
+ * gpu_compute_phase1_kernel is optimized for memory coalescing.
+ * The inner loop accesses g_matrix[c * 14855 + g].
+ * For a given iteration `i`, all threads in a block read the same `c`.
+ * Since `g` is (mostly) contiguous across threads in a warp, threads will access
+ * adjacent memory addresses, resulting in coalesced memory reads.
+ */
 __global__ void gpu_compute_phase1_kernel(
     const uint16_t* active_guesses,
     int num_active,

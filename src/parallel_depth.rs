@@ -178,7 +178,7 @@ mod tests {
         let matrix = ResponseMatrix::new(&dict);
         let metrics = Metrics::new();
         let global_cache = GlobalCache::new(1024);
-        let equiv_cache: [_; 64] =
+        let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| RwLock::new(rustc_hash::FxHashMap::default()));
         let beta = AtomicU32::new(100);
         let active_guesses: Vec<usize> = vec![0, 1, 2];
@@ -209,7 +209,7 @@ fn test_parallel_depth2_prunes_early() {
     let matrix = ResponseMatrix::new(&dict);
     let metrics = Metrics::new();
     let global_cache = GlobalCache::new(1024);
-    let equiv_cache: [_; 64] =
+    let equiv_cache: [_; 1024] =
         std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
     // Beta is 0! It should do zero real work.
