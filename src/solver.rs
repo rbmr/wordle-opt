@@ -898,6 +898,7 @@ impl<'a> Solver<'a> {
 
         let mut local_max_k = 0;
         let mut valid_max_k = 0;
+        let mut min_val_found = u32::MAX;
 
         #[cfg(cuda_enabled)]
         let use_gpu1 = (phase1_guesses.len() * set.len()) > 50000;
@@ -957,6 +958,8 @@ impl<'a> Solver<'a> {
                                     valid_max_k = num_non_empty;
                                 }
                                 phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                            } else {
+                                min_val_found = min_val_found.min(lb_cost);
                             }
                         }
                     }
@@ -1004,6 +1007,8 @@ impl<'a> Solver<'a> {
                             valid_max_k = num_non_empty;
                         }
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
             } else {
@@ -1043,6 +1048,8 @@ impl<'a> Solver<'a> {
                             valid_max_k = num_non_empty;
                         }
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
             }
@@ -1051,6 +1058,7 @@ impl<'a> Solver<'a> {
 
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
             if g_lb >= best_val {
+                min_val_found = min_val_found.min(g_lb);
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1058,6 +1066,7 @@ impl<'a> Solver<'a> {
             }
             let val =
                 self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
+            min_val_found = min_val_found.min(val);
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -1125,6 +1134,8 @@ impl<'a> Solver<'a> {
                                 }
                                 if lb_cost < best_val {
                                     phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                                } else {
+                                    min_val_found = min_val_found.min(lb_cost);
                                 }
                             }
                         }
@@ -1172,6 +1183,8 @@ impl<'a> Solver<'a> {
                         }
                         if lb_cost < best_val {
                             phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
                         }
                     }
                 } else {
@@ -1211,6 +1224,8 @@ impl<'a> Solver<'a> {
                         }
                         if lb_cost < best_val {
                             phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
                         }
                     }
                 }
@@ -1234,6 +1249,7 @@ impl<'a> Solver<'a> {
             } else {
                 for &(_g, _, g_lb, _non_empty) in &phase2_tuples {
                     if g_lb >= best_val {
+                        min_val_found = min_val_found.min(g_lb);
                         self.metrics
                             .pruned_by_bounds
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1247,6 +1263,7 @@ impl<'a> Solver<'a> {
                         depth,
                         local_max_k,
                     );
+                    min_val_found = min_val_found.min(val);
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -1267,11 +1284,15 @@ impl<'a> Solver<'a> {
         let is_exact = best_val < beta;
         if is_exact {
             self.cache.insert(hash, best_val, true);
+            best_val
         } else {
-            self.cache.insert(hash, beta, false);
+            let mut final_lb = beta.max(local_lb);
+            if best_val > local_lb && min_val_found != u32::MAX {
+                final_lb = final_lb.max(min_val_found);
+            }
+            self.cache.insert(hash, final_lb, false);
+            final_lb
         }
-
-        best_val
     }
     /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
     ///
