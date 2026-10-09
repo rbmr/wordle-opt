@@ -295,7 +295,7 @@ impl<'a> Solver<'a> {
             .with(|ts| ts.borrow_mut().take())
             .unwrap_or_else(|| {
                 Box::new(SolverScratch {
-                    scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.candidates.len()]),
+                    scratch_is_in_set: std::array::from_fn(|_| vec![false; dict.guesses.len()]),
                     scratch_guesses: std::array::from_fn(|_| Vec::new()),
                     scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
                     scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
@@ -848,7 +848,8 @@ impl<'a> Solver<'a> {
         // Fast set-membership check
         let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
         for &c in set {
-            is_in_set[c] = true;
+            let g = self.dict.candidate_to_guess[c];
+            is_in_set[g] = true;
         }
 
         for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
@@ -858,13 +859,7 @@ impl<'a> Solver<'a> {
                 let g = block_idx * 64 + tz as usize;
 
                 active_guesses.push(g);
-                let c_idx = self.dict.guess_to_candidate[g];
-                let in_set = if c_idx != u16::MAX {
-                    is_in_set[c_idx as usize]
-                } else {
-                    false
-                };
-                if in_set {
+                if is_in_set[g] {
                     phase1_guesses.push(g);
                 } else {
                     phase2_guesses.push(g);
@@ -874,7 +869,8 @@ impl<'a> Solver<'a> {
             }
         }
         for &c in set {
-            is_in_set[c] = false;
+            let g = self.dict.candidate_to_guess[c];
+            is_in_set[g] = false;
         }
         self.scratch_is_in_set[depth] = is_in_set;
         self.scratch_active_bits[depth] = active_bits_scratch;
