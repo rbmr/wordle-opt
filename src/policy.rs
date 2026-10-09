@@ -1099,7 +1099,7 @@ pub fn build_policy_tree(
             optimal = OptimalPolicy::new(
                 matrix,
                 dict,
-                &metrics,
+                metrics,
                 &global_cache,
                 &equiv_cache,
                 &capacity_bounds_2d,
