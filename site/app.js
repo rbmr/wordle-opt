@@ -517,10 +517,7 @@ function renderChart() {
   for (let d = 0; d < hist.length; d++) if (hist[d]) counts.push([d + 1, hist[d]]);
   if (counts.length === 0) return;
   const maxCount = Math.max(...counts.map(([, c]) => c));
-  const s = app.report.stats;
-  box.appendChild(
-    el("div", "chart-title", `Guess-count distribution (${s.candidates.toLocaleString()} candidates, mean ${s.meanGuesses.toFixed(3)})`)
-  );
+  box.appendChild(el("div", "chart-title", "Guess-count distribution"));
   const bars = el("div", "chart-bars");
   for (const [guesses, count] of counts) {
     const col = el("div", "chart-col");
