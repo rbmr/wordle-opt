@@ -1140,7 +1140,7 @@ impl<'a> Solver<'a> {
                                 if num_non_empty > local_max_k {
                                     local_max_k = num_non_empty;
                                 }
-                                if lb_cost < beta && num_non_empty > valid_max_k {
+                                if num_non_empty > valid_max_k {
                                     valid_max_k = num_non_empty;
                                 }
                                 if lb_cost < best_val {
@@ -1192,7 +1192,7 @@ impl<'a> Solver<'a> {
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
                         }
-                        if lb_cost < beta && num_non_empty > valid_max_k {
+                        if num_non_empty > valid_max_k {
                             valid_max_k = num_non_empty;
                         }
                         if lb_cost < best_val {
@@ -1237,7 +1237,7 @@ impl<'a> Solver<'a> {
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
                         }
-                        if lb_cost < beta && num_non_empty > valid_max_k {
+                        if num_non_empty > valid_max_k {
                             valid_max_k = num_non_empty;
                         }
                         if lb_cost < best_val {
