@@ -2,13 +2,13 @@
 
 Example policy trees for the viewer. The two heuristics cover the **full**
 2340-candidate set with the full 14,855-word guess list. The `optimal` one is a
-500-candidate subset for now. It is a placeholder, since the full optimal tree
+1000-candidate subset for now. It is a placeholder, since the full optimal tree
 needs an exact solve of every reachable state, which is much more expensive
 than the single `full` cost run.
 
 | file | strategy | candidates | nodes | max depth | total cost | mean guesses |
 |------|----------|-----------:|------:|----------:|-----------:|-------------:|
-| `optimal.json` | `optimal` | 500 | 524 | 3 | 1449 | 2.898 |
+| `optimal.json` | `optimal` | 1000 | 1049 | 3 | 3121 | 3.121 |
 | `min-remaining.json` | `min-remaining` | 2340 | 2934 | 4 | 8561 | 3.659 |
 | `max-freq.json` | `max-freq` | 2340 | 2908 | 8 | 9545 | 4.079 |
 
@@ -21,9 +21,10 @@ for s in min-remaining max-freq; do
     --output "site/examples/$s.json" --no-progress
 done
 
-# optimal: placeholder 500-candidate subset, a reproducible random draw
+# optimal: placeholder 1000-candidate subset (the deterministic first-1000
+# convention the golden tests and `benchmark` use)
 cargo run --release -- solve --strategy optimal \
-  --max-candidates 500 --sample-seed 20261008 \
+  --max-candidates 1000 \
   --output site/examples/optimal.json --no-progress
 ```
 
@@ -44,9 +45,10 @@ for n in optimal min-remaining max-freq; do
 done
 ```
 
-The optimal placeholder's total cost (1449) was independently cross-checked
-against the exact solver on the identical subset
-(`wordle-opt diagnose -n 500 -s 20261008` gives cost 1449).
+The optimal placeholder's total cost (3121) is independently cross-checked
+against the exact solver on the identical subset: `solve --compare` runs the
+cost-only solve and the tree build on the same candidates and refuses to
+report if the two disagree.
 
 ## Other word lengths
 
