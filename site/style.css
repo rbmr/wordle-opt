@@ -100,8 +100,10 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 .response-tiles .tile { cursor: pointer; }
 .response-tiles .tile.unset { border-style: dashed; color: var(--muted); background: #fff; }
 .editor-buttons { display: flex; gap: 8px; }
-.hint { color: var(--muted); font-size: 13px; min-height: 18px; text-align: center; }
-.hint code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.options { color: var(--muted); font-size: 13px; min-height: 18px; text-align: center; }
+.options code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.options-list { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 6px; }
+.option-row { display: flex; }
 
 .done {
   text-align: center; font-size: 18px; color: var(--ok); font-weight: 600;

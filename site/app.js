@@ -54,6 +54,9 @@ function wordLength(file) {
   return sample.length;
 }
 
+// Editor tile states, cycled on click: unset -> gray -> yellow -> green -> unset.
+const CYCLE = [null, "b", "y", "g"];
+
 // --- validation (shared by both views; drives the stats + badge) ---
 function validateTree(file) {
   const errors = [];
@@ -297,7 +300,7 @@ function renderPlay() {
     renderEditor();
   }
   document.getElementById("back").disabled = p.responses.length === 0;
-  document.getElementById("editor-hint").textContent = "";
+  document.getElementById("editor-options").textContent = "";
 }
 
 function renderEditor() {
@@ -319,20 +322,17 @@ function renderEditor() {
   document.getElementById("submit-response").disabled = p.editor.some((x) => x === null);
 }
 
-function showHint() {
+function showOptions() {
   const cur = currentPlay();
   const map = candidatesMap(app.file, cur.node, cur.candidates);
   const keys = [...map.keys()].filter((r) => r !== app.win).sort((a, b) => responseIndex(a) - responseIndex(b));
-  const hint = document.getElementById("editor-hint");
-  hint.textContent = "";
+  const box = document.getElementById("editor-options");
+  box.textContent = "";
   const winPossible = map.has(app.win);
-  hint.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}${winPossible ? " (or the win)" : ""} \u2014 click one:`));
-  const list = el("div", "hint-list");
-  list.style.display = "flex";
-  list.style.flexWrap = "wrap";
-  list.style.gap = "6px";
-  list.style.justifyContent = "center";
+  box.appendChild(el("div", "", `${keys.length} possible response${keys.length === 1 ? "" : "s"}${winPossible ? " (or the win)" : ""} \u2014 click one:`));
+  const list = el("div", "options-list");
   for (const r of keys) {
+    const row = el("div", "option-row");
     const t = tiles(r, "", "");
     t.style.cursor = "pointer";
     t.title = "use this response";
@@ -340,9 +340,10 @@ function showHint() {
       app.play.editor = r.split("");
       renderEditor();
     });
-    list.appendChild(t);
+    row.appendChild(t);
+    list.appendChild(row);
   }
-  hint.appendChild(list);
+  box.appendChild(list);
 }
 
 // --- tree view ---
@@ -440,10 +441,15 @@ function showStats(file, report) {
   badge.appendChild(el("span", "v", report.ok ? "\u2713 valid" : "\u2717 " + report.errors.length + " problem(s)"));
   box.appendChild(badge);
   const status = document.getElementById("status");
-  status.className = "status " + (report.ok ? "ok" : "bad");
-  status.textContent = report.ok
-    ? `Validated ${s.nodes.toLocaleString()} nodes / ${s.candidates.toLocaleString()} candidates \u2014 every edge corresponds to a possible response.`
-    : "INVALID \u2014 " + report.errors[0];
+  if (report.ok) {
+    // Nothing to report on a valid tree - the stats bar carries the badge.
+    status.hidden = true;
+    status.textContent = "";
+  } else {
+    status.hidden = false;
+    status.className = "status bad";
+    status.textContent = "INVALID \u2014 " + report.errors[0];
+  }
 }
 
 function setMode(mode) {
@@ -457,6 +463,7 @@ function setMode(mode) {
 
 function loadFile(file) {
   const status = document.getElementById("status");
+  status.hidden = false;
   if (file.format !== "wordle-policy-tree") {
     status.className = "status bad";
     status.textContent = `Not a readable policy tree (format = ${file.format || "missing"}).`;
@@ -486,6 +493,7 @@ function loadFile(file) {
 // a sibling file is blocked by the browser.
 function loadExample(name) {
   const status = document.getElementById("status");
+  status.hidden = false;
   status.className = "status";
   status.textContent = `Loading ${name}\u2026`;
   const existing = window.WordleExamples && window.WordleExamples[name];
@@ -522,6 +530,7 @@ document.getElementById("file").addEventListener("change", (e) => {
     try { loadFile(JSON.parse(reader.result)); }
     catch (err) {
       const status = document.getElementById("status");
+      status.hidden = false;
       status.className = "status bad";
       status.textContent = "Could not parse JSON: " + err.message;
     }
@@ -531,7 +540,7 @@ document.getElementById("file").addEventListener("change", (e) => {
 
 document.getElementById("submit-response").addEventListener("click", submitResponse);
 document.getElementById("clear-response").addEventListener("click", () => { app.play.editor = new Array(app.letters).fill(null); renderEditor(); });
-document.getElementById("hint-response").addEventListener("click", showHint);
+document.getElementById("options-response").addEventListener("click", showOptions);
 document.getElementById("back").addEventListener("click", backPlay);
 document.getElementById("reset").addEventListener("click", resetPlay);
 
