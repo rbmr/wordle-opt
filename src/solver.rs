@@ -931,10 +931,10 @@ impl<'a> Solver<'a> {
                             if num_non_empty > local_max_k {
                                 local_max_k = num_non_empty;
                             }
+                            if num_non_empty > valid_max_k {
+                                valid_max_k = num_non_empty;
+                            }
                             if lb_cost < beta {
-                                if num_non_empty > valid_max_k {
-                                    valid_max_k = num_non_empty;
-                                }
                                 phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                             } else {
                                 min_val_found = min_val_found.min(lb_cost);
@@ -980,10 +980,10 @@ impl<'a> Solver<'a> {
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     } else {
                         min_val_found = min_val_found.min(lb_cost);
@@ -1022,10 +1022,10 @@ impl<'a> Solver<'a> {
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
                     if lb_cost < beta {
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     } else {
                         min_val_found = min_val_found.min(lb_cost);
