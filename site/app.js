@@ -514,9 +514,13 @@ function renderChart() {
   if (!app.report) return;
   const hist = app.report.stats.depthHistogram; // hist[d] = wins at tree depth d
   const counts = [];
-  for (let d = 0; d < hist.length; d++) if (hist[d]) counts.push([d + 1, hist[d]]);
+  for (let d = 0; d < hist.length; d++) {
+    // Always show the "1 guess" bar (depth 0), even at zero, so the axis
+    // starts there.
+    if (d === 0 || hist[d]) counts.push([d + 1, hist[d] || 0]);
+  }
   if (counts.length === 0) return;
-  const maxCount = Math.max(...counts.map(([, c]) => c));
+  const maxCount = Math.max(1, ...counts.map(([, c]) => c));
   box.appendChild(el("div", "chart-title", "Guess-count distribution"));
   const bars = el("div", "chart-bars");
   for (const [guesses, count] of counts) {
