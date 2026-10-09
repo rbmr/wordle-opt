@@ -1,14 +1,13 @@
 # Example policy trees
 
-Example policy trees for the viewer. The two heuristics cover the **full**
-2340-candidate set with the full 14,855-word guess list. The `optimal` one is a
-1000-candidate subset for now. It is a placeholder, since the full optimal tree
-needs an exact solve of every reachable state, which is much more expensive
-than the single `full` cost run.
+Example policy trees for the viewer. All three cover the **full**
+2340-candidate set with the full 14,855-word guess list: `optimal` is the exact
+optimum (total cost 8001), and the two heuristics are cheaper policies included
+for comparison.
 
 | file | strategy | candidates | nodes | max depth | total cost | mean guesses |
 |------|----------|-----------:|------:|----------:|-----------:|-------------:|
-| `optimal.json` | `optimal` | 1000 | 1049 | 3 | 3121 | 3.121 |
+| `optimal.json` | `optimal` | 2340 | 2478 | 5 | 8001 | 3.419 |
 | `min-remaining.json` | `min-remaining` | 2340 | 2934 | 4 | 8561 | 3.659 |
 | `max-freq.json` | `max-freq` | 2340 | 2908 | 8 | 9545 | 4.079 |
 
@@ -21,11 +20,9 @@ for s in min-remaining max-freq; do
     --output "site/examples/$s.json" --no-progress
 done
 
-# optimal: placeholder 1000-candidate subset (the deterministic first-1000
-# convention the golden tests and `benchmark` use)
-cargo run --release -- solve --strategy optimal \
-  --max-candidates 1000 \
-  --output site/examples/optimal.json --no-progress
+# optimal: the full tree, written by the `full` run on the compute host (see
+# the main README's "Running the actual full N=2340 solve"); copy it in from
+# ~/optimal-2340.json there.
 ```
 
 Each file embeds the guess and candidate lists, so it is self-contained: the
@@ -45,10 +42,11 @@ for n in optimal min-remaining max-freq; do
 done
 ```
 
-The optimal placeholder's total cost (3121) is independently cross-checked
-against the exact solver on the identical subset: `solve --compare` runs the
-cost-only solve and the tree build on the same candidates and refuses to
-report if the two disagree.
+The optimal tree's total cost (8001) is independently checked: the full run
+validates the written tree (edge iff possible at every node, every candidate
+terminates) before reporting success, and `solve --compare` cross-checks a
+tree's cost against a cost-only solve of the identical candidate set whenever
+one is built from a subset.
 
 ## Other word lengths
 
@@ -75,14 +73,10 @@ node site/examples/generate_letter_examples.js
 
 ## The full optimal tree
 
-The heuristics are already full-scale. The remaining piece is the **optimal**
-tree for all 2340 candidates. That needs an exact solve of every reachable
-state, which is much more expensive than the single `full` cost run, so it is
-intended to be generated on the compute host and will replace the
-`optimal.json` placeholder:
-
-```bash
-cargo run --release -- solve --strategy optimal --output optimal-2340.json
-```
+`optimal.json` is the real thing: the exact optimal policy for all 2340
+candidates - 2478 nodes, maximum depth 5, total cost 8001 (mean 3.419 guesses).
+It was generated on the compute host by the `full` run in **4.28 hours**
+(15,413.7s), which also exported its progress series
+(`~/optimal-2340-progress.parquet`).
 
 The viewer handles trees of any size. The browser renderer expands lazily.
