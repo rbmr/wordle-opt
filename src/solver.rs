@@ -466,9 +466,9 @@ impl<'a> Solver<'a> {
                         &global_cache,
                         equiv_cache,
                     );
-                    // For a bucket, the cost is evaluated via min_state_val.
-                    // We use a very loose beta since we evaluate in parallel.
-                    solver.min_state_val(&bucket, &all_guesses_bits, initial_greedy_cost, 2, max_k)
+                    let bucket_greedy = Self::greedy_solve(matrix, dict, &bucket);
+                    let val = solver.min_state_val(&bucket, &all_guesses_bits, bucket_greedy, 2, max_k);
+                    val.min(bucket_greedy)
                 })
                 .sum();
 
