@@ -1075,7 +1075,7 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let val =
-                self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
+                self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, self.max_k);
             min_val_found = min_val_found.min(val);
             if val < best_val {
                 best_val = val;
@@ -1288,7 +1288,7 @@ impl<'a> Solver<'a> {
                         _g,
                         best_val,
                         depth,
-                        local_max_k,
+                        self.max_k,
                     );
                     min_val_found = min_val_found.min(val);
                     if val < best_val {
