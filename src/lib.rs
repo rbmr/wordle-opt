@@ -974,11 +974,12 @@ fn spawn_build_progress(
                 pruned_by_equivalence: m.pruned_by_equivalence.load(Ordering::Relaxed) as u64,
             };
             eprintln!(
-                "[progress] elapsed={:.0}s nodes={} states={} guesses={} cache_hits={} bounds_pruned={}",
+                "[progress] elapsed={:.0}s nodes={} states={} guesses={} root_guesses={} cache_hits={} bounds_pruned={}",
                 sample.elapsed_s,
                 sample.nodes,
                 sample.states_evaluated,
                 sample.guesses_evaluated,
+                m.root_guesses_done.load(Ordering::Relaxed),
                 sample.cache_hits,
                 sample.pruned_by_bounds
             );

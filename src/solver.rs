@@ -38,7 +38,9 @@ pub struct Metrics {
     pub cache_misses: AtomicUsize,
     pub equiv_cache_hits: AtomicUsize,
     pub equiv_cache_misses: AtomicUsize,
-    /// Number of root-level first guesses fully evaluated (for progress reporting).
+    /// Number of guesses fully evaluated by the current optimal-guess scan
+    /// (root or per-node, for progress reporting). In a policy-tree build this
+    /// makes the dominant root scan's progress readable as a fraction.
     pub root_guesses_done: AtomicUsize,
 }
 
