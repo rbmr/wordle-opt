@@ -16,26 +16,44 @@ unsafe extern "C" {
     pub fn gpu_get_h_out_num_non_empty(ctx: *mut std::ffi::c_void) -> *mut u8;
 }
 
+/// Uploads the response matrix (and capacity bounds) to the GPU, once per
+/// distinct matrix. The engine can be used with more than one dictionary in a
+/// single process (the test suite does exactly that), and the kernel indexes
+/// the matrix by the full guess count, so re-initializing when the matrix
+/// changes is required for correctness, not just an optimization.
 #[cfg(cuda_enabled)]
 pub fn init_gpu_once(matrix: &[u8], _bounds: &[Vec<u32>], _max_k: usize) {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        let max_possible_k = 2340;
-        let mut flat_bounds = vec![0u32; (max_possible_k + 1) * 2341];
-        for k in 2..=max_possible_k {
-            for c in 0..=2340 {
-                flat_bounds[k * 2341 + c] = crate::heuristic::capacity_bound(c, k);
-            }
+    use std::sync::Mutex;
+
+    fn content_key(matrix: &[u8]) -> (usize, u64) {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = rustc_hash::FxHasher::default();
+        matrix.hash(&mut hasher);
+        (matrix.len(), hasher.finish())
+    }
+
+    static INIT: Mutex<Option<(usize, u64)>> = Mutex::new(None);
+    let key = content_key(matrix);
+    let mut guard = INIT.lock().unwrap_or_else(|e| e.into_inner());
+    if *guard == Some(key) {
+        return;
+    }
+    let max_possible_k = 2340;
+    let mut flat_bounds = vec![0u32; (max_possible_k + 1) * 2341];
+    for k in 2..=max_possible_k {
+        for c in 0..=2340 {
+            flat_bounds[k * 2341 + c] = crate::heuristic::capacity_bound(c, k);
         }
-        unsafe {
-            gpu_init(
-                matrix.as_ptr(),
-                matrix.len(),
-                flat_bounds.as_ptr(),
-                flat_bounds.len() * 4,
-            );
-        }
-    });
+    }
+    unsafe {
+        gpu_init(
+            matrix.as_ptr(),
+            matrix.len(),
+            flat_bounds.as_ptr(),
+            flat_bounds.len() * 4,
+        );
+    }
+    *guard = Some(key);
 }
 
 #[cfg(cuda_enabled)]
