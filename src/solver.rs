@@ -1022,16 +1022,20 @@ impl<'a> Solver<'a> {
                             *counts.get_unchecked_mut(r) += 1;
                         }
                     }
-                    for r_idx in 0..243 {
+                    for r_idx in 0..242 {
                         let count = counts[r_idx];
                         if count > 0 {
                             counts[r_idx] = 0;
                             num_non_empty += 1;
                             expected_rem += (count as u32) * (count as u32);
-                            if r_idx != crate::core::Response::WIN.0 as usize {
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                            }
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
+                    }
+                    if counts[242] > 0 {
+                        let count = counts[242];
+                        counts[242] = 0;
+                        num_non_empty += 1;
+                        expected_rem += (count as u32) * (count as u32);
                     }
                     if num_non_empty == 1 {
                         continue;
@@ -1195,16 +1199,20 @@ impl<'a> Solver<'a> {
                                 *counts.get_unchecked_mut(r) += 1;
                             }
                         }
-                        for r_idx in 0..243 {
+                        for r_idx in 0..242 {
                             let count = counts[r_idx];
                             if count > 0 {
                                 counts[r_idx] = 0;
                                 num_non_empty += 1;
                                 expected_rem += (count as u32) * (count as u32);
-                                if r_idx != crate::core::Response::WIN.0 as usize {
-                                    lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                                }
+                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                             }
+                        }
+                        if counts[242] > 0 {
+                            let count = counts[242];
+                            counts[242] = 0;
+                            num_non_empty += 1;
+                            expected_rem += (count as u32) * (count as u32);
                         }
                         if num_non_empty == 1 {
                             continue;
