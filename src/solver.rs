@@ -799,7 +799,7 @@ impl<'a> Solver<'a> {
                     self.metrics
                         .equiv_cache_hits
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    std::sync::Arc::clone(cached)
+                    Some(std::sync::Arc::clone(cached))
                 } else {
                     self.metrics
                         .equiv_cache_misses
@@ -817,7 +817,7 @@ impl<'a> Solver<'a> {
                         }
                     }
                     cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
-                    rc
+                    Some(rc)
                 }
             } else {
                 self.metrics
@@ -831,16 +831,15 @@ impl<'a> Solver<'a> {
                             .sum::<usize>(),
                     std::sync::atomic::Ordering::Relaxed,
                 );
-                std::sync::Arc::new(vec![]) // dummy
+                None
             };
 
-            if should_cache_equiv {
-                slice_ptr = rc_new.as_slice() as *const _;
-                Some(rc_new)
+            if let Some(rc_val) = &rc_new {
+                slice_ptr = rc_val.as_slice() as *const _;
             } else {
                 slice_ptr = active_bits_scratch.as_slice() as *const _;
-                None
             }
+            rc_new
         };
 
         let active_guesses_slice = unsafe { &*slice_ptr };
