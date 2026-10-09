@@ -110,15 +110,17 @@ __global__ void gpu_compute_phase1_kernel(
     uint8_t num_non_empty = 0;
     const uint32_t* bounds_row = g_capacity_bounds + parent_max_k * 2341;
 
-    for (int r = 0; r < 243; r++) {
+    for (int r = 0; r < 242; r++) {
         uint16_t count = counts[r];
         if (count > 0) {
             num_non_empty++;
             expected_rem += (uint32_t)count * (uint32_t)count;
-            if (r != 121) {
-                lb_cost += bounds_row[count];
-            }
+            lb_cost += bounds_row[count];
         }
+    }
+    if (counts[242] > 0) {
+        num_non_empty++;
+        expected_rem += (uint32_t)counts[242] * (uint32_t)counts[242];
     }
 
     out_expected_rem[g_idx] = expected_rem;
