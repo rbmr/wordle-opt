@@ -69,7 +69,6 @@ static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 
 pub struct SolverScratch {
     pub scratch_is_in_set: [Vec<u64>; 32],
-    pub scratch_guesses: [Vec<usize>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
     pub scratch_phase1_guesses: [Vec<usize>; 32],
     pub scratch_phase2_guesses: [Vec<usize>; 32],
@@ -108,7 +107,6 @@ pub struct Solver<'a> {
     pub current_cost_so_far: u32,
     /// Depth-indexed scratch buffers to avoid allocation in min_state_val.
     pub scratch_is_in_set: [Vec<u64>; 32],
-    scratch_guesses: [Vec<usize>; 32],
     scratch_sorted_sets: [Vec<usize>; 32],
     scratch_phase1_guesses: [Vec<usize>; 32],
     scratch_phase2_guesses: [Vec<usize>; 32],
@@ -125,10 +123,6 @@ impl<'a> Drop for Solver<'a> {
         let scratch = Box::new(SolverScratch {
             scratch_is_in_set: std::mem::replace(
                 &mut self.scratch_is_in_set,
-                std::array::from_fn(|_| Vec::new()),
-            ),
-            scratch_guesses: std::mem::replace(
-                &mut self.scratch_guesses,
                 std::array::from_fn(|_| Vec::new()),
             ),
             scratch_sorted_sets: std::mem::replace(
@@ -299,7 +293,6 @@ impl<'a> Solver<'a> {
                     scratch_is_in_set: std::array::from_fn(|_| {
                         vec![0u64; dict.guesses.len().div_ceil(64)]
                     }),
-                    scratch_guesses: std::array::from_fn(|_| Vec::new()),
                     scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
                     scratch_phase1_guesses: std::array::from_fn(|_| Vec::new()),
                     scratch_phase2_guesses: std::array::from_fn(|_| Vec::new()),
@@ -324,7 +317,6 @@ impl<'a> Solver<'a> {
             current_cost_so_far: 0,
 
             scratch_is_in_set: scratch.scratch_is_in_set,
-            scratch_guesses: scratch.scratch_guesses,
             scratch_sorted_sets: scratch.scratch_sorted_sets,
             scratch_phase1_guesses: scratch.scratch_phase1_guesses,
             scratch_phase2_guesses: scratch.scratch_phase2_guesses,
@@ -667,8 +659,6 @@ impl<'a> Solver<'a> {
 
         let mut best_val = beta;
 
-        let mut active_guesses = std::mem::take(&mut self.scratch_guesses[depth]);
-        active_guesses.clear();
 
         let mut phase1_guesses = std::mem::take(&mut self.scratch_phase1_guesses[depth]);
         phase1_guesses.clear();
@@ -857,7 +847,6 @@ impl<'a> Solver<'a> {
             while b != 0 {
                 let tz = b.trailing_zeros();
                 let g = block_idx * 64 + tz as usize;
-                active_guesses.push(g);
                 phase1_guesses.push(g);
                 b &= b - 1;
             }
@@ -866,7 +855,6 @@ impl<'a> Solver<'a> {
             while b != 0 {
                 let tz = b.trailing_zeros();
                 let g = block_idx * 64 + tz as usize;
-                active_guesses.push(g);
                 phase2_guesses.push(g);
                 b &= b - 1;
             }
@@ -1266,7 +1254,6 @@ impl<'a> Solver<'a> {
             }
         }
 
-        self.scratch_guesses[depth] = active_guesses;
 
         self.scratch_phase1_guesses[depth] = phase1_guesses;
         self.scratch_phase2_guesses[depth] = phase2_guesses;
