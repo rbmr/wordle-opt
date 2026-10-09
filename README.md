@@ -88,22 +88,16 @@ cargo run --release -- validate tree.json
 A policy is a map from the set of remaining candidates to a guess. Because it
 is deterministic, the whole game under that policy is a static decision tree:
 **nodes are guesses**, **edges are responses**, and a node is terminal when its
-guess is the answer. `src/policy.rs` stores and validates such trees; the
-compact representation does not store candidate sets at all - they are implied
-by the path of responses, which is what makes it compact.
+guess is the answer. `src/policy.rs` stores and validates such trees. A node's
+candidate set is not stored at all, since it is implied by the path of responses
+taken to reach it, which is what makes the representation compact.
 
-Two serializations are defined:
-
-- **compact** (default): a flat arena of numeric indices (guess index,
-  response index, child index) plus the dictionary hash. Small and fast.
-- **readable** (`--format readable`): nested
-  `{"guess": "trace", "children": {"bgybg": ...}}` with the word lists
-  embedded, so the file is fully self-contained and can be validated (and
-  rendered by the viewer) with no other files.
-
-Both carry a **dictionary hash** - an FNV-1a digest of the sorted guess and
-candidate lists - so a tree can never be silently applied to the wrong
-dictionary.
+A tree is serialized as **readable** JSON: nested
+`{"guess": "trace", "children": {"bgybg": ...}}` with the word lists embedded,
+so the file is fully self-contained and can be validated (and rendered by the
+viewer) with no other files. It also carries a **dictionary hash**, an FNV-1a
+digest of the sorted guess and candidate lists, so a tree can never be silently
+applied to the wrong dictionary.
 
 ### `solve`
 
@@ -117,7 +111,6 @@ wordle-opt solve \
 
 Optional flags:
 
-- `--format compact|readable` (default `compact`).
 - `--max-candidates N` - build for the first `N` candidates only (the same
   deterministic convention the golden tests use). Add `--sample-seed S` to
   instead draw a reproducible, representative `N`-candidate spread.
@@ -146,22 +139,23 @@ invariant: **at each node, an edge for a response exists if and only if that
 response is possible** for some still-reachable candidate, and each edge leads
 to exactly the subtree for the candidates that produce it. It also verifies the
 tree is a tree (each node reachable once), that leaves are wins, that every
-candidate terminates, and that the dictionary hash matches. Readable trees are
-self-contained; compact trees need `--guesses`/`--candidates`.
+candidate terminates, and that the dictionary hash matches. The tree is
+self-contained, so no other files are needed.
 
 ## Interactive viewer
 
 `site/` is a dependency-free static viewer, published to GitHub Pages by
-`.github/workflows/pages.yml`. It loads a readable policy tree (bundled example
-or your own file) and **validates it in the browser** against the same
-edge-iff-possible rule. Two views:
+`.github/workflows/pages.yml`. It loads a readable policy tree (a bundled
+example or one of your own) and **validates it in the browser** against the same
+edge-iff-possible rule. Two views, selected once a policy is loaded:
 
 - **Play** (default): traverse the policy like the game. The current guess is
-  shown, you enter the response you would get, and it either advances, reports
-  an impossible response, or reports a solve; Back and Restart are included.
-  Each node shows its *expected guesses remaining* (computed from the fully
-  determined subtree), and each guess is coloured by the response you entered.
-- **Explore tree**: the full collapsible tree, with the same per-node metric.
+  shown, you set the response on its letters, and it either advances, reports an
+  impossible response, or reports a solve. Back and Restart are included. Each
+  node shows its *expected guesses remaining* (computed from the fully
+  determined subtree).
+- **Explore**: the full collapsible tree, plus the per-node metric, the summary
+  statistics, and a bar plot of the guess-count distribution.
 
 The word length is taken from the tree, so it is not tied to 5 letters (there
 are 3-, 4- and 6-letter examples under `site/examples/`).
