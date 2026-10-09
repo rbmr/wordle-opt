@@ -430,44 +430,100 @@ impl<'a> OptimalPolicy<'a> {
     }
 
     fn scan(&self, candidates: &[usize]) -> (usize, u32) {
-        // Seed the incumbent with a fast greedy upper bound, then evaluate
-        // candidate guesses in heuristic order, tightening the bound. This is
-        // the sequential analogue of `Solver::solve`'s root scan, and it
-        // returns the first (heuristic-ordered) guess achieving the optimum.
-        //
-        // `min_guess_val(.., beta)` returns the exact `T*(C,g)` only when that
-        // is strictly below `beta`; otherwise it returns a value >= beta. So we
-        // probe with `best_val + 1`, which makes `v <= best_val` exact and lets
-        // us recognise a guess that merely *ties* the incumbent (needed because
-        // the greedy bound is often already optimal).
-        let mut best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
-        let mut best_guess = usize::MAX;
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+        let initial_best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
+        // global_beta tracks best_val + 1 so we get exact values for ties!
+        let global_beta = AtomicU32::new(initial_best_val + 1);
+        // Pack (cost, index) into u64. We want to minimize cost, and tie-break by index.
+        let global_best = AtomicU64::new(((initial_best_val as u64) << 32) | (u32::MAX as u64));
         let active = active_guesses(self.matrix, self.dict, candidates);
-        let mut solver = Solver::new(
-            self.matrix,
-            self.max_k,
-            self.dict,
-            self.metrics,
-            self.capacity_bounds_2d,
-            self.cache,
-            self.equiv_cache,
-        );
-        for (g, _) in &active {
-            let v = solver.min_guess_val(
-                candidates,
-                self.all_guesses_bits,
-                *g,
-                best_val + 1,
-                1,
+
+        // For very small candidate sets, avoid thread overhead
+        if candidates.len() <= 10 {
+            let mut solver = Solver::new(
+                self.matrix,
                 self.max_k,
+                self.dict,
+                self.metrics,
+                self.capacity_bounds_2d,
+                self.cache,
+                self.equiv_cache,
             );
-            if v < best_val {
-                best_val = v;
-                best_guess = *g;
-            } else if v == best_val && best_guess == usize::MAX {
-                best_guess = *g;
+            let mut best_val = initial_best_val;
+            let mut best_guess = usize::MAX;
+            for (g, _) in &active {
+                let v = solver.min_guess_val(
+                    candidates,
+                    self.all_guesses_bits,
+                    *g,
+                    best_val + 1,
+                    1,
+                    self.max_k,
+                );
+                if v < best_val {
+                    best_val = v;
+                    best_guess = *g;
+                } else if v == best_val && best_guess == usize::MAX {
+                    best_guess = *g;
+                }
             }
+            return (best_guess, best_val);
         }
+
+        let chunk_size = (active.len() / rayon::current_num_threads()).max(1);
+
+        active
+            .par_chunks(chunk_size)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                let mut solver = Solver::new_with_global_beta(
+                    self.matrix,
+                    self.max_k,
+                    self.dict,
+                    self.metrics,
+                    self.capacity_bounds_2d,
+                    self.cache,
+                    &global_beta,
+                    self.equiv_cache,
+                );
+
+                let start_idx = chunk_idx * chunk_size;
+
+                for (i, &(g, _)) in chunk.iter().enumerate() {
+                    let idx = start_idx + i;
+
+                    let current_best_val = global_beta.load(Ordering::Relaxed);
+
+                    let v = solver.min_guess_val(
+                        candidates,
+                        self.all_guesses_bits,
+                        g,
+                        current_best_val,
+                        1,
+                        self.max_k,
+                    );
+
+                    let packed = ((v as u64) << 32) | (idx as u64);
+                    let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                    let old_val = (old >> 32) as u32;
+                    if v < old_val {
+                        global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                    }
+                }
+            });
+
+        let final_best = global_best.load(Ordering::Relaxed);
+        let best_val = (final_best >> 32) as u32;
+        let best_idx = (final_best & 0xFFFFFFFF) as u32;
+
+        let best_guess = if best_idx == u32::MAX {
+            usize::MAX
+        } else {
+            active[best_idx as usize].0
+        };
+
         (best_guess, best_val)
     }
 }
