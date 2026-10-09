@@ -62,7 +62,7 @@ void gpu_free_context(void* ptr) {
 }
 
 void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bounds, size_t bounds_size) {
-    cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+    cudaSetDeviceFlags(cudaDeviceScheduleSpin);
     cudaSetDevice(0);
     cudaMalloc(&global_d_matrix, matrix_size);
     cudaMemcpy(global_d_matrix, host_matrix, matrix_size, cudaMemcpyHostToDevice);
