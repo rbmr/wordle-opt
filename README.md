@@ -1,87 +1,133 @@
+<!--
+  This file is for humans: people using the CLI, people using the visualizer,
+  or people wanting to understand the project. Agent-facing process rules,
+  compute-host operations and the daily-run discipline live in AGENTS.md -
+  please add them there, not here.
+-->
+
 # Wordle-Opt
 
 A Rust engine that computes the mathematically optimal guessing strategy for
-Wordle: the strategy that minimizes the total number of guesses needed to
-solve every candidate word, found by exhaustive branch-and-bound search
-rather than heuristics.
+Wordle: the strategy that minimizes the total number of guesses needed to solve
+every candidate word, found by exhaustive branch-and-bound search rather than
+heuristics.
+
+It has solved the full 2340-word candidate set exactly (total cost **8001**,
+mean 3.419 guesses per game), and the complete optimal policy tree is bundled
+with the interactive viewer - so you can inspect the optimal strategy guess by
+guess, or play against it.
 
 ## How it works
 
 Brute-forcing the full search tree over the ~2340-word candidate set is
-computationally infeasible, so the solver (`src/solver.rs`) prunes
-aggressively while guaranteeing the final answer is still exactly optimal:
+computationally infeasible, so the solver (`src/solver.rs`) prunes aggressively
+while guaranteeing the final answer is still exactly optimal:
 
 - **Alpha-beta pruning** over the guess/response tree, seeded with a tight
   initial upper bound from a fast single-threaded greedy pre-pass
   (`greedy_solve`), so early cutoffs are effective from the start.
 - **Capacity lower bounds** (`heuristic::capacity_bound`): an
-  information-theoretic minimum cost for solving `n` remaining candidates
-  given a branching factor `k`, used to discard guesses that provably cannot
-  beat the current best.
+  information-theoretic minimum cost for solving `n` remaining candidates given
+  a branching factor `k`, used to discard guesses that provably cannot beat the
+  current best.
 - **Equivalence-class guess pruning**: guesses that partition the current
   candidate set identically to a guess already tried are skipped, since they
-  can't produce a different outcome. The projection per `c_mask` is memoized in an
-  `FxHashMap` cache, dynamically sized to fit tightly within the 32 KB L1 cache.
+  can't produce a different outcome. The projection per `c_mask` is memoized in
+  an `FxHashMap` cache, dynamically sized to fit tightly within the 32 KB L1
+  cache.
 - **A lock-free transposition table** (`src/cache.rs::GlobalCache`): a
-  fixed-size array of `AtomicU64` slots, each packing a 45-bit Zobrist hash,
-  an 18-bit cost value, and an exact/lower-bound flag, shared across threads
-  without locking. It's a best-effort cache (a documented, accepted race can
-  occasionally lose an update - see issue #4) - correctness of the alpha-beta
-  search does not depend on it.
-- **Parallelism via `rayon`** at the root: the buckets of the first root
-  guess, then the remaining root guesses, are evaluated in parallel with a
-  shared atomic beta so threads prune against each other's progress. Root
-  candidates are sorted by `lb` bounds prior to execution so promising
-  guesses tighten the shared beta earlier (benefit at full scale unproven).
-- **CUDA GPU Acceleration**: Core capacity bound matrices and `phase1` /
-  `phase2` filtering logic are offloaded to an RTX 2060 GPU (`gpu_kernel.cu`).
-  L1-cache tuning and OS-level `cudaDeviceScheduleBlockingSync` block-waits
-  are intended to prevent CPU starvation. The end-to-end effect has been verified: the algorithm successfully computes the true optimal strategy for N=2340 in 5.19 hours, crushing the 10-hour goal.
+  fixed-size array of `AtomicU64` slots, each packing a 45-bit Zobrist hash, an
+  18-bit cost value, and an exact/lower-bound flag, shared across threads
+  without locking. It is a best-effort cache (a documented, accepted race can
+  occasionally lose an update - see issue #4); the correctness of the
+  alpha-beta search does not depend on it.
+- **Parallelism via `rayon`**: root guesses are evaluated in parallel against a
+  shared atomic beta, so threads prune against each other's progress. Root
+  candidates are sorted by their lower bounds first, so promising guesses
+  tighten the shared beta earlier.
+- **CUDA GPU acceleration**: capacity-bound work and phase filtering are
+  offloaded to an RTX 2060 (`gpu_kernel.cu`), with L1-tuned kernels and
+  spin-waiting stream syncs.
 
-## Milestone Status
+The reasoning behind each of these, the scaling behaviour at large N, and the
+memory layout are in `ARCHITECTURE.md`.
 
-**ACHIEVED**: The `wordle-opt` algorithm successfully proved the optimal Wordle strategy for the full 2340 set on the `compute` host. The 10-hour milestone constraint is officially shattered. As a validation checkpoint, the exact output log (commit a243ff9) is captured below:
+## Status
 
-```text
-=== FULL RUN COMPLETE ===
-Candidates: 2340
-Optimal total cost: 8001
-Avg guesses: 3.419231
-Wall time: 18693.042s (5.19h)
-Root guesses done: 14120
-```
+The engine solved the full 2340-candidate set exactly: total cost **8001**,
+mean **3.419** guesses per game. The cost-only run took 5.19 hours; the
+complete **optimal policy tree** - 2478 nodes, maximum depth 5 - took 4.28
+hours to build, and is what the viewer renders by default.
+
+The optimal strategy is fixed; the remaining work is speed, i.e. reaching the
+same exact result in less wall-clock time.
 
 ## Usage
 
 ```bash
-# Deterministic benchmark at increasing sizes (see Benchmarking below)
-cargo run --release -- benchmark [-n MAX_N]
-
-# Randomized multi-sample benchmark: several random subsets per size
-# instead of one fixed slice (see Benchmarking below)
-cargo run --release -- benchmark-random [-n MAX_N] [-k SAMPLES_PER_SIZE]
-
-# Full Metrics breakdown (branching factor, search depth, cache hit
-# rate, prune counters) for one random sample per size - use this to
-# investigate *why* time scales the way it does, not just that it did.
-# Appends to diagnose_history.md. See ARCHITECTURE.md's "Known Scaling
-# Behavior" section for a worked example.
-cargo run --release -- diagnose [-n N1,N2,...]
-
-# Solve the full candidate set (guarded to run only on the designated
-# compute host - see run_full in src/main.rs)
-cargo run --release -- full
-
-# Differential correctness fuzzer: compares the optimized solver against
-# an unoptimized naive reference (src/naive.rs) on random subsets
-cargo run --release -- verify
-
-# Capture a fully determined strategy as a policy tree (see "Policy trees")
+# Build a policy tree (see "Policy trees" below)
 cargo run --release -- solve --strategy optimal --output tree.json
+
+# A smaller tree for a quick look: the first 250 candidates
+cargo run --release -- solve --strategy optimal --max-candidates 250 \
+  --output tree-250.json
+
+# Cheaper strategies: min-remaining | max-freq
+cargo run --release -- solve --strategy min-remaining --output heuristic.json
 
 # Validate any policy tree file
 cargo run --release -- validate tree.json
+
+# Differential correctness fuzzer: compares the optimized solver against an
+# unoptimized naive reference (src/naive.rs) on random subsets
+cargo run --release -- verify
 ```
+
+Building an `optimal` tree for the full candidate set takes hours, so start
+with `--max-candidates`. Other subcommands exist for measuring and validating
+the engine itself (`benchmark`, `benchmark-random`, `diagnose`, `full`);
+AGENTS.md describes what they do and the dedicated machine they are meant to
+run on.
+
+### `solve` flags
+
+- `--max-candidates N` - build for the first `N` candidates only (the same
+  deterministic convention the golden tests use). Add `--sample-seed S` to
+  instead draw a reproducible, representative `N`-candidate spread.
+- `--stats progress.parquet [--stats-format parquet|ndjson]` - export a small
+  **progress time series** (one row per sampled interval: nodes built, frontier
+  size, depth, cache hits, ...). Sampling is periodic and clock-gated, never
+  per node, so it cannot measurably slow a build; it is off unless `--stats` is
+  given. A periodic progress thread fills the series during long node
+  evaluations (the root scan can run for hours), so it covers the whole run
+  rather than only the node-boundary phase. The Parquet file is written with
+  `SNAPPY` compression and loads directly into pandas/polars/duckdb for
+  plotting.
+- `--compare` - also run the cost-only solve on the same candidate set, print
+  its time and the tree/cost-only ratio, and fail if its exact optimum
+  disagrees with the tree's total. Measured on the compute host, the tree build
+  is about 1.1-1.5x the cost-only solve at N=500-1000 (2-5x at N<=250, where
+  fixed per-node costs dominate), converging toward parity as the root scan
+  dominates.
+- `--no-progress` - silence the periodic stderr progress line.
+- `--cache-entries N` - transposition-table size (power of two).
+
+`solve` self-validates the tree it writes (round-tripping through the reader)
+and prints a summary.
+
+### `validate`
+
+```bash
+wordle-opt validate tree.json
+```
+
+Recomputes every node's candidate set from the root and checks the defining
+invariant: **at each node, an edge for a response exists if and only if that
+response is possible** for some still-reachable candidate, and each edge leads
+to exactly the subtree for the candidates that produce it. It also verifies the
+tree is a tree (each node reachable once), that leaves are wins, that every
+candidate terminates, and that the dictionary hash matches. The tree is
+self-contained, so no other files are needed.
 
 ## Policy trees
 
@@ -105,224 +151,55 @@ viewer) with no other files. It also carries a **dictionary hash**, an FNV-1a
 digest of the sorted guess and candidate lists, so a tree can never be silently
 applied to the wrong dictionary.
 
-### `solve`
-
-```bash
-wordle-opt solve \
-  --guesses words/guesses.txt \
-  --candidates words/candidates.txt \
-  --output tree.json \
-  --strategy optimal        # optimal | min-remaining | max-freq
-```
-
-Optional flags:
-
-- `--max-candidates N` - build for the first `N` candidates only (the same
-  deterministic convention the golden tests use). Add `--sample-seed S` to
-  instead draw a reproducible, representative `N`-candidate spread.
-- `--stats progress.parquet [--stats-format parquet|ndjson]` - export a small
-  **progress time series** (one row per sampled interval: nodes built, frontier
-  size, depth, cache hits, ...). Sampling is periodic and clock-gated, never
-  per node, so it cannot measurably slow a build; it is off unless `--stats`
-  is given. A periodic progress thread fills the series during long node
-  evaluations (the root scan can run for hours), so it covers the whole run
-  rather than only the node-boundary phase. The Parquet file is written with
-  `SNAPPY` compression and loads directly into pandas/polars/duckdb for
-  plotting.
-- `--compare` - also run the cost-only solve on the same candidate set, print
-  its time and the tree/cost-only ratio, and fail if its exact optimum
-  disagrees with the tree's total. Matched measurements on the compute host
-  put the tree build at about 1.1-1.5x the cost-only solve at N=500-1000
-  (2-5x at N<=250, where fixed per-node costs dominate), converging toward
-  parity as the root scan dominates.
-- `--no-progress` - silence the periodic stderr progress line.
-- `--cache-entries N` - transposition-table size (power of two).
-
-`solve` self-validates the tree it writes (round-tripping through the reader)
-and prints a summary. Building an `optimal` tree requires an exact solve of
-every reachable state, so it is meant to be generated on the compute host.
-
-### `validate`
-
-```bash
-wordle-opt validate tree.json
-```
-
-Recomputes every node's candidate set from the root and checks the defining
-invariant: **at each node, an edge for a response exists if and only if that
-response is possible** for some still-reachable candidate, and each edge leads
-to exactly the subtree for the candidates that produce it. It also verifies the
-tree is a tree (each node reachable once), that leaves are wins, that every
-candidate terminates, and that the dictionary hash matches. The tree is
-self-contained, so no other files are needed.
-
 ## Interactive viewer
 
-`site/` is a dependency-free static viewer, published to GitHub Pages by
-`.github/workflows/pages.yml`. It loads a readable policy tree (a bundled
-example or one of your own) and **validates it in the browser** against the same
-edge-iff-possible rule. The viewer's pure logic - response computation,
-candidate filtering, validation, per-node stats and the win rule - lives in
-`site/policy-core.js`, separate from the DOM layer in `site/app.js`, and is
-tested by `node site/policy-core.test.js` (also run by CI). Two views, selected
-once a policy is loaded:
+`site/` is a dependency-free static viewer, published to GitHub Pages at
+**https://rbmr.github.io/wordle-opt/**. It loads a readable policy tree (a
+bundled example, or one of your own) and **validates it in the browser**
+against the same edge-iff-possible rule, so anything that loads can be assumed
+valid. The viewer's pure logic - response computation, candidate filtering,
+validation, per-node stats and the win rule - lives in `site/policy-core.js`,
+separate from the DOM layer in `site/app.js`, and is tested by
+`node site/policy-core.test.js` (also run by CI).
 
-- **Play** (default): traverse the policy like the game. The current guess is
-  shown, you set the response on its letters, and it either advances, reports an
-  impossible response, or reports a solve. Back and Restart are included. Each
-  node shows its *expected guesses remaining* (computed from the fully
-  determined subtree).
-- **Explore**: two stacked blocks, the stats (a two-column table of the input
-  files and the policy, next to a bar plot of the guess-count distribution) and
-  the tree explorer (the full collapsible tree with expand/collapse, expand to
-  depth, and find).
+Two views, selected once a policy is loaded:
 
-Invalid trees are rejected on load, so anything that is loaded can be assumed
-valid.
+- **Play** (default): traverse the policy like the game. Each row is one guess;
+  click a letter of the current guess to cycle its response (gray -> yellow ->
+  green), then Submit. An impossible response is reported as such; the
+  all-green response wins and shows a solved line with a confetti button. Back
+  returns to the previous guess with its response still filled in, so a typo
+  can be fixed without re-entering it. When only one candidate remains, the
+  all-green response is pre-filled as a convenience - it is still just a
+  response, and Submit is what wins. Each node shows its *expected guesses
+  remaining* and how many candidates are still possible, and Options lists
+  every possible response for the current guess (including the win, when it is
+  available).
+- **Explore**: the statistics (a table of the input files and the policy, next
+  to a bar plot of the guess-count distribution) and the tree explorer (the
+  full collapsible tree, with expand/collapse, expand-to-depth, and find).
 
 The word length is taken from the tree, so it is not tied to 5 letters (there
 are 3-, 4- and 6-letter examples under `site/examples/`).
 
-Three 5-letter examples are bundled. The two heuristics are built on the full
-2340-candidate set; the `optimal` one is a 500-candidate subset for now (a
-placeholder until the full optimal tree is generated):
+Bundled examples:
 
-| example | candidates | mean guesses |
-|---|---:|---:|
-| `optimal` | 500 | 2.898 |
-| `min-remaining` | 2340 | 3.659 |
-| `max-freq` | 2340 | 4.079 |
+| example | strategy | candidates | nodes | max depth | total cost | mean guesses |
+|---|---|--:|--:|--:|--:|--:|
+| `optimal` | optimal | 2340 | 2478 | 5 | 8001 | 3.419 |
+| `min-remaining` | min-remaining | 2340 | 2934 | 4 | 8561 | 3.659 |
+| `max-freq` | max-freq | 2340 | 2908 | 8 | 9545 | 4.079 |
 
-See `site/examples/README.md` for the exact commands that generated them.
+See `site/examples/README.md` for how they were generated.
 
-### Running on a remote compute host
+## Development
 
-Larger sizes are slow on a laptop. `deploy_and_bench.sh` rsyncs the repo to
-a configured remote host, builds in release, and runs the benchmark there:
-
-```bash
-./deploy_and_bench.sh
-```
-
-## Testing and correctness
-
-`cargo test --release` runs the full suite, including golden regression
-tests in `src/solver.rs` that assert an exact, hardcoded optimal cost for
-fixed candidate subsets (currently N=100, 250, 750). These exist to make
-silent correctness regressions loud: if a change to the search or pruning
-logic ever produces a different (wrong) cost for the same fixed input, the
-test fails immediately instead of the mistake being noticed later (or not
-at all). When intentionally changing solver behavior, treat a golden test
-failure as "explain why the new number is correct," not "update the
-constant" - see the commit history of `src/solver.rs` for a real example of
-a golden test needing to be *added*, not adjusted, to catch a bug.
-
-Use `--release`: these tests run the real solver on real instances and are
-too slow to be meaningful in debug builds. CI (`.github/workflows/rust.yml`)
-enforces this, plus `cargo clippy --release -- -D warnings`.
-
-## Benchmarking
-
-`cargo run --release -- benchmark` uses a **fixed, deterministic** candidate
-subset per size (the first N dictionary entries, sorted - the same
-convention the golden tests use), and appends a result to
-`benchmark_history.md` stamped with the git commit, hostname, and CPU count
-it ran on. This means entries are actually comparable to each other: same N
-and same host implies same input and same hardware, so a timing or
-state-count change reflects a real code change, not benchmark noise.
-
-The commit hash comes from the `WORDLE_OPT_COMMIT` environment variable if
-set, falling back to `git rev-parse` in the working directory otherwise
-(see `git_commit_hash()` in `src/main.rs`). This matters because compute's
-build directory is populated by `rsync --exclude '.git'` (see below) - it
-has no git repo of its own to ask, and running `git rev-parse` there would
-either fail or, worse, silently answer with whatever unrelated git checkout
-happens to be sitting in that directory, mislabeling a run with a commit
-that isn't what actually produced it. `deploy_and_bench.sh` and
-`run_full.sh` both compute the commit from the *local* repo (the one
-actually being synced) and pass it through via this variable - always use
-one of those two scripts rather than invoking `cargo run` on compute
-directly, or the commit stamp will silently read "unknown".
-
-Earlier benchmarking used randomly sampled candidates and untracked commits,
-which made results non-reproducible and non-comparable; that history is
-preserved for reference in `benchmark_history_legacy.md` but should not be
-used to judge whether a change is an improvement or a regression.
-
-`cargo run --release -- benchmark-random [-n MAX_N] [-k SAMPLES_PER_SIZE]`
-is the more statistically meaningful sibling of `benchmark`: the first-N
-sorted slice is a single, arbitrary sample (alphabetically-first words
-aren't necessarily representative of a "typical" N-word instance), so it
-can't distinguish a real improvement from that one input happening to be
-easy or hard. This mode draws `SAMPLES_PER_SIZE` (default 5) independent
-random subsets per size from a single `fastrand::Rng` seeded with a fixed
-constant (`BENCHMARK_RANDOM_SEED` in `src/main.rs`), and reports
-min/avg/max cost, time, and states across them. The fixed seed means this
-is exactly as reproducible as the deterministic benchmark - the same seed,
-sizes, and sample count always draw the same sequence of subsets - it's
-just reproducible over a representative spread of inputs instead of one
-fixed slice. This is the mode to use for tracking real scaling/performance
-progress; use `benchmark` for quick, single-sample sanity checks.
-
-`MAX_N` defaults to 1000, not the full ladder up to 1500: `diagnose` found
-a sharp cost cliff between N=1100 and N=1200 (see ARCHITECTURE.md's "Known
-Scaling Behavior") where a single sample can take 1-2 hours, so including
-1500 at the default 5 samples/size could silently turn a routine benchmark
-into a many-hour run. Pass `-n 1500` (with a low `-k`) deliberately when
-you want that specific, expensive data point.
-
-Prefer `./deploy_and_bench.sh` over calling `benchmark-random` directly on
-compute - it syncs the current code, runs the test suite first (so a
-broken change is caught before you benchmark it, not after), then
-benchmarks, all bounded by a single outer timeout. It forwards its
-arguments to `benchmark-random`, e.g. `./deploy_and_bench.sh -n 500 -k 3`
-for a fast check while iterating. Never run it (or any other compute job)
-while another one is already running there - concurrent jobs contend for
-the same cores and cache, which silently invalidates both jobs' timings.
-
-## Running the actual full N=2340 solve
-
-The 10-hour goal is met (5.19 h, commit `a243ff9`); the next milestone is a
-full solve in under 2 hours. The deliverable is still the optimizations that
-get the algorithm there, not the answer a full run produces - the optimal cost
-doesn't change between commits, only how fast it's reached does.
-
-A `full` run now has two roles. It is the day's **validation checkpoint** (at
-most one per day), and its output is the **policy JSON** for the chosen
-strategy, not just the optimal cost. The readable JSON is built only after the
-solve finishes - during the run everything stays in the efficient in-memory
-arena - so the serialization adds no meaningful overhead to the solve. On
-compute the run writes `~/optimal-2340.json` (the tree) and
-`~/optimal-2340-progress.parquet` (its progress time series). Both live in the
-home directory, not the rsync target, so the next deploy cannot delete them.
-The run also bounds its own memory: a 2 GB transposition table and a
-4,096-entry-per-shard equivalence-cache cap (each cached projection is about
-2 KB, so the historical defaults could reach tens of GB - the first attempt
-without these bounds was OOM-killed at 38 minutes). Progress lines include
-`rss_mb` so memory can be watched live.
-
-Because you only get one a day, only launch it when diagnose/benchmark data at
-large N gives a specific, verified reason to expect a bounded finish (see
-ARCHITECTURE.md's "Known Scaling Behavior" for why small-N extrapolation alone
-is not that reason). The progress series is what makes the day-over-day
-comparison possible - the point is to measure whether the day's optimizations
-moved the needle, not just to get an answer.
-
-```bash
-./run_full.sh    # syncs, builds, tests, then launches `full` detached and
-                  # returns immediately - it does not wait for it to finish.
-                  # The timeout is a safety cap, not the milestone threshold:
-                  # killing a run early would throw away the tree it spent
-                  # hours building, and the milestone is read off the wall
-                  # time a completed run reports.
-./check_full.sh  # cheap, near-instant status check: still running? crashed?
-                  # done? Poll this on your own schedule instead of blocking
-                  # on the run.
-```
-
-`run_full.sh` refuses to start if a wordle-opt process is already running
-on compute (same one-job-at-a-time rule as `deploy_and_bench.sh`, now
-actually enforced instead of just documented). Every `full` run's output is
-stamped with the exact commit that produced it (see the note on
-`WORDLE_OPT_COMMIT` below) so a result in `benchmark_history.md` or an
-issue comment can always be traced back to the code that generated it.
+`cargo test --release` runs the full suite, including golden regression tests
+in `src/solver.rs` that assert exact optimal costs for fixed candidate subsets.
+They exist to make silent correctness regressions loud: if a change to the
+search or pruning logic produces a different cost for the same fixed input, the
+test fails immediately instead of the mistake being noticed later. Treat a
+golden-test failure as "explain why the new number is correct," not "update the
+constant." Use `--release` - these tests run the real solver on real instances.
+CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release -- -D
+warnings`, `cargo fmt -- --check`, and the viewer's Node tests.

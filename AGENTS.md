@@ -111,8 +111,9 @@ overshot). Concretely, from here on:
   without that context reads as a measurement, not a guess, and this repo
   has been burned by exactly that.
 - **Only trust reproducible, seeded methodology** (`benchmark`,
-  `benchmark-random` - see README) for anything you report as a real
-  result. A one-off unseeded sample is not evidence of a trend.
+  `benchmark-random` - see "Benchmark and diagnose tools" below) for anything
+  you report as a real result. A one-off unseeded sample is not evidence of a
+  trend.
 - **Never declare the algorithm "fully optimal" or "can't be improved
   further" as a way to stop working.** There is always more available:
   more tests, more analysis of existing benchmark data, another
@@ -165,12 +166,12 @@ a short `timeout` locally rather than guessing.
   at rsync with the error hidden behind an output filter.)
 - **Exception:** You are explicitly authorized to use direct SSH commands to install the GPU driver on `compute`. Otherwise, **never hand-roll rsync/ssh/cargo commands against `compute`.** Use
   `deploy_and_bench.sh` for benchmark iteration and `run_full.sh` /
-  `check_full.sh` for the full run (see README). They exist so every run -
-  yours or a future session's - syncs, tests, and benchmarks the same
-  way, and so results are stamped with the commit that actually produced
-  them (`WORDLE_OPT_COMMIT` - see README's note on this; `git rev-parse` on
-  compute itself cannot work, since compute's build directory intentionally
-  has no `.git`).
+  `check_full.sh` for the full run (see "Benchmark and diagnose tools" below).
+  They exist so every run - yours or a future session's - syncs, tests, and
+  benchmarks the same way, and so results are stamped with the commit that
+  actually produced them (`WORDLE_OPT_COMMIT` - see the note below; `git
+  rev-parse` on compute itself cannot work, since compute's build directory
+  intentionally has no `.git`).
 - **One job at a time on compute, always.** Before starting anything
   there, confirm nothing else is already running
   (`ssh compute pgrep -f target/release/wordle-opt`). Concurrent jobs
@@ -189,6 +190,43 @@ a short `timeout` locally rather than guessing.
   you background manually - background it, note it in the progress issue,
   and go do something else in the meantime.
 
+## Benchmark and diagnose tools
+
+- `benchmark [-n MAX_N]` - a **fixed, deterministic** candidate subset per
+  size (the first N dictionary entries, sorted - the same convention the
+  golden tests use), appended to `benchmark_history.md` stamped with the git
+  commit, hostname and CPU count it ran on. Same N and same host implies the
+  same input and hardware, so a timing or state-count change reflects a real
+  code change, not benchmark noise. Use it for quick, single-sample sanity
+  checks.
+- `benchmark-random [-n MAX_N] [-k SAMPLES]` - `SAMPLES` (default 5)
+  independent random subsets per size, drawn from a single seeded RNG
+  (`BENCHMARK_RANDOM_SEED`), so it is exactly as reproducible as `benchmark`
+  but over a representative spread instead of one arbitrary slice. This is
+  the mode to use when judging real scaling/performance progress. `MAX_N`
+  defaults to 1000, not 1500: `diagnose` found a sharp cost cliff between
+  N=1100 and N=1200 where a single sample can take 1-2 hours (see
+  ARCHITECTURE.md's "Known Scaling Behavior"), so raise it deliberately with
+  a low `-k`.
+- `diagnose [-n N1,N2,...]` - a full metrics breakdown (branching factor,
+  search depth, cache hit rate, prune counters) for one random sample per
+  size, for investigating *why* time scales the way it does. Appends to
+  `diagnose_history.md`.
+
+The commit stamp: these tools (and `full`) label their results with the commit
+that produced them. The hash comes from `WORDLE_OPT_COMMIT` when set, falling
+back to `git rev-parse` in the working directory. Compute's build directory is
+populated by `rsync --exclude '.git'`, so it has no git repo of its own - always
+launch runs through `deploy_and_bench.sh` / `run_full.sh`, which compute the
+commit from the local repo and pass it through, rather than invoking
+`cargo run` on compute directly (which would silently stamp the result
+"unknown").
+
+Earlier benchmarking used randomly sampled candidates and untracked commits,
+which made results non-reproducible and non-comparable; that history is kept
+for reference in `benchmark_history_legacy.md` and should not be used to judge
+whether a change is an improvement or a regression.
+
 ## The `full` run: at most once a day
 
 A `full` run is the day's validation checkpoint, and you get **at most one
@@ -202,16 +240,35 @@ Because you only get one a day, make it count:
 
 - Only launch it when diagnose/benchmark data at large N gives a specific,
   verified reason to expect it will finish in a bounded time.
-- Export the run's progress time series (`--stats`, see README) so the
-  algorithm can be compared **day over day**. The point of the daily run is
-  to measure whether the optimizations since the previous day actually moved
-  the needle, not just to "get an answer".
+- The run always exports its progress time series (see "Operationally"
+  below) so the algorithm can be compared **day over day**. The point of the
+  daily run is to measure whether the optimizations since the previous day
+  actually moved the needle, not just to "get an answer".
 - Record each day's full-run time and its progress series so the trend is
   visible.
 - `run_full.sh` is bounded by `timeout` and refuses a concurrent run, but
   don't relaunch it reflexively after every change hoping it now works -
   every hour it runs is an hour `compute` is unavailable for the benchmark
   iteration that's the actual day-to-day work.
+
+Operationally:
+
+- `./run_full.sh` syncs, builds, tests, then launches `full` **detached** and
+  returns immediately - it does not wait for it to finish. The `timeout` is a
+  safety cap, not the milestone threshold: killing a run early would throw
+  away the tree it spent hours building, and the milestone is read off the
+  wall time a completed run reports.
+- `./check_full.sh` is the cheap, near-instant status check: still running?
+  crashed? done? Poll it on your own schedule instead of blocking on the run.
+- The run writes `~/optimal-2340.json` (the tree) and
+  `~/optimal-2340-progress.parquet` (its progress series) in compute's home
+  directory, not the rsync target, so the next deploy cannot delete them.
+- The run bounds its own memory: a 2 GB transposition table and a
+  4,096-entry-per-shard equivalence-cache cap. (The transposition table
+  allocates two AtomicU64 slots per unit - 16 bytes - and each cached
+  projection is about 2 KB, so the historical defaults could reach tens of
+  GB: the first full tree run was OOM-killed at 38 minutes before these
+  bounds.) Progress lines include `rss_mb` so memory can be watched live.
 
 ## Correctness practice
 
