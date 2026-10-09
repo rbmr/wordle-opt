@@ -70,6 +70,19 @@ impl Metrics {
 /// Sentinel used by non-root Solver instances; never tightened, so never causes spurious abort.
 static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 
+/// Per-shard entry cap for the equivalence cache. Each cached projection is an
+/// `Arc<Vec<u64>>` of one bit per guess (~2 KB for the full 14,855-word list),
+/// so the default cap of 65,536 entries per shard permits tens of GB in the
+/// worst case - more than the compute host has. A large run can lower it with
+/// [`set_equiv_cache_cap`] to bound memory at some cost in hit rate.
+static EQUIV_CACHE_CAP: AtomicUsize = AtomicUsize::new(65_536);
+
+/// Lowers (or raises) the per-shard equivalence-cache entry cap. Process-wide:
+/// one solve runs per process.
+pub fn set_equiv_cache_cap(entries_per_shard: usize) {
+    EQUIV_CACHE_CAP.store(entries_per_shard.max(1024), Ordering::Relaxed);
+}
+
 pub struct SolverScratch {
     pub scratch_is_in_set: [Vec<u64>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
@@ -344,7 +357,11 @@ impl<'a> Solver<'a> {
         equiv_cache: &'a EquivCache,
     ) -> u32 {
         let cache_size = if crate::is_compute_host() {
-            // 512 M entries × 8 bytes each = 4 GB. Compute has 14 GB available.
+            // 512 M units x 16 bytes each (two AtomicU64 slots per unit) =
+            // 8 GB, which is the whole reason the cost-only full run is tight
+            // on the 16 GB compute host. The policy-tree full run uses a
+            // smaller table (see run_full) because it also holds the
+            // equivalence cache and the tree.
             512 * 1024 * 1024
         } else {
             64 * 1024 * 1024
@@ -828,9 +845,11 @@ impl<'a> Solver<'a> {
                             - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
                         std::sync::atomic::Ordering::Relaxed,
                     );
-                    if cache_mut.len() > 65536 {
+                    let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
+                    if cache_mut.len() > cap {
+                        let evict = (cap / 4).max(1);
                         let keys_to_remove: Vec<_> =
-                            cache_mut.keys().take(16384).copied().collect();
+                            cache_mut.keys().take(evict).copied().collect();
                         for k in keys_to_remove {
                             cache_mut.remove(&k);
                         }

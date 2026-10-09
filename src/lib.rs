@@ -710,12 +710,15 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
 
     let observer = std::sync::Arc::new(crate::policy::BuildObserver::default());
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    apply_memory_bounds();
     let opts = BuildOptions {
         collect_samples: true,
         progress: true,
-        // 512 M entries x 8 bytes = 4 GB, the same transposition table the
-        // cost-only full run used on the 16 GB compute host.
-        cache_entries: 512 * 1024 * 1024,
+        // 1 << 27 units x 16 bytes = 2 GB. Deliberately smaller than the
+        // cost-only full run's 512 M units (8 GB): this run also holds the
+        // equivalence cache, and the first attempt was OOM-killed with both
+        // at their maxima.
+        cache_entries: 1 << 27,
         observer: Some(std::sync::Arc::clone(&observer)),
         ..Default::default()
     };
@@ -917,6 +920,35 @@ fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> Dictionary {
     Dictionary::from_words(full.guesses.clone(), subset)
 }
 
+/// Resident set size of this process, in MiB, from `/proc/self/status`. Used
+/// by the progress thread so a long run's memory is visible while it runs
+/// (an unbounded equivalence cache is the one thing that has OOM-killed a
+/// full run). `None` where /proc is unavailable.
+fn rss_mb() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kb / 1024);
+        }
+    }
+    None
+}
+
+/// Applies the memory bounds a large run needs. The equivalence cache caches
+/// one ~2 KB projection per distinct candidate set, so its default cap allows
+/// tens of GB in the worst case (it OOM-killed the first full tree run);
+/// `WORDLE_OPT_EQUIV_CACHE_CAP` overrides the per-shard default used here.
+/// Deliberately not applied to `benchmark`/`diagnose`, whose historical timings
+/// should stay comparable.
+fn apply_memory_bounds() {
+    let cap = std::env::var("WORDLE_OPT_EQUIV_CACHE_CAP")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(4_096);
+    crate::solver::set_equiv_cache_cap(cap);
+}
+
 /// Spawns a thread that reports a build's live counters every `interval`, to
 /// stderr and as [`crate::policy::ProgressSample`]s. The builder only samples
 /// at node boundaries, so without this a long node evaluation (the root scan
@@ -974,14 +1006,17 @@ fn spawn_build_progress(
                 pruned_by_equivalence: m.pruned_by_equivalence.load(Ordering::Relaxed) as u64,
             };
             eprintln!(
-                "[progress] elapsed={:.0}s nodes={} states={} guesses={} root_guesses={} cache_hits={} bounds_pruned={}",
+                "[progress] elapsed={:.0}s nodes={} states={} guesses={} root_guesses={} cache_hits={} bounds_pruned={} rss_mb={}",
                 sample.elapsed_s,
                 sample.nodes,
                 sample.states_evaluated,
                 sample.guesses_evaluated,
                 m.root_guesses_done.load(Ordering::Relaxed),
                 sample.cache_hits,
-                sample.pruned_by_bounds
+                sample.pruned_by_bounds,
+                rss_mb()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "?".into())
             );
             thread_samples
                 .lock()
@@ -1082,6 +1117,7 @@ fn run_solve_cli(args: &[String]) {
 
     let observer = std::sync::Arc::new(crate::policy::BuildObserver::default());
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    apply_memory_bounds();
     let opts = BuildOptions {
         collect_samples,
         progress,
