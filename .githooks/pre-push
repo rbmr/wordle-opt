@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+source $HOME/.cargo/env
 cargo fmt -- --check
 cargo clippy --release -- -D warnings
 cargo test --release
