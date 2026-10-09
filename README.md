@@ -273,22 +273,25 @@ A `full` run now has two roles. It is the day's **validation checkpoint** (at
 most one per day), and its output is the **policy JSON** for the chosen
 strategy, not just the optimal cost. The readable JSON is built only after the
 solve finishes - during the run everything stays in the efficient in-memory
-arena - so the serialization adds no meaningful overhead to the solve.
+arena - so the serialization adds no meaningful overhead to the solve. On
+compute the run writes `~/optimal-2340.json` (the tree) and
+`~/optimal-2340-progress.parquet` (its progress time series). Both live in the
+home directory, not the rsync target, so the next deploy cannot delete them.
 
 Because you only get one a day, only launch it when diagnose/benchmark data at
 large N gives a specific, verified reason to expect a bounded finish (see
 ARCHITECTURE.md's "Known Scaling Behavior" for why small-N extrapolation alone
-is not that reason). Export the run's progress time series (`solve --stats`,
-above) so the algorithm can be compared **day over day** - the point is to
-measure whether the day's optimizations moved the needle, not just to get an
-answer.
+is not that reason). The progress series is what makes the day-over-day
+comparison possible - the point is to measure whether the day's optimizations
+moved the needle, not just to get an answer.
 
 ```bash
 ./run_full.sh    # syncs, builds, tests, then launches `full` detached and
                   # returns immediately - it does not wait for it to finish.
-                  # Bounded by `timeout` (currently 36000s; set it to the
-                  # current milestone, so a run that overruns has already
-                  # answered the question).
+                  # The timeout is a safety cap, not the milestone threshold:
+                  # killing a run early would throw away the tree it spent
+                  # hours building, and the milestone is read off the wall
+                  # time a completed run reports.
 ./check_full.sh  # cheap, near-instant status check: still running? crashed?
                   # done? Poll this on your own schedule instead of blocking
                   # on the run.

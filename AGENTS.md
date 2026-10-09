@@ -143,22 +143,26 @@ a short `timeout` locally rather than guessing.
 
 ## Workflow on compute
 
-- **You are running on `assistant`. Always set
-  `WORDLE_OPT_COMPUTE_HOST=robert@10.10.10.2`** when invoking
+- **First check which machine you are on (`hostname`).** On `assistant`,
+  always set `WORDLE_OPT_COMPUTE_HOST=robert@10.10.10.2` when invoking
   `deploy_and_bench.sh` / `run_full.sh` / `check_full.sh` - e.g.
   `WORDLE_OPT_COMPUTE_HOST=robert@10.10.10.2 ./deploy_and_bench.sh ...`.
   This is a private link that exists only between `assistant` and
   `compute` on their shared Proxmox host - it never depends on Tailscale
-  or the external LAN. Without this env var, the scripts default to
-  `robert@compute` (the Tailscale hostname), which requires a periodic
-  interactive web re-auth ("Tailscale SSH requires an additional check")
-  that **you cannot complete yourself** - only the maintainer can click
-  that link. If you ever see that message, or anything about compute
-  being unreachable, **check this first**: it almost certainly means the
-  private-link env var was left off, not that compute is actually
-  unreachable. (This has actually happened - a session lost real time
-  believing compute was locked behind Tailscale auth when the private
-  link was working the entire time.)
+  or the external LAN, and it does not exist from any other machine. On
+  any other machine (e.g. the maintainer's laptop), leave the variable
+  unset and use the default `robert@compute` over Tailscale.
+  The Tailscale hostname requires a periodic interactive web re-auth
+  ("Tailscale SSH requires an additional check") that **you cannot
+  complete yourself** - only the maintainer can click that link. If you
+  ever see that message, or anything about compute being unreachable,
+  **check this first**: it almost certainly means the private-link env
+  var was left off, not that compute is actually unreachable. (This has
+  actually happened - a session lost real time believing compute was
+  locked behind Tailscale auth when the private link was working the
+  entire time. The reverse has happened too: a session on the laptop set
+  the assistant-only env var, and every `deploy_and_bench.sh` run failed
+  at rsync with the error hidden behind an output filter.)
 - **Exception:** You are explicitly authorized to use direct SSH commands to install the GPU driver on `compute`. Otherwise, **never hand-roll rsync/ssh/cargo commands against `compute`.** Use
   `deploy_and_bench.sh` for benchmark iteration and `run_full.sh` /
   `check_full.sh` for the full run (see README). They exist so every run -
