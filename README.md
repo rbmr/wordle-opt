@@ -154,8 +154,13 @@ edge-iff-possible rule. Two views, selected once a policy is loaded:
   impossible response, or reports a solve. Back and Restart are included. Each
   node shows its *expected guesses remaining* (computed from the fully
   determined subtree).
-- **Explore**: the full collapsible tree, plus the per-node metric, the summary
-  statistics, and a bar plot of the guess-count distribution.
+- **Explore**: two stacked blocks, the stats (a two-column table of the input
+  files and the policy, next to a bar plot of the guess-count distribution) and
+  the tree explorer (the full collapsible tree with expand/collapse, expand to
+  depth, and find).
+
+Invalid trees are rejected on load, so anything that is loaded can be assumed
+valid.
 
 The word length is taken from the tree, so it is not tied to 5 letters (there
 are 3-, 4- and 6-letter examples under `site/examples/`).

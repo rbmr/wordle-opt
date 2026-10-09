@@ -58,7 +58,7 @@ function wordLength(file) {
 // start gray (all black) so no clicks are wasted setting the common case.
 const CYCLE = ["b", "y", "g"];
 
-// --- validation (shared by both views; drives the stats + badge) ---
+// --- validation (shared by both views; a tree is rejected on load if invalid) ---
 function validateTree(file) {
   const errors = [];
   const WIN = winString(wordLength(file));
@@ -470,35 +470,41 @@ function applySearch() {
   s.classList.toggle("no-match", q.length > 0 && matches === 0);
 }
 
-function showStats(file, report) {
-  const box = document.getElementById("stats");
-  box.textContent = "";
+function renderStats(file, report) {
   const s = report.stats;
-  const items = [
-    ["strategy", file.strategy], ["candidates", s.candidates.toLocaleString()],
-    ["nodes", s.nodes.toLocaleString()], ["edges", s.edges.toLocaleString()],
-    ["max depth", s.maxDepth], ["mean guesses", s.meanGuesses.toFixed(4)],
+  const table = document.getElementById("stats-table");
+  table.textContent = "";
+  const thead = el("thead");
+  const hr = el("tr");
+  hr.appendChild(el("th", "", "Input"));
+  hr.appendChild(el("th", "", "Policy"));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const inputCol = el("td");
+  for (const [k, v] of [
+    ["candidates", s.candidates.toLocaleString()],
+    ["guesses", s.guesses.toLocaleString()],
     ["dictionary hash", file.dictionary_hash],
-  ];
-  for (const [k, v] of items) {
-    const d = el("div", "stat");
-    d.appendChild(el("span", "k", k));
-    d.appendChild(el("span", "v", String(v)));
-    box.appendChild(d);
+  ]) {
+    inputCol.appendChild(el("div", "", `${k}: ${v}`));
   }
-  const badge = el("div", "stat badge " + (report.ok ? "ok" : "bad"));
-  badge.appendChild(el("span", "k", "validation"));
-  badge.appendChild(el("span", "v", report.ok ? "\u2713 valid" : "\u2717 " + report.errors.length + " problem(s)"));
-  box.appendChild(badge);
-  const status = document.getElementById("status");
-  if (report.ok) {
-    status.hidden = true;
-    status.textContent = "";
-  } else {
-    status.hidden = false;
-    status.className = "status bad";
-    status.textContent = "INVALID: " + report.errors[0];
+  const policyCol = el("td");
+  for (const [k, v] of [
+    ["name", file.strategy],
+    ["nodes", s.nodes.toLocaleString()],
+    ["edges", s.edges.toLocaleString()],
+    ["max depth", String(s.maxDepth)],
+    ["mean guesses", s.meanGuesses.toFixed(4)],
+  ]) {
+    policyCol.appendChild(el("div", "", `${k}: ${v}`));
   }
+  const tr = el("tr");
+  tr.appendChild(inputCol);
+  tr.appendChild(policyCol);
+  const tbody = el("tbody");
+  tbody.appendChild(tr);
+  table.appendChild(tbody);
 }
 
 // Bar plot of how many candidates are solved in 1, 2, 3 ... guesses.
@@ -535,12 +541,7 @@ function setMode(mode) {
   const selected = app.selected !== null;
   document.getElementById("play").hidden = !selected || mode !== "play";
   document.getElementById("tree-pane").hidden = !selected || mode !== "tree";
-  // Statistics are only meaningful in the explore view.
-  document.getElementById("stats").hidden = !selected || mode !== "tree";
-  if (mode === "tree" && selected) {
-    renderChart();
-    renderTree();
-  }
+  if (mode === "tree" && selected) renderTree();
 }
 
 // Reflects the selected policy (button highlight), the optional custom-file
@@ -559,7 +560,9 @@ function updateSelectionUI() {
   setMode(app.mode);
 }
 
-function loadFile(file, selection) {
+// Validates and, if valid, selects the policy. An invalid tree is rejected
+// outright, so anything that is loaded can be assumed valid.
+function loadFile(file, selection, customName) {
   const status = document.getElementById("status");
   status.hidden = false;
   if (file.format !== "wordle-policy-tree") {
@@ -572,19 +575,30 @@ function loadFile(file, selection) {
     status.textContent = `Unsupported tree version ${file.version}.`;
     return;
   }
+  const report = validateTree(file);
+  if (!report.ok) {
+    status.className = "status bad";
+    status.textContent = `Policy rejected: ${report.errors[0]}`;
+    return;
+  }
   app.file = file;
   app.selected = selection;
+  app.report = report;
   app.letters = wordLength(file);
   app.win = winString(app.letters);
-  const report = validateTree(file);
-  app.report = report;
   app.nodeStats = computeNodeStats(file);
+  if (customName !== undefined) {
+    app.customName = customName;
+    app.customTree = file;
+  }
   document.getElementById("depth").max = String(Math.max(1, report.stats.maxDepth));
-  showStats(file, report);
+  renderStats(file, report);
+  renderChart();
   resetPlay();
-  app.mode = "play";
   document.getElementById("tree").textContent = "";
   app.allNodes = [];
+  status.hidden = true;
+  status.textContent = "";
   updateSelectionUI();
 }
 
@@ -633,9 +647,7 @@ document.getElementById("file").addEventListener("change", (e) => {
   reader.onload = () => {
     try {
       const obj = JSON.parse(reader.result);
-      app.customTree = obj;
-      app.customName = f.name;
-      loadFile(obj, "custom");
+      loadFile(obj, "custom", f.name);
     } catch (err) {
       const status = document.getElementById("status");
       status.hidden = false;

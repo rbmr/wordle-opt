@@ -69,15 +69,28 @@ input[type="search"].no-match { border-color: var(--bad); }
 .status.ok { color: var(--ok); }
 .status.bad { color: var(--bad); }
 
-.stats { display: flex; flex-wrap: wrap; gap: 8px; max-width: 1080px; margin: 12px auto 0; padding: 0 24px; }
-.stat {
-  display: flex; flex-direction: column; background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px;
+.mode-bar { display: flex; justify-content: center; padding: 16px 24px 4px; }
+.segmented { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 999px; overflow: hidden; }
+.segmented button {
+  border: none; border-radius: 0; padding: 7px 26px; background: #fff; color: var(--fg);
 }
-.stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
-.stat .v { font-size: 14px; }
-.stat.badge.ok .v { color: var(--ok); }
-.stat.badge.bad .v { color: var(--bad); }
+.segmented button + button { border-left: 1px solid var(--border-strong); }
+.segmented button:hover { background: var(--panel-2); }
+.segmented button.active { background: var(--fg); color: #fff; }
+.segmented button.active:hover { background: var(--fg); }
+
+.explore-stats {
+  display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start;
+  margin: 8px 0 20px;
+}
+.stats-table { border-collapse: collapse; font-size: 14px; }
+.stats-table th {
+  text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.06em; padding: 0 24px 6px 0; border-bottom: 1px solid var(--border);
+}
+.stats-table td { padding: 4px 24px 4px 0; }
+.stats-table td:first-child { color: var(--muted); }
+.stats-table td + td, .stats-table th + th { padding-left: 24px; border-left: 1px solid var(--border); }
 
 main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 .pane { padding-top: 16px; }
@@ -121,7 +134,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
 .play-msg.ok { color: var(--ok); }
 
 /* ---- tree mode ---- */
-.chart { margin: 14px 0 20px; }
+.chart { margin: 0; }
 .chart-title { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 .chart-bars { display: flex; align-items: flex-end; gap: 8px; }
 .chart-col { display: flex; flex-direction: column; align-items: center; }
