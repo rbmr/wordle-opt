@@ -1133,6 +1133,9 @@ impl<'a> Solver<'a> {
                                 }
                                 let lb_cost = lbs[i];
                                 let expected_rem = exps[i];
+                                if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
+                                    continue;
+                                }
                                 let g = phase2_guesses[i];
                                 if num_non_empty > local_max_k {
                                     local_max_k = num_non_empty;
@@ -1175,19 +1178,15 @@ impl<'a> Solver<'a> {
                         if num_non_empty == 1 {
                             continue;
                         }
-                        let mut has_size_one = false;
                         for i in 0..num_non_empty {
                             let r_idx = local_counts[i].0 as usize;
                             let count = local_counts[i].1 as usize;
-                            if count == 1 {
-                                has_size_one = true;
-                            }
                             expected_rem += (count as u32) * (count as u32);
                             if r_idx != crate::core::Response::WIN.0 as usize {
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                             }
                         }
-                        if num_non_empty == 2 && has_size_one {
+                        if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
                             continue;
                         }
                         if num_non_empty > local_max_k {
@@ -1214,15 +1213,11 @@ impl<'a> Solver<'a> {
                                 *counts.get_unchecked_mut(r) += 1;
                             }
                         }
-                        let mut has_size_one = false;
                         for r_idx in 0..242 {
                             let count = counts[r_idx];
                             if count > 0 {
                                 counts[r_idx] = 0;
                                 num_non_empty += 1;
-                                if count == 1 {
-                                    has_size_one = true;
-                                }
                                 expected_rem += (count as u32) * (count as u32);
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                             }
@@ -1231,15 +1226,12 @@ impl<'a> Solver<'a> {
                             let count = counts[242];
                             counts[242] = 0;
                             num_non_empty += 1;
-                            if count == 1 {
-                                has_size_one = true;
-                            }
                             expected_rem += (count as u32) * (count as u32);
                         }
                         if num_non_empty == 1 {
                             continue;
                         }
-                        if num_non_empty == 2 && has_size_one {
+                        if num_non_empty == 2 && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2 {
                             continue;
                         }
                         if num_non_empty > local_max_k {
