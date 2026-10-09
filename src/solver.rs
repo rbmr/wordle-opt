@@ -1288,7 +1288,7 @@ impl<'a> Solver<'a> {
                         _g,
                         best_val,
                         depth,
-                        parent_max_k,
+                        local_max_k,
                     );
                     min_val_found = min_val_found.min(val);
                     if val < best_val {
