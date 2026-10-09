@@ -18,11 +18,20 @@ what's being built. The optimal cost number itself doesn't change between
 commits; only how fast it's reached does, and that speed is the entire
 point.
 
+**Concretely, the deliverable is the `solve` CLI tool**: one command that,
+given a guesses file and a candidates file, produces the fully determined
+policy for the chosen strategy (`optimal`, or a heuristic like
+`min-remaining` / `max-freq` for cheaper testing). Today that means 5-letter
+words. Its output is the **policy JSON**, not just the optimal cost.
+
+**The 10-hour goal was met** (the full N=2340 set solved in 5.19 h, commit
+`a243ff9`). **The next milestone is a full solve in under 2 hours.**
+
 A consequence that's easy to get backwards: **completing one full N=2340
-run is a rare validation checkpoint, not the finish line.** Don't treat
+run is a validation checkpoint, not the finish line.** Don't treat
 "we got an answer" as success, and don't chase getting a run to completion
-as a goal in itself - chase the optimizations. See "The `full` run is rare"
-below.
+as a goal in itself - chase the optimizations. See "The `full` run: at most
+once a day" below.
 
 **Exactness is non-negotiable.** This is an exact branch-and-bound solver,
 not a heuristic. It must always return the true optimal cost. Never trade
@@ -39,7 +48,7 @@ throughput is the bottleneck, the lever is using more of *this one
 machine's* resources better (more of its cores, its GPU, a
 faster-per-core approach), not more machines.
 
-**The 10-hour goal is achievable. Believe that, and keep trying
+**The milestone is achievable. Believe that, and keep trying
 indefinitely.** Extrapolations that make it look out of reach (a
 depth-cliff projection, a power-law fit, whatever) are estimates from an
 incomplete search of the optimization space, not a proof of a ceiling -
@@ -47,7 +56,7 @@ treat a discouraging number as "haven't found the right angle yet," not
 as evidence to lose confidence over. There is always another concrete
 thing to try.
 
-**You do not get to unilaterally decide the 10-hour goal is unattainable.**
+**You do not get to unilaterally decide the milestone is unattainable.**
 That determination is the maintainer's call, not something you declare in
 an issue or a commit message - and reaching that conclusion isn't
 actually the goal anyway; continuing to try is. Before it's even worth
@@ -176,17 +185,29 @@ a short `timeout` locally rather than guessing.
   you background manually - background it, note it in the progress issue,
   and go do something else in the meantime.
 
-## The `full` run is rare
+## The `full` run: at most once a day
 
-`run_full.sh` is bounded by `timeout` at the 10-hour milestone itself (a
-run that hasn't finished by then has already answered the question) and
-refuses to start a second concurrent run. But the bigger constraint is
-upstream of the script: **only launch a `full` run when diagnose/benchmark
-data at large N gives you a specific, verified reason to expect it will
-finish in a bounded time.** Don't relaunch it reflexively after every
-change hoping it now works, and don't launch it just to "get to an
-answer" - every hour it runs is an hour `compute` is unavailable for the
-benchmark iteration that's the actual day-to-day work.
+A `full` run is the day's validation checkpoint, and you get **at most one
+per day**. Its output is the **policy JSON**, not just the optimal cost.
+Construct the readable JSON only after the solve has finished - during the
+run keep everything in the efficient in-memory representation, and build the
+JSON once the solve completes, so the serialization adds no meaningful
+overhead to the solve itself.
+
+Because you only get one a day, make it count:
+
+- Only launch it when diagnose/benchmark data at large N gives a specific,
+  verified reason to expect it will finish in a bounded time.
+- Export the run's progress time series (`--stats`, see README) so the
+  algorithm can be compared **day over day**. The point of the daily run is
+  to measure whether the optimizations since the previous day actually moved
+  the needle, not just to "get an answer".
+- Record each day's full-run time and its progress series so the trend is
+  visible.
+- `run_full.sh` is bounded by `timeout` and refuses a concurrent run, but
+  don't relaunch it reflexively after every change hoping it now works -
+  every hour it runs is an hour `compute` is unavailable for the benchmark
+  iteration that's the actual day-to-day work.
 
 ## Correctness practice
 

@@ -264,25 +264,31 @@ the same cores and cache, which silently invalidates both jobs' timings.
 
 ## Running the actual full N=2340 solve
 
-The project's goal is the optimizations that get the algorithm under 10
-hours, not the answer a full run produces - the optimal cost doesn't
-change between commits, only how fast it's reached does. A `full` run is
-therefore a **rare, deliberate milestone check**, not a routine step: it
-occupies compute's one shared CPU for potentially hours, which blocks the
-benchmark iteration that's the actual day-to-day work. Don't run it after
-every change, and don't run it "to get to done" - only run it when
-diagnose/benchmark data at large N gives a specific, verified reason to
-expect it will finish in a bounded time (see ARCHITECTURE.md's "Known
-Scaling Behavior" for why small-N extrapolation alone is not that reason).
+The 10-hour goal is met (5.19 h, commit `a243ff9`); the next milestone is a
+full solve in under 2 hours. The deliverable is still the optimizations that
+get the algorithm there, not the answer a full run produces - the optimal cost
+doesn't change between commits, only how fast it's reached does.
 
-When it is actually warranted:
+A `full` run now has two roles. It is the day's **validation checkpoint** (at
+most one per day), and its output is the **policy JSON** for the chosen
+strategy, not just the optimal cost. The readable JSON is built only after the
+solve finishes - during the run everything stays in the efficient in-memory
+arena - so the serialization adds no meaningful overhead to the solve.
+
+Because you only get one a day, only launch it when diagnose/benchmark data at
+large N gives a specific, verified reason to expect a bounded finish (see
+ARCHITECTURE.md's "Known Scaling Behavior" for why small-N extrapolation alone
+is not that reason). Export the run's progress time series (`solve --stats`,
+above) so the algorithm can be compared **day over day** - the point is to
+measure whether the day's optimizations moved the needle, not just to get an
+answer.
 
 ```bash
 ./run_full.sh    # syncs, builds, tests, then launches `full` detached and
                   # returns immediately - it does not wait for it to finish.
-                  # Bounded by `timeout` at 36000s (the 10h milestone itself
-                  # - a run that hasn't finished by then has already
-                  # answered "under 10 hours?" with "no").
+                  # Bounded by `timeout` (currently 36000s; set it to the
+                  # current milestone, so a run that overruns has already
+                  # answered the question).
 ./check_full.sh  # cheap, near-instant status check: still running? crashed?
                   # done? Poll this on your own schedule instead of blocking
                   # on the run.
