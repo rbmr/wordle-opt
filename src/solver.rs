@@ -27,6 +27,7 @@ impl std::borrow::Borrow<[usize]> for CandidateSet {
 /// Instrumentation counters for a single `Solver::solve` run, used for
 /// benchmarking and progress reporting. Not part of the solving logic itself.
 /// Counters to measure the performance and branching factor of the search.
+#[derive(Debug)]
 pub struct Metrics {
     pub states_evaluated: AtomicUsize,
     pub max_depth: AtomicUsize,
