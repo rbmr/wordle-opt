@@ -144,15 +144,12 @@ a short `timeout` locally rather than guessing.
 
 ## Workflow on compute
 
-- **First check which machine you are on (`hostname`).** On `assistant`,
-  always set `WORDLE_OPT_COMPUTE_HOST=robert@10.10.10.2` when invoking
-  `deploy_and_bench.sh` / `run_full.sh` / `check_full.sh` - e.g.
-  `WORDLE_OPT_COMPUTE_HOST=robert@10.10.10.2 ./deploy_and_bench.sh ...`.
-  This is a private link that exists only between `assistant` and
-  `compute` on their shared Proxmox host - it never depends on Tailscale
-  or the external LAN, and it does not exist from any other machine. On
-  any other machine (e.g. the maintainer's laptop), leave the variable
-  unset and use the default `robert@compute` over Tailscale.
+- **First check which machine you are on (`hostname`).** Reach
+  `compute` over Tailscale as `robert@compute` (the scripts' default),
+  so `WORDLE_OPT_COMPUTE_HOST` can simply be left unset from anywhere.
+  The old `10.10.10.2` private link was retired in the 2026-10-10
+  migration off Proxmox - `compute` and `assistant` are now separate
+  physical hosts.
   The Tailscale hostname requires a periodic interactive web re-auth
   ("Tailscale SSH requires an additional check") that **you cannot
   complete yourself** - only the maintainer can click that link. If you
