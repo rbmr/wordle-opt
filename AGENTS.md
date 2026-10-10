@@ -156,6 +156,9 @@ a short `timeout` locally rather than guessing.
   is a WoL machine now: wake it with `ssh wake-pc01` (Wake-on-LAN via
   the rpi5). Only treat it as a real problem if it is up and the
   connection still fails.
+  A third machine `zbook` is also on the tailnet. It can be woken the
+  same way (`ssh wake-zbook`), but this machine has no SSH access to it -
+  do not attempt to log into `zbook`; that restriction is deliberate.
   (Historical: sessions used to burn time on two failure modes - blaming
   Tailscale re-auth when the private link actually worked, or a laptop
   session setting the assistant-only env var and failing at rsync - both
