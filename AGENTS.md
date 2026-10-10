@@ -145,22 +145,21 @@ a short `timeout` locally rather than guessing.
 ## Workflow on compute
 
 - **First check which machine you are on (`hostname`).** Reach
-  `compute` over Tailscale as `robert@compute` (the scripts' default),
-  so `WORDLE_OPT_COMPUTE_HOST` can simply be left unset from anywhere.
-  The old `10.10.10.2` private link was retired in the 2026-10-10
-  migration off Proxmox - `compute` and `assistant` are now separate
-  physical hosts.
-  The Tailscale hostname requires a periodic interactive web re-auth
-  ("Tailscale SSH requires an additional check") that **you cannot
-  complete yourself** - only the maintainer can click that link. If you
-  ever see that message, or anything about compute being unreachable,
-  **check this first**: it almost certainly means the private-link env
-  var was left off, not that compute is actually unreachable. (This has
-  actually happened - a session lost real time believing compute was
-  locked behind Tailscale auth when the private link was working the
-  entire time. The reverse has happened too: a session on the laptop set
-  the assistant-only env var, and every `deploy_and_bench.sh` run failed
-  at rsync with the error hidden behind an output filter.)
+  `compute` over Tailscale as `user@pc01` (the scripts' default), so
+  `WORDLE_OPT_COMPUTE_HOST` can simply be left unset from anywhere. The
+  old `10.10.10.2` private link died with the October 2026 migration off
+  Proxmox: `compute` now runs bare-metal on the machine `pc01`, and
+  `assistant` runs on the laptop `helios`. The tailnet policy grants
+  agent traffic to homelab nodes in accept mode, so this SSH path no
+  longer needs any interactive re-auth.
+  If `pc01` is unreachable, check first whether it is powered off - it
+  is a WoL machine now: wake it with `ssh wake-pc01` (Wake-on-LAN via
+  the rpi5). Only treat it as a real problem if it is up and the
+  connection still fails.
+  (Historical: sessions used to burn time on two failure modes - blaming
+  Tailscale re-auth when the private link actually worked, or a laptop
+  session setting the assistant-only env var and failing at rsync - both
+  are retired together with the private link itself.)
 - **Exception:** You are explicitly authorized to use direct SSH commands to install the GPU driver on `compute`. Otherwise, **never hand-roll rsync/ssh/cargo commands against `compute`.** Use
   `deploy_and_bench.sh` for benchmark iteration and `run_full.sh` /
   `check_full.sh` for the full run (see "Benchmark and diagnose tools" below).

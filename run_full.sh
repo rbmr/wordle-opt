@@ -30,7 +30,7 @@ set -e
 # concurrent jobs contend for the same cores/cache and invalidate both jobs'
 # timings, and a second `full` run racing the first would also stomp on the
 # same output files.
-HOST="${WORDLE_OPT_COMPUTE_HOST:-robert@compute}"
+HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
 LOG="full_run.log"
 PIDFILE="full_run.pid"
 TIMEOUT_SECS="${WORDLE_OPT_FULL_TIMEOUT:-36000}" # 10h, the milestone threshold

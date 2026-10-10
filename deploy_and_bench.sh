@@ -6,18 +6,17 @@ set -e
 # agent) syncs, tests, and benchmarks the same way.
 #
 # Default host resolves via Tailscale (see `tailscale status`), which works
-# regardless of which network this script runs from. If you're running this
-# FROM assistant specifically (the wordle-opt agent's own use case), set
-# WORDLE_OPT_COMPUTE_HOST=robert@10.10.10.2 - a private link that exists
-# only between assistant and compute on their shared Proxmox host, so it
-# never depends on the external LAN's DHCP or on Tailscale re-authentication.
-# The VM itself must be powered on first - see pve01 (`qm start 100`) if
-# neither address connects.
+# regardless of which network this script runs from. `compute` is the
+# bare-metal machine `pc01` since the October 2026 migration off Proxmox -
+# reachable as `user@pc01` over Tailscale; the old 10.10.10.2 private link
+# is retired and the tailnet grants this path in accept mode (no re-auth).
+# The machine must be powered on first - `pc01` is a WoL machine now: wake
+# it with `ssh wake-pc01` (Wake-on-LAN via the rpi5) if it is off.
 #
 # Any arguments are passed through to `benchmark-random` - e.g.
 # `./deploy_and_bench.sh -n 500 -k 3` for a quick check while iterating,
 # or no arguments for the fuller default sweep once an idea looks promising.
-HOST="${WORDLE_OPT_COMPUTE_HOST:-robert@compute}"
+HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
 
 # Computed HERE, not on compute: the remote build directory has no .git (see
 # the rsync --exclude below), so it structurally cannot answer "what commit

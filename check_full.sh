@@ -6,7 +6,7 @@ set -e
 # on the full run's completion. If it's still running, just check back
 # later (e.g. re-run this script on your own schedule); don't sit and wait
 # on it synchronously.
-HOST="${WORDLE_OPT_COMPUTE_HOST:-robert@compute}"
+HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
 LOG="wordle-opt/full_run.log"
 PIDFILE="full_run.pid"
 
