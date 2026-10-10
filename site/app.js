@@ -49,8 +49,19 @@ const app = {
   nodeStats: new Map(),
   // tree state
   allNodes: [],
-  expandDepth: 2,
+  expandDepth: 1, // collapsed by default (the slider sets this to depth+1)
   query: "",
+  // word-list state (Explore): the words, plus which file they were built for
+  wordData: [],
+  wordCandCount: 0,
+  wordListFile: null,
+  wordMatches: [],
+  wordRowH: 0,
+  wordScroll: null,
+  // candidate-column filter: "all" | "candidates" | "non"
+  wordFilter: "all",
+  // which file the tree DOM was built for, so re-entering Explore is instant
+  treeFile: null,
 };
 
 // --- play view ---
@@ -474,6 +485,153 @@ function renderChart() {
   box.appendChild(plot);
 }
 
+// --- word list (Explore) ---
+// The data is built in one cheap pass; the rows are rendered in chunks on
+// animation frames, so Explore opens immediately (the header, filter and table
+// shell are static markup) and the list fills in over the next few hundred
+// milliseconds instead of blocking the first paint on ~15k rows.
+function renderWordList() {
+  app.wordData = [];
+  app.wordCandCount = 0;
+  const file = app.file;
+  if (!file) return;
+  const candidates = new Set(file.candidates.map((w) => w.toLowerCase()));
+  for (const w of file.guesses) {
+    const isCand = candidates.has(w.toLowerCase());
+    if (isCand) app.wordCandCount++;
+    app.wordData.push({ word: w, lower: w.toLowerCase(), isCand });
+  }
+  syncWordHeader();
+  applyWordFilter();
+}
+
+// The marks are drawn as inline SVG rather than text glyphs: the symbol fonts
+// render U+2713/U+2714 and U+2715/U+2716 with wildly different weights, so a
+// check and a cross that look balanced in one font look mismatched in another.
+// A fixed stroke width makes them match everywhere.
+function markSvg(isCandidate) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "3.2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute("d", isCandidate ? "M4 10.5 L8.5 15 L16 5.5" : "M5.5 5.5 L14.5 14.5 M14.5 5.5 L5.5 14.5");
+  svg.appendChild(path);
+  return svg;
+}
+
+function wordRow(d) {
+  const tr = document.createElement("tr");
+  tr.appendChild(el("td", "word", d.word));
+  const mark = el("td", d.isCand ? "mark yes" : "mark no");
+  mark.appendChild(markSvg(d.isCand));
+  mark.title = d.isCand ? "candidate: can be the final answer" : "guess only: never the final answer";
+  tr.appendChild(mark);
+  return tr;
+}
+
+// The words matching both filters. Computed from the data, never from the DOM,
+// so the shown count is exact even while the rows are still streaming in.
+function wordMatches() {
+  const q = (document.getElementById("word-search").value || "").trim().toLowerCase();
+  const mode = app.wordFilter;
+  return (app.wordData || []).filter(
+    (d) => (q === "" || d.lower.includes(q)) && (mode === "all" || (mode === "candidates") === d.isCand)
+  );
+}
+
+// Renders only the rows in (and just around) the scroll viewport, with spacer
+// rows standing in for the rest. That keeps the scrollbar honest and the list
+// effectively complete the moment Explore opens, instead of laying out ~15k
+// rows (which is what made the first paint slow).
+function spacerRow(heightPx) {
+  const tr = document.createElement("tr");
+  tr.className = "spacer";
+  const td = document.createElement("td");
+  td.colSpan = 2;
+  td.style.height = heightPx + "px";
+  tr.appendChild(td);
+  return tr;
+}
+
+function wordRowHeight() {
+  if (app.wordRowH) return app.wordRowH;
+  const rows = document.querySelectorAll("#word-rows tr:not(.spacer)");
+  if (rows.length >= 2) app.wordRowH = rows[1].offsetTop - rows[0].offsetTop;
+  else if (rows.length === 1) app.wordRowH = rows[0].offsetHeight;
+  return app.wordRowH || 31;
+}
+
+function drawWordWindow() {
+  const wrap = document.querySelector(".word-table-wrap");
+  const tbody = document.getElementById("word-rows");
+  const matches = app.wordMatches || [];
+  const rowH = wordRowHeight();
+  // The wrap's height is content-driven (a max-height, not a fixed height), so
+  // before any rows exist clientHeight is only the header. Size the window for
+  // the largest viewport the wrap can ever have, so the first render already
+  // covers it instead of leaving the bottom of the box empty.
+  const maxH = parseFloat(getComputedStyle(wrap).maxHeight) || 460;
+  const viewH = Math.max(wrap.clientHeight, maxH);
+  const first = Math.max(0, Math.floor(wrap.scrollTop / rowH) - 5);
+  const count = Math.ceil(viewH / rowH) + 10;
+  const last = Math.min(matches.length, first + count);
+  tbody.textContent = "";
+  if (first > 0) tbody.appendChild(spacerRow(first * rowH));
+  for (let i = first; i < last; i++) tbody.appendChild(wordRow(matches[i]));
+  if (last < matches.length) tbody.appendChild(spacerRow((matches.length - last) * rowH));
+}
+
+// The words matching the current filters are handed straight to the windowed
+// renderer, so a filter change is instant no matter how many rows match.
+function renderWordRows(matches) {
+  app.wordMatches = matches;
+  const wrap = document.querySelector(".word-table-wrap");
+  if (wrap) wrap.scrollTop = 0;
+  drawWordWindow();
+}
+
+// Substring filter (case-insensitive) combined with the Candidate-column
+// filter. The count is the size of the intersection of the two.
+function applyWordFilter() {
+  const matches = wordMatches();
+  renderWordRows(matches);
+  const total = (app.wordData || []).length;
+  const count = document.getElementById("word-count");
+  if (document.getElementById("word-search").value.trim() === "" && app.wordFilter === "all") {
+    count.textContent = `${total.toLocaleString()} words \u00b7 ${app.wordCandCount.toLocaleString()} candidates`;
+  } else {
+    const suffix =
+      app.wordFilter === "all" ? "" : app.wordFilter === "candidates" ? " \u00b7 candidates only" : " \u00b7 non-candidates only";
+    count.textContent = `${matches.length.toLocaleString()} of ${total.toLocaleString()} shown${suffix}`;
+  }
+}
+
+function syncWordHeader() {
+  const th = document.getElementById("word-cand-header");
+  th.dataset.mode = app.wordFilter;
+  th.title =
+    app.wordFilter === "all"
+      ? "click to filter: all words \u2192 candidates only \u2192 non-candidates only"
+      : app.wordFilter === "candidates"
+        ? "showing candidates only; click for non-candidates"
+        : "showing non-candidates only; click to show all";
+}
+
+// Clicking the Candidate header cycles all -> candidates only -> non-candidates
+// -> all, always combined with whatever the substring filter says.
+function cycleWordFilter() {
+  const modes = ["all", "candidates", "non"];
+  app.wordFilter = modes[(modes.indexOf(app.wordFilter) + 1) % modes.length];
+  syncWordHeader();
+  applyWordFilter();
+}
+
 function setMode(mode) {
   app.mode = mode;
   document.getElementById("mode-play").classList.toggle("active", mode === "play");
@@ -481,7 +639,18 @@ function setMode(mode) {
   const selected = app.selected !== null;
   document.getElementById("play").hidden = !selected || mode !== "play";
   document.getElementById("tree-pane").hidden = !selected || mode !== "tree";
-  if (mode === "tree" && selected) renderTree();
+  if (mode === "tree" && selected) {
+    // Re-entering Explore reuses the already-built DOM (including whatever the
+    // user expanded); it is only rebuilt when a different tree is loaded.
+    if (app.treeFile !== app.file) {
+      renderTree();
+      app.treeFile = app.file;
+    }
+    if (app.wordListFile !== app.file) {
+      renderWordList();
+      app.wordListFile = app.file;
+    }
+  }
 }
 
 // Reflects the selected policy (button highlight), the optional custom-file
@@ -537,6 +706,10 @@ function loadFile(file, selection, customName) {
   resetPlay();
   document.getElementById("tree").textContent = "";
   app.allNodes = [];
+  app.treeFile = null;
+  app.wordListFile = null;
+  app.wordFilter = "all";
+  document.getElementById("word-search").value = "";
   status.hidden = true;
   status.textContent = "";
   updateSelectionUI();
@@ -615,6 +788,16 @@ depthEl.addEventListener("input", () => {
   renderTree();
 });
 document.getElementById("search").addEventListener("input", (e) => { app.query = e.target.value; applySearch(); });
+document.getElementById("word-search").addEventListener("input", applyWordFilter);
+document.getElementById("word-cand-header").addEventListener("click", cycleWordFilter);
+// Scroll is the only thing that changes which word rows are rendered.
+document.querySelector(".word-table-wrap").addEventListener("scroll", () => {
+  if (app.wordScroll) return;
+  app.wordScroll = requestAnimationFrame(() => {
+    app.wordScroll = null;
+    drawWordWindow();
+  });
+});
 
 // Default to the optimal example.
 loadExample("optimal");

@@ -82,8 +82,8 @@
       </div>
       <div class="group">
         <label for="depth">Expand to depth</label>
-        <input type="range" id="depth" min="0" max="8" value="1" />
-        <span id="depth-val">1</span>
+        <input type="range" id="depth" min="0" max="8" value="0" />
+        <span id="depth-val">0</span>
       </div>
       <div class="group">
         <label for="search">Find</label>
@@ -91,6 +91,30 @@
       </div>
     </div>
     <div id="tree" class="tree"></div>
+
+    <h2 class="section-title">Word list</h2>
+    <div class="toolbar inner">
+      <div class="group">
+        <label for="word-search">Filter</label>
+        <input type="search" id="word-search" placeholder="substring" autocomplete="off" />
+      </div>
+      <div class="group"><span id="word-count" class="muted"></span></div>
+    </div>
+    <p class="word-note muted">
+      Every accepted guess in this tree's dictionary. The second column marks the
+      words that can be the final answer.
+    </p>
+    <div class="word-table-wrap">
+      <table class="word-table" id="word-table">
+        <thead>
+          <tr>
+            <th>Word</th>
+            <th id="word-cand-header" class="clickable" data-mode="all" title="click to filter: all words \u2192 candidates only \u2192 non-candidates only">Candidate</th>
+          </tr>
+        </thead>
+        <tbody id="word-rows"></tbody>
+      </table>
+    </div>
   </section>
 </main>
 
