@@ -441,7 +441,7 @@ impl<'a> OptimalPolicy<'a> {
 
     fn scan(&self, candidates: &[usize]) -> (usize, u32) {
         use rayon::prelude::*;
-        use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+        use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
         let initial_best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
         // global_beta tracks best_val + 1 so we get exact values for ties!
@@ -485,12 +485,25 @@ impl<'a> OptimalPolicy<'a> {
             return (best_guess, best_val);
         }
 
-        let chunk_size = (active.len() / rayon::current_num_threads()).max(1);
-
-        active
-            .par_chunks(chunk_size)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
+        // Dynamic, rank-ordered claiming: every worker repeatedly takes the
+        // next-best-ranked unevaluated guess from a shared counter. The
+        // guesses' costs are wildly uneven, so a static one-chunk-per-thread
+        // split left most cores idle while a few long evaluations finished
+        // (measured: busy cores fell from ~13 to ~1 over the root scan), and
+        // it also let the late chunks run with a loose beta while only the
+        // first chunk held the best-ranked guesses. Claiming in rank order
+        // keeps all workers on the most promising guesses first, so the
+        // bound tightens as early as possible.
+        //
+        // The outcome is independent of evaluation order: a guess whose true
+        // cost is <= the best is always evaluated exactly (beta is always
+        // best + 1 >= its cost + 1 at that point), and the packed
+        // (cost, index) minimum breaks ties by heuristic rank.
+        let next = AtomicUsize::new(0);
+        (0..rayon::current_num_threads())
+            .into_par_iter()
+            .with_max_len(1)
+            .for_each(|_| {
                 let mut solver = Solver::new_with_global_beta(
                     self.matrix,
                     self.max_k,
@@ -502,10 +515,11 @@ impl<'a> OptimalPolicy<'a> {
                     self.equiv_cache,
                 );
 
-                let start_idx = chunk_idx * chunk_size;
-
-                for (i, &(g, _)) in chunk.iter().enumerate() {
-                    let idx = start_idx + i;
+                loop {
+                    let idx = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(&(g, _)) = active.get(idx) else {
+                        break;
+                    };
 
                     let current_best_val = global_beta.load(Ordering::Relaxed);
 
@@ -1709,6 +1723,42 @@ mod tests {
             assert_eq!(
                 report.total_cost, solver_cost as u64,
                 "optimal policy tree total cost must equal the solver's optimal cost at N={n}"
+            );
+        }
+    }
+
+    /// The optimal tree must not depend on how the per-node scan is scheduled.
+    /// The scan claims guesses dynamically across however many worker threads
+    /// exist, so evaluation order differs between runs and thread counts; the
+    /// tree - including which of several equally-optimal guesses is chosen -
+    /// must be byte-identical regardless.
+    #[test]
+    fn optimal_tree_is_independent_of_thread_count() {
+        let n = 100;
+        let dict = real_dict(n);
+        let matrix = ResponseMatrix::new(&dict);
+        let root: Vec<usize> = (0..n).collect();
+        let build_json = |threads: usize| -> String {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            pool.install(|| {
+                let opts = BuildOptions {
+                    progress: false,
+                    ..Default::default()
+                };
+                let (tree, _) =
+                    build_policy_tree(&matrix, &dict, Strategy::Optimal, &root, &opts).unwrap();
+                tree.to_readable(&dict).unwrap().to_json()
+            })
+        };
+        let reference = build_json(1);
+        for threads in [3, 8] {
+            assert_eq!(
+                build_json(threads),
+                reference,
+                "optimal tree differs between 1 and {threads} threads"
             );
         }
     }
