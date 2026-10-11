@@ -6,21 +6,29 @@ set -e
 # on the full run's completion. If it's still running, just check back
 # later (e.g. re-run this script on your own schedule); don't sit and wait
 # on it synchronously.
+#
+# The run's artifacts are stamped with the UTC day and the commit, so this
+# prints the stamp it is reporting on and where that run's files are. When a
+# run has finished, the tail includes its summary block - copy the row from
+# there into full_run_history.md.
 HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
-LOG="wordle-opt/full_run.log"
-PIDFILE="full_run.pid"
+RUN_DIR="full-runs"
 
 ssh "$HOST" "
-	if [ ! -f $PIDFILE ]; then
-		echo 'No full_run.pid found - run_full.sh has not been run yet (or the file was cleaned up).'
+	stampfile=\"\$HOME/$RUN_DIR/CURRENT\"
+	if [ ! -f \"\$stampfile\" ]; then
+		echo 'No full run has been started on this host yet (no ~/$RUN_DIR/CURRENT).'
 		exit 0
 	fi
-	pid=\$(cat $PIDFILE)
-	if kill -0 \"\$pid\" 2>/dev/null; then
-		echo \"RUNNING (pid \$pid)\"
+	stamp=\$(cat \"\$stampfile\")
+	pidfile=\"\$HOME/$RUN_DIR/current.pid\"
+	log=\"\$HOME/$RUN_DIR/\$stamp.log\"
+	if [ -f \"\$pidfile\" ] && kill -0 \"\$(cat \"\$pidfile\")\" 2>/dev/null; then
+		echo \"RUNNING (run \$stamp, pid \$(cat \"\$pidfile\"))\"
 	else
-		echo 'NOT RUNNING (process has exited - check the tail below for completion or a crash)'
+		echo \"NOT RUNNING (run \$stamp has exited - see the tail below for completion or a crash)\"
+		echo \"Artifacts: ~/$RUN_DIR/\$stamp.json, ~/$RUN_DIR/\$stamp-progress.parquet, ~/$RUN_DIR/\$stamp.log\"
 	fi
-	echo '--- last 15 lines of $LOG ---'
-	tail -n 15 $LOG 2>/dev/null || echo '(no log yet)'
+	echo \"--- last 15 lines of \$stamp.log ---\"
+	tail -n 15 \"\$log\" 2>/dev/null || echo '(no log yet)'
 "

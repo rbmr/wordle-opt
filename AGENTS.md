@@ -189,7 +189,26 @@ a short `timeout` locally rather than guessing.
   you background manually - background it, note it in the progress issue,
   and go do something else in the meantime.
 
-## Benchmark and diagnose tools
+## Tree-only runs: the cost-only modes are being removed
+
+Every run's output is the **policy tree**. The cost-only modes - the
+`benchmark` / `benchmark-random` / `diagnose` subcommands, `solve --compare`'s
+cost-only baseline, and the standalone cost-only entry points behind them - are
+being removed (issue #13). A run that reports a cost instead of producing a
+tree measures the wrong thing: it skips exactly the work the deliverable is
+about, which is how the information the tree needs is determined, stored,
+maintained through the run, and finally serialized. Optimizing the algorithm
+therefore means optimizing the tree build.
+
+What stays is the machinery the tree is built from: the solver internals that
+compute costs and bounds, and the heuristic strategies (`min-remaining`,
+`max-freq`) that produce trees and exercise the same path cheaply. What goes is
+any user-facing run whose output is a bare cost.
+
+Until the removal lands, treat the tools below as legacy: don't use them to
+produce new evidence, and prefer a tree-producing run.
+
+## Benchmark and diagnose tools (legacy, being removed - see above)
 
 - `benchmark [-n MAX_N]` - a **fixed, deterministic** candidate subset per
   size (the first N dictionary entries, sorted - the same convention the
@@ -226,25 +245,33 @@ which made results non-reproducible and non-comparable; that history is kept
 for reference in `benchmark_history_legacy.md` and should not be used to judge
 whether a change is an improvement or a regression.
 
-## The `full` run: at most once a day
+## The `full` run: at most once a day, and its output is the tree
 
-A `full` run is the day's validation checkpoint, and you get **at most one
-per day**. Its output is the **policy JSON**, not just the optimal cost.
-Construct the readable JSON only after the solve has finished - during the
-run keep everything in the efficient in-memory representation, and build the
-JSON once the solve completes, so the serialization adds no meaningful
-overhead to the solve itself.
+A `full` run is the day's checkpoint, and you get **at most one per day**.
+Its output is the **policy tree**, not just the optimal cost (see "Tree-only
+runs" below). Construct the readable JSON only after the solve has finished -
+during the run keep everything in the efficient in-memory representation, and
+build the JSON once the solve completes, so the serialization adds no
+meaningful overhead to the solve itself.
 
-Because you only get one a day, make it count:
+When to run it is your own judgment, not a schedule:
 
-- Only launch it when diagnose/benchmark data at large N gives a specific,
-  verified reason to expect it will finish in a bounded time.
-- The run always exports its progress time series (see "Operationally"
-  below) so the algorithm can be compared **day over day**. The point of the
-  daily run is to measure whether the optimizations since the previous day
-  actually moved the needle, not just to "get an answer".
-- Record each day's full-run time and its progress series so the trend is
-  visible.
+- Run one when a new commit with a **performance-relevant change** has landed,
+  and skip it when nothing performance-relevant changed - a run whose commit
+  differs only in docs or tests measures nothing new.
+- Nothing schedules it. There is no daily job: the run is a deliberate
+  checkpoint on evidence, not a routine step.
+- Only launch it when large-N evidence gives a specific, verified reason to
+  expect it will finish in a bounded time (see ARCHITECTURE.md's "Known
+  Scaling Behavior" for why small-N extrapolation alone is not that evidence).
+- It **requires a clean tree**. `run_full.sh` refuses to start with
+  uncommitted changes, because the run records the commit it ran as, and an
+  uncommitted edit would make that record wrong.
+- Every run keeps its own artifacts, stamped with the UTC day and the commit
+  (`~/full-runs/<YYYY-MM-DD>-<commit>.{json,parquet,log}` in compute's home),
+  so no run can overwrite another's data. **Add a row for each completed run
+  to `full_run_history.md`** - that repo-side index is what makes the trend
+  visible, and what survives a compute rebuild.
 - `run_full.sh` is bounded by `timeout` and refuses a concurrent run, but
   don't relaunch it reflexively after every change hoping it now works -
   every hour it runs is an hour `compute` is unavailable for the benchmark
@@ -259,9 +286,10 @@ Operationally:
   wall time a completed run reports.
 - `./check_full.sh` is the cheap, near-instant status check: still running?
   crashed? done? Poll it on your own schedule instead of blocking on the run.
-- The run writes `~/optimal-2340.json` (the tree) and
-  `~/optimal-2340-progress.parquet` (its progress series) in compute's home
-  directory, not the rsync target, so the next deploy cannot delete them.
+- The run keeps its artifacts in `~/full-runs/` in compute's home directory -
+  `<YYYY-MM-DD>-<commit>.json` (the tree), `-progress.parquet` (its progress
+  series) and `.log` (its log) - not the rsync target, so neither the next
+  deploy nor a later run can delete or overwrite them.
 - The run bounds its own memory: a 2 GB transposition table and a
   4,096-entry-per-shard equivalence-cache cap. (The transposition table
   allocates two AtomicU64 slots per unit - 16 bytes - and each cached
