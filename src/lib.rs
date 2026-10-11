@@ -56,6 +56,13 @@ fn hostname() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+/// Whether `host` is a hostname of the designated compute machine. `pc01` is
+/// the bare-metal compute host since the October 2026 migration; the older
+/// names are kept so historical setups keep working.
+fn is_compute_hostname(host: &str) -> bool {
+    matches!(host, "pc01" | "ubuntu-main" | "compute")
+}
+
 /// Whether this process is running on the designated high-memory/high-core
 /// compute host, as opposed to a laptop/dev machine. Gates both the
 /// transposition table size (`Solver::solve`) and which CLI operations are
@@ -63,8 +70,7 @@ fn hostname() -> String {
 /// single check so the two decisions can't silently drift apart if the
 /// compute host's name ever changes.
 pub fn is_compute_host() -> bool {
-    let host = hostname();
-    host == "ubuntu-main" || host == "compute"
+    is_compute_hostname(&hostname())
 }
 
 /// Runs the solver on fixed, deterministic candidate subsets (the first `n`
@@ -687,7 +693,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
     // task guidance on why that machine must never run heavy computation.
     if !is_compute_host() {
         eprintln!(
-            "HARD GUARD: full run must execute on the compute host (hostname 'ubuntu-main' or 'compute'). Use rsync + ssh, or deploy_and_bench.sh."
+            "HARD GUARD: full run must execute on the compute host (hostname 'pc01'). Use rsync + ssh, or deploy_and_bench.sh."
         );
         std::process::exit(1);
     }
@@ -1549,6 +1555,20 @@ mod tests {
         assert_eq!(last.nodes, 7);
         assert_eq!(last.states_evaluated, 1234);
         assert!(last.elapsed_s > 0.0);
+    }
+
+    /// The compute host must be recognised by its current name, or the full
+    /// run / benchmark guards refuse to run and the transposition table
+    /// silently falls back to its small non-compute size. Dev machines must
+    /// not be recognised.
+    #[test]
+    fn compute_hostnames_are_recognised() {
+        assert!(is_compute_hostname("pc01"));
+        assert!(is_compute_hostname("compute"));
+        assert!(is_compute_hostname("ubuntu-main"));
+        assert!(!is_compute_hostname("helios"));
+        assert!(!is_compute_hostname("assistant"));
+        assert!(!is_compute_hostname(""));
     }
 
     /// A full run's outputs default to the home directory (not the rsync
