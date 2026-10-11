@@ -60,7 +60,8 @@ def parse_run_history(text):
             continue
 
         def col(name, default=""):
-            i = header.index(name) if name in header else -1
+            # Prefix match, so "date" finds the "Date (UTC)" column.
+            i = next((j for j, h in enumerate(header) if h.startswith(name)), -1)
             return cells[i] if 0 <= i < len(cells) else default
 
         m = re.search(r"([\d.]+)\s*s", col("wall time"))
