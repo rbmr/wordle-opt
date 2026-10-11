@@ -3,7 +3,13 @@ set -e
 source $HOME/.cargo/env
 cargo fmt -- --check
 cargo clippy --release -- -D warnings
-cargo test --release
+# Serialize the tests, matching deploy_and_bench.sh's compute-side gate. The
+# GPU path uploads the response matrix into process-global device buffers, so
+# several solves with *different* dictionaries running concurrently (which the
+# default parallel test harness does) race on that matrix and give wrong golden
+# costs. Until the GPU init is made thread-safe, this gate must run serially or
+# it fails nondeterministically on any CUDA-enabled host.
+cargo test --release -- --test-threads=1
 # The viewer's pure logic (site/policy-core.js) is shared with the browser and
 # has its own fixtures; skip with a note where Node is not installed.
 if command -v node >/dev/null 2>&1; then
