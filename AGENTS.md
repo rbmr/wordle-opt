@@ -270,7 +270,7 @@ When to run it is your own judgment, not a schedule:
 - Every run keeps its own artifacts, stamped with the UTC day and the commit
   (`~/full-runs/<YYYY-MM-DD>-<commit>.{json,parquet,log}` in compute's home),
   so no run can overwrite another's data. **Add a row for each completed run
-  to `full_run_history.md`** - that repo-side index is what makes the trend
+  to `run_history.md`** - that repo-side index is what makes the trend
   visible, and what survives a compute rebuild.
 - `run_full.sh` is bounded by `timeout` and refuses a concurrent run, but
   don't relaunch it reflexively after every change hoping it now works -

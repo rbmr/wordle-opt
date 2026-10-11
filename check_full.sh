@@ -10,7 +10,7 @@ set -e
 # The run's artifacts are stamped with the UTC day and the commit, so this
 # prints the stamp it is reporting on and where that run's files are. When a
 # run has finished, the tail includes its summary block - copy the row from
-# there into full_run_history.md.
+# there into run_history.md.
 HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
 RUN_DIR="full-runs"
 

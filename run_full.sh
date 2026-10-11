@@ -16,7 +16,7 @@ set -e
 #   ~/full-runs/<YYYY-MM-DD>-<commit>.json             the policy tree
 #   ~/full-runs/<YYYY-MM-DD>-<commit>-progress.parquet its progress series
 #   ~/full-runs/<YYYY-MM-DD>-<commit>.log              the run log (summary included)
-# Add a row for the completed run to full_run_history.md - that file is the
+# Add a row for the completed run to run_history.md - that file is the
 # record that survives a compute rebuild; the artifacts above do not.
 #
 # When to run is this repo's own call: a full run once a new commit with a
