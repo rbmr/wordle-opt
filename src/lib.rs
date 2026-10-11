@@ -73,6 +73,38 @@ pub fn is_compute_host() -> bool {
     is_compute_hostname(&hostname())
 }
 
+/// The message to print when a build with no CUDA support runs on the compute
+/// host, or `None` when there is nothing to warn about. Split out from the
+/// printer so the wording and the host gating are testable without spawning a
+/// process.
+///
+/// This is the runtime backstop for the failure that silently cost the pc01
+/// reinstall its GPU: `build.rs` only sets `cuda_enabled` when `nvcc` is
+/// present, so a compute host without the CUDA toolkit compiles every
+/// `#[cfg(cuda_enabled)]` path away and runs CPU-only - invisibly, since the
+/// build script's own warning does not reappear once its output is cached
+/// (installing `nvcc` afterwards does not force a re-run).
+fn compute_cuda_mismatch_warning(host: &str, cuda_enabled: bool) -> Option<String> {
+    if is_compute_hostname(host) && !cuda_enabled {
+        Some(format!(
+            "WARNING: this is the compute host ('{host}') but the build has NO CUDA support: \
+             nvcc was absent when build.rs ran, so every #[cfg(cuda_enabled)] path (the GPU) \
+             compiled away and this run is CPU-only. Fix: install `nvidia-cuda-toolkit` and \
+             `g++-13` on the compute host, then force build.rs to re-run (e.g. `touch \
+             src/gpu_kernel.cu`) and rebuild."
+        ))
+    } else {
+        None
+    }
+}
+
+/// Prints [`compute_cuda_mismatch_warning`] for this host and build, if any.
+fn warn_if_compute_without_cuda() {
+    if let Some(msg) = compute_cuda_mismatch_warning(&hostname(), cfg!(cuda_enabled)) {
+        eprintln!("{msg}");
+    }
+}
+
 /// Runs the solver on fixed, deterministic candidate subsets (the first `n`
 /// dictionary entries, sorted - identical to the golden regression tests in
 /// `solver.rs`) and appends a self-contained, traceable record to
@@ -1325,6 +1357,7 @@ fn run_validate_cli(args: &[String]) {
 // Agent integrating IDA*
 /// Command line interface entrypoint for solving, benchmarking, and verifying the optimal strategy.
 pub fn run_cli() {
+    warn_if_compute_without_cuda();
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("solve") => return run_solve_cli(&args[2..]),
@@ -1569,6 +1602,18 @@ mod tests {
         assert!(!is_compute_hostname("helios"));
         assert!(!is_compute_hostname("assistant"));
         assert!(!is_compute_hostname(""));
+    }
+
+    /// A compute-host build that lost its CUDA toolkit must say so at runtime,
+    /// since the GPU paths compile away silently. Dev machines building
+    /// without CUDA are normal and must stay quiet, as must a compute host
+    /// that does have CUDA.
+    #[test]
+    fn compute_host_without_cuda_warns() {
+        assert!(compute_cuda_mismatch_warning("pc01", false).is_some());
+        assert!(compute_cuda_mismatch_warning("compute", false).is_some());
+        assert!(compute_cuda_mismatch_warning("pc01", true).is_none());
+        assert!(compute_cuda_mismatch_warning("helios", false).is_none());
     }
 
     /// A full run's outputs default to the home directory (not the rsync
