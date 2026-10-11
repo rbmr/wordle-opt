@@ -949,22 +949,39 @@ impl Flags {
 /// - `--max-candidates N --sample-seed S` takes `N` candidates drawn from the
 ///   reproducible stream `subset_rng(S, N)` - a representative spread rather
 ///   than one alphabetically-adjacent slice.
-fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> Dictionary {
+fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> (Dictionary, String) {
     let guesses = flags.get_or("guesses", "words/guesses.txt");
     let candidates = flags.get_or("candidates", "words/candidates.txt");
     let full = Dictionary::load(guesses, candidates);
-    if max_candidates == 0 || max_candidates >= full.candidates.len() {
-        return full;
+    let total = full.candidates.len();
+    // The candidate selection is part of a run's identity - (commit, seed, size)
+    // is what makes a timing reproducible - so it is described in the returned
+    // string and printed by the caller, into the run's log.
+    if max_candidates == 0 || max_candidates >= total {
+        return (
+            full,
+            format!("full list ({total} candidates, no subset, no seed)"),
+        );
     }
-    let idx: Vec<usize> = match flags.get("sample-seed").and_then(|v| v.parse::<u64>().ok()) {
+    let (idx, description) = match flags.get("sample-seed").and_then(|v| v.parse::<u64>().ok()) {
         Some(seed) => {
             let mut rng = subset_rng(seed, max_candidates);
-            sample_random_subset(&mut rng, full.candidates.len(), max_candidates)
+            let idx = sample_random_subset(&mut rng, total, max_candidates);
+            (
+                idx,
+                format!("seeded subset (seed={seed}, size={max_candidates} of {total})"),
+            )
         }
-        None => (0..max_candidates).collect(),
+        None => (
+            (0..max_candidates).collect(),
+            format!("deterministic first-{max_candidates} subset of {total} (no seed)"),
+        ),
     };
     let subset: Vec<crate::core::Word> = idx.iter().map(|&i| full.candidates[i]).collect();
-    Dictionary::from_words(full.guesses.clone(), subset)
+    (
+        Dictionary::from_words(full.guesses.clone(), subset),
+        description,
+    )
 }
 
 /// Resident set size of this process, in MiB, from `/proc/self/status`. Used
@@ -1158,13 +1175,14 @@ fn run_solve_cli(args: &[String]) {
     let collect_samples = flags.get("stats").is_some();
     let stats_format = flags.get_or("stats-format", "parquet");
 
-    let dict = load_dict_from_flags(&flags, max_candidates);
+    let (dict, selection) = load_dict_from_flags(&flags, max_candidates);
     let n = dict.candidates.len();
     println!(
-        "solve: strategy={} candidates={} guesses={}",
+        "solve: strategy={} candidates={} guesses={} selection=\"{}\"",
         strategy.name(),
         n,
-        dict.guesses.len()
+        dict.guesses.len(),
+        selection
     );
     if strategy == Strategy::Optimal && !is_compute_host() && n > 500 {
         eprintln!(
@@ -1227,7 +1245,7 @@ fn run_solve_cli(args: &[String]) {
     // failure must not discard the result of a long build.
     println!("=== POLICY TREE COMPLETE ===");
     println!("Strategy: {}", strategy.name());
-    println!("Candidates: {}", n);
+    println!("Candidates: {} ({})", n, selection);
     println!("Nodes: {}", stats.summary.nodes);
     println!("Edges: {}", stats.summary.edges);
     println!("Leaves: {}", stats.summary.leaves);
@@ -1660,6 +1678,34 @@ mod tests {
             after - before >= 0.1,
             "cpu time grew by only {}s after ~0.3s of work",
             after - before
+        );
+    }
+
+    /// A run's identity is (commit, seed, candidate-set size): without the seed
+    /// in the log, a subset timing cannot be reproduced or compared, because a
+    /// different subset of the same size can perform very differently.
+    #[test]
+    fn candidate_selection_description_records_the_seed() {
+        let flags =
+            |args: &[&str]| Flags::parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let (_, d) = load_dict_from_flags(
+            &flags(&["--max-candidates", "10", "--sample-seed", "7"]),
+            10,
+        );
+        assert!(
+            d.contains("seed=7"),
+            "seeded subset must name its seed: {d}"
+        );
+        assert!(
+            d.contains("size=10"),
+            "seeded subset must name its size: {d}"
+        );
+        let (_, d) = load_dict_from_flags(&flags(&["--max-candidates", "10"]), 10);
+        assert!(d.contains("no seed"), "an unseeded subset must say so: {d}");
+        let (_, d) = load_dict_from_flags(&flags(&[]), 0);
+        assert!(
+            d.contains("full list"),
+            "the full list must be described: {d}"
         );
     }
 

@@ -13,9 +13,11 @@ set -e
 # The machine must be powered on first - `pc01` is a WoL machine now: wake
 # it with `ssh wake-pc01` (Wake-on-LAN via the rpi5) if it is off.
 #
-# Any arguments are passed through to `benchmark-random` - e.g.
-# `./deploy_and_bench.sh -n 500 -k 3` for a quick check while iterating,
-# or no arguments for the fuller default sweep once an idea looks promising.
+# Any arguments are passed straight through to the CLI - e.g.
+# `./deploy_and_bench.sh solve --strategy optimal --max-candidates 500
+# --sample-seed 1 --output /tmp/n500.json` for a reproducible tree run at a
+# smaller candidate set, which is the cheap way to exercise the tree path while
+# iterating (the cost-only benchmark modes are being removed - see issue #13).
 HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
 
 # Computed HERE, not on compute: the remote build directory has no .git (see

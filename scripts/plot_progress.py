@@ -43,28 +43,41 @@ def read(path):
 
 
 def parse_run_history(text):
-    """Rows of run_history.md -> list of dicts. Header and separator rows and any
-    row without a parseable wall time are skipped."""
+    """Rows of run_history.md -> list of dicts. The column set is read from the
+    header row, so adding or reordering columns cannot silently mis-parse a row.
+    A row without a parseable wall time is skipped."""
     runs = []
+    header = None
     for line in text.splitlines():
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 6 or cells[0].startswith("---") or cells[0].lower().startswith("date"):
+        if header is None:
+            if cells and cells[0].lower().startswith("date"):
+                header = [c.lower() for c in cells]
             continue
-        m = re.search(r"([\d.]+)\s*s", cells[5])
+        if not cells or all(set(c) <= set("-: ") for c in cells):
+            continue
+
+        def col(name, default=""):
+            i = header.index(name) if name in header else -1
+            return cells[i] if 0 <= i < len(cells) else default
+
+        m = re.search(r"([\d.]+)\s*s", col("wall time"))
         if not m:
             continue
         try:
-            candidates = int(cells[3])
+            candidates = int(col("candidates"))
         except ValueError:
             candidates = None
-        runs.append({"date": cells[0],
-                     "commit": cells[1].strip("`") or "unknown",
+        seed = col("seed")
+        runs.append({"date": col("date"),
+                     "commit": col("commit").strip("`") or "unknown",
                      "candidates": candidates,
-                     "strategy": cells[4] or "unknown",
+                     "seed": seed if seed and seed != "—" else None,
+                     "strategy": col("strategy") or "unknown",
                      "seconds": float(m.group(1)),
-                     "cost": cells[6] if len(cells) > 6 else "—"})
+                     "cost": col("cost", "—") or "—"})
     return runs
 
 
@@ -100,18 +113,18 @@ def main():
     ax1.set_title("Full N=2340 tree runs over time (post-migration only)")
     ax1.grid(True, alpha=0.3)
 
-    by_commit = {}
+    by_key = {}
     for r in runs:
         if r["candidates"]:
-            by_commit.setdefault(r["commit"], []).append(r)
-    if by_commit:
+            by_key.setdefault((r["commit"], r["seed"]), []).append(r)
+    if by_key:
         cmap = plt.get_cmap("viridis")
-        for i, (commit, rows) in enumerate(sorted(by_commit.items(),
-                                                  key=lambda kv: kv[1][0]["date"])):
+        for i, ((commit, seed), rows) in enumerate(
+                sorted(by_key.items(), key=lambda kv: kv[1][0]["date"])):
             rows.sort(key=lambda r: r["candidates"])
             ax2.plot([r["candidates"] for r in rows], [r["seconds"] for r in rows],
-                     marker="o", ms=4, lw=1.8, color=cmap(i / max(1, len(by_commit) - 1)),
-                     label=f"{commit} ({rows[0]['date']})")
+                     marker="o", ms=4, lw=1.8, color=cmap(i / max(1, len(by_key) - 1)),
+                     label=f"{commit} seed={seed if seed else '-'} ({rows[0]['date']})")
         ax2.set_xscale("log")
         ax2.set_yscale("log")
         ax2.legend(fontsize=8)
@@ -134,7 +147,7 @@ def main():
         print("  (none recorded)")
     for r in sorted(runs, key=lambda r: (r["date"], r["candidates"] or 0)):
         print(f"  {r['date']}  {r['commit']:>10}  N={str(r['candidates']):<5} "
-              f"{r['strategy']:<10} {r['seconds']:9.3f}s  cost={r['cost']}")
+              f"seed={str(r['seed']):<4} {r['strategy']:<10} {r['seconds']:9.3f}s  cost={r['cost']}")
 
 
 if __name__ == "__main__":

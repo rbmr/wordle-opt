@@ -205,6 +205,19 @@ compute costs and bounds, and the heuristic strategies (`min-remaining`,
 `max-freq`) that produce trees and exercise the same path cheaply. What goes is
 any user-facing run whose output is a bare cost.
 
+To run one cheaply - a tree at a smaller candidate set, reproducible from a seed:
+
+```
+./deploy_and_bench.sh solve --strategy optimal --max-candidates 500 --sample-seed 1 --output /tmp/n500.json
+```
+
+The subset is drawn from `subset_rng(seed, size)`, so **(commit, seed, size) is
+the run's identity**: the run prints that triple into its log, and its timing is
+only comparable against a run with the same triple. Record every completed run -
+seed included - in `run_history.md`; that is what builds the size-vs-time trend,
+and it is how a full run that got faster while small runs got slower is visible
+rather than hidden.
+
 Until the removal lands, treat the tools below as legacy: don't use them to
 produce new evidence, and prefer a tree-producing run.
 
