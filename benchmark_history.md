@@ -369,3 +369,13 @@ Each size draws 3 independent random subsets (no replacement within a subset) fr
 | 750 | 3 | 2272/2283.0/2289 | 64.08/93.46/122.25 | 305987/415189.0/476309 | 51194 |
 | 1000 | 3 | 3121/3130.0/3141 | 182.33/280.91/347.62 | 1261314/1508018.7/1763456 | 356249 |
 
+## Randomized Benchmark Run: commit=1ae4d0c host=pc01 cpus=16 seed=20260906 samples_per_size=3 unix_time=1791724935
+Each size draws 3 independent random subsets (no replacement within a subset) from a stream derived from (seed=20260906, size) alone - so a given size's samples are reproduced by any re-run with the same seed and sample count, regardless of what other sizes are requested alongside it.
+| Size | Samples | Cost [Min/Avg/Max] | Time(s) [Min/Avg/Max] | States [Min/Avg/Max] | CacheHits Avg |
+|------|---------|---------------------|------------------------|----------------------|---------------|
+| 100 | 3 | 244/247.0/250 | 0.04/0.05/0.06 | 23/70.7/131 | 0 |
+| 250 | 3 | 675/680.7/685 | 0.12/0.15/0.17 | 231/462.0/639 | 32 |
+| 500 | 3 | 1457/1460.7/1466 | 6.29/6.95/7.57 | 21236/26337.7/33436 | 5271 |
+| 750 | 3 | 2272/2283.0/2289 | 19.64/26.51/36.14 | 207853/279504.0/316508 | 53420 |
+| 1000 | 3 | 3121/3130.0/3141 | 93.55/112.32/122.29 | 852907/1004661.0/1170467 | 472868 |
+
