@@ -760,6 +760,7 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         observer: Some(std::sync::Arc::clone(&observer)),
         ..Default::default()
     };
+    let cpu_start = process_cpu_seconds();
     let start = Instant::now();
     let (progress_thread, progress_samples) =
         spawn_build_progress(&observer, std::time::Duration::from_secs(60), start, &done);
@@ -801,6 +802,14 @@ fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
         elapsed.as_secs_f64(),
         elapsed.as_secs_f64() / 3600.0
     );
+    if let (Some(c0), Some(c1)) = (cpu_start, process_cpu_seconds()) {
+        println!(
+            "Avg busy cores: {:.1} (cpu {:.1}s over wall {:.1}s; GPU spin-waits count as busy)",
+            (c1 - c0) / elapsed.as_secs_f64(),
+            c1 - c0,
+            elapsed.as_secs_f64()
+        );
+    }
     println!("States evaluated: {}", stats.summary.states_evaluated);
     println!("Guesses evaluated: {}", stats.summary.guesses_evaluated);
     println!("Bounds pruned: {}", stats.summary.pruned_by_bounds);
@@ -973,6 +982,25 @@ fn rss_mb() -> Option<u64> {
     None
 }
 
+/// Total CPU time (user + system) this process has consumed so far, in
+/// seconds, from `/proc/self/stat`. Dividing a CPU-time delta by the wall-time
+/// delta gives the average number of cores kept busy, which shows whether a
+/// run is actually using the machine or is waiting on a few straggler
+/// threads. Caveat: threads spinning on a GPU kernel (`cudaDeviceScheduleSpin`)
+/// count as busy, so this is an upper bound on useful work. Assumes the
+/// standard Linux clock tick of 100 Hz. `None` where /proc is unavailable.
+fn process_cpu_seconds() -> Option<f64> {
+    const CLK_TCK: f64 = 100.0;
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // The command name (field 2) may contain spaces; fields resume after the
+    // last ')'. utime/stime are fields 14/15, i.e. indices 11/12 from there.
+    let rest = stat.get(stat.rfind(')')? + 1..)?;
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let utime: f64 = fields.get(11)?.parse().ok()?;
+    let stime: f64 = fields.get(12)?.parse().ok()?;
+    Some((utime + stime) / CLK_TCK)
+}
+
 /// Applies the memory bounds a large run needs. The equivalence cache caches
 /// one ~2 KB projection per distinct candidate set, so its default cap allows
 /// tens of GB in the worst case (it OOM-killed the first full tree run);
@@ -1015,6 +1043,10 @@ fn spawn_build_progress(
         // record a sample once per `interval`. A short interval shortens the
         // tick with it, so the cadence is honored exactly.
         let tick = interval.min(std::time::Duration::from_millis(250));
+        // Previous (wall seconds, cpu seconds), for the per-interval average
+        // number of busy cores.
+        let mut prev_wall = start.elapsed().as_secs_f64();
+        let mut prev_cpu = process_cpu_seconds();
         loop {
             let mut waited = std::time::Duration::ZERO;
             while waited < interval {
@@ -1043,8 +1075,17 @@ fn spawn_build_progress(
                 pruned_by_bounds: m.pruned_by_bounds.load(Ordering::Relaxed) as u64,
                 pruned_by_equivalence: m.pruned_by_equivalence.load(Ordering::Relaxed) as u64,
             };
+            let cpu_now = process_cpu_seconds();
+            let busy_cores = match (prev_cpu, cpu_now) {
+                (Some(p), Some(c)) if sample.elapsed_s > prev_wall => {
+                    format!("{:.1}", (c - p) / (sample.elapsed_s - prev_wall))
+                }
+                _ => "?".into(),
+            };
+            prev_wall = sample.elapsed_s;
+            prev_cpu = cpu_now;
             eprintln!(
-                "[progress] elapsed={:.0}s nodes={} states={} guesses={} root_guesses={} cache_hits={} bounds_pruned={} rss_mb={}",
+                "[progress] elapsed={:.0}s nodes={} states={} guesses={} root_guesses={} cache_hits={} bounds_pruned={} busy_cores={} rss_mb={}",
                 sample.elapsed_s,
                 sample.nodes,
                 sample.states_evaluated,
@@ -1052,6 +1093,7 @@ fn spawn_build_progress(
                 m.root_guesses_done.load(Ordering::Relaxed),
                 sample.cache_hits,
                 sample.pruned_by_bounds,
+                busy_cores,
                 rss_mb()
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "?".into())
@@ -1163,6 +1205,7 @@ fn run_solve_cli(args: &[String]) {
         observer: Some(std::sync::Arc::clone(&observer)),
         ..Default::default()
     };
+    let cpu_start = process_cpu_seconds();
     let start = Instant::now();
     let (progress_thread, progress_samples) =
         spawn_build_progress(&observer, std::time::Duration::from_secs(15), start, &done);
@@ -1195,6 +1238,14 @@ fn run_solve_cli(args: &[String]) {
         stats.summary.total_cost as f64 / n as f64
     );
     println!("Build time: {:.3}s", elapsed.as_secs_f64());
+    if let (Some(c0), Some(c1)) = (cpu_start, process_cpu_seconds()) {
+        println!(
+            "Avg busy cores: {:.1} (cpu {:.1}s over wall {:.1}s; GPU spin-waits count as busy)",
+            (c1 - c0) / elapsed.as_secs_f64(),
+            c1 - c0,
+            elapsed.as_secs_f64()
+        );
+    }
     println!(
         "Dictionary hash: {}",
         crate::policy::hash_hex(tree.dictionary_hash)
@@ -1588,6 +1639,28 @@ mod tests {
         assert_eq!(last.nodes, 7);
         assert_eq!(last.states_evaluated, 1234);
         assert!(last.elapsed_s > 0.0);
+    }
+
+    /// Process CPU time is readable here (Linux) and grows when CPU is burned,
+    /// so a busy-cores figure derived from it is meaningful.
+    #[test]
+    fn process_cpu_seconds_increases_with_work() {
+        let before = process_cpu_seconds().expect("/proc/self/stat must be readable");
+        let t0 = Instant::now();
+        let mut acc = 0u64;
+        // Burn ~0.3 s of CPU (well above the 10 ms clock tick).
+        while t0.elapsed() < std::time::Duration::from_millis(300) {
+            for i in 0..10_000u64 {
+                acc = acc.wrapping_mul(31).wrapping_add(i);
+            }
+            std::hint::black_box(acc);
+        }
+        let after = process_cpu_seconds().expect("/proc/self/stat must be readable");
+        assert!(
+            after - before >= 0.1,
+            "cpu time grew by only {}s after ~0.3s of work",
+            after - before
+        );
     }
 
     /// The compute host must be recognised by its current name, or the full
