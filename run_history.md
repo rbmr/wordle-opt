@@ -37,13 +37,19 @@ the commit that actually ran.
 | Date (UTC) | Commit | Host | Candidates | Seed | Strategy | Wall time | Cost | Nodes | States | Peak RSS | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-10-11 | `a67dd02` | pc01 | 1000 | 1 | optimal | 40.942s | 3124 | 1049 | — | — | first post-migration tree run recorded; GPU-backed (avg busy cores 15.7); validation OK |
+| 2026-10-11 | `a67dd02` | pc01 | 2340 | — | optimal | 6470.277s (1.80h) | 8001 | 2478 | 139753702 | ~9.9GB | full N=2340 run; under the 2h milestone; mean guesses 3.419231, max depth 5, avg busy cores 16.0; validation OK |
 
 ## Notes
 
 - The `a67dd02` row is taken from that run's own output (`Build time: 40.942s`,
   `Total cost: 3124`, `Nodes: 1049`, `Validation: OK`), captured when it ran; the
   command was `solve --strategy optimal --max-candidates 1000 --sample-seed 1`.
-- The full N=2340 run launched the same day is added here when it completes. It
-  uses the whole candidate list, so its seed cell is `—` (no subset was drawn).
+- The full N=2340 `a67dd02` row is taken from that run's own summary block
+  (`Wall time: 6470.277s (1.80h)`, `Total cost: 8001`, `Nodes: 2478`,
+  `States evaluated: 139753702`, peak `rss_mb=9899`, `Validation: OK`), captured
+  via `./check_full.sh`. It uses the whole candidate list, so its seed cell is
+  `—` (no subset was drawn). This is the first full run to finish under the 2h
+  milestone; it was launched by the 2026-10-11 monitoring session and completed
+  at 22:15 UTC.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
