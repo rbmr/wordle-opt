@@ -25,7 +25,10 @@ policy for the chosen strategy (`optimal`, or a heuristic like
 words. Its output is the **policy JSON**, not just the optimal cost.
 
 **The 10-hour goal was met** (the full N=2340 set solved in 5.19 h, commit
-`a243ff9`). **The next milestone is a full solve in under 2 hours.**
+`a243ff9`), and **the 2-hour milestone was met on 2026-10-11**: the full N=2340
+policy tree built in **1.80 h** (6470.277 s) at commit `a67dd02` on pc01, cost
+8001, validation OK - see `run_history.md`. **The next milestone is a full solve
+in under 20 minutes.**
 
 A consequence that's easy to get backwards: **completing one full N=2340
 run is a validation checkpoint, not the finish line.** Don't treat
