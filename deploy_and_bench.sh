@@ -16,8 +16,8 @@ set -e
 # Any arguments are passed straight through to the CLI - e.g.
 # `./deploy_and_bench.sh solve --strategy optimal --max-candidates 500
 # --sample-seed 1 --output /tmp/n500.json` for a reproducible tree run at a
-# smaller candidate set, which is the cheap way to exercise the tree path while
-# iterating (the cost-only benchmark modes are being removed - see issue #13).
+# smaller candidate set. If no arguments are provided, it defaults to
+# building a small reproducible optimal tree (--max-candidates 250 --sample-seed 1).
 HOST="${WORDLE_OPT_COMPUTE_HOST:-user@pc01}"
 
 # Computed HERE, not on compute: the remote build directory has no .git (see
@@ -45,12 +45,14 @@ ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bi
 echo "Running correctness tests on compute (catches a broken change before benchmarking it)..."
 ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
 
-# This script is for benchmark-random only, always foreground and bounded to
-# 10h - it does NOT have a `full` mode. An earlier version briefly added one
-# that blocked the calling shell for up to 10 hours waiting on the SSH
-# command to return - exactly the synchronous-wait anti-pattern AGENTS.md
-# warns against. run_full.sh/check_full.sh supersede that: they launch the
-# full run detached and let you poll it instead of blocking on it. Use those
-# for a `full` run; this script stays benchmark-random-only.
-echo "Running benchmark suite on compute (bounded by timeout 36000)..."
-ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- $*"
+# This script is the tree-producing iteration entry point, always foreground
+# and bounded to 10h - it does NOT have a `full` mode. run_full.sh/check_full.sh
+# launch the full N=2340 run detached and let you poll it instead of blocking
+# on it. Use those for a `full` run; this script is for tree iteration.
+CMD_ARGS="$*"
+if [ -z "$CMD_ARGS" ]; then
+	CMD_ARGS="solve --strategy optimal --max-candidates 250 --sample-seed 1 --output /tmp/iter-tree-250.json"
+fi
+
+echo "Running tree iteration on compute (bounded by timeout 36000): $CMD_ARGS"
+ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- $CMD_ARGS"

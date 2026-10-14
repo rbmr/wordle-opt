@@ -104,10 +104,9 @@ apply.
 
 ## Known Scaling Behavior: depth transitions, not a smooth curve
 
-`benchmark-random` (see AGENTS.md's "Benchmark and diagnose tools") showed avg
+Historical diagnostic runs (see `diagnose_history.md`) showed avg
 cost/candidate scaling smoothly from N=1000 to N=1500 (~3.13 -> ~3.26
-guesses/candidate) while wall-clock time jumped ~25x. Investigated with
-`diagnose` (see `diagnose_history.md`): the cause is `max_depth` - the
+guesses/candidate) while wall-clock time jumped ~25x. The cause is `max_depth` - the
 deepest guess-sequence the search has to explore to *prove* optimality -
 stepping from 4 to 5 somewhere between N=1100 and N=1200. That single
 step, not smooth growth in N, dominates: wall time jumped 5.2x for only
@@ -139,9 +138,8 @@ treat it as a lead to chase, not a conclusion to build on unverified.
 
 Every algorithmic claim here should be checkable against the code it cites
 and against `cargo test --release` (the golden regression tests in
-`src/solver.rs` pin down exact expected costs for fixed inputs) or
-`benchmark_history.md` (deterministic, commit-stamped timing and search-
-statistics data - see AGENTS.md's "Benchmark and diagnose tools"). If a future change
+`src/solver.rs` pin down exact expected costs and tree validity for fixed inputs) or
+`run_history.md` (deterministic, commit-stamped timing and tree statistics). If a future change
 makes a section here inaccurate, fix the section rather than leaving it as
 aspirational documentation of what used to be true.
 

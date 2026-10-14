@@ -113,8 +113,8 @@ overshot). Concretely, from here on:
   confidence level, and say what evidence would firm it up. A number
   without that context reads as a measurement, not a guess, and this repo
   has been burned by exactly that.
-- **Only trust reproducible, seeded methodology** (`benchmark`,
-  `benchmark-random` - see "Benchmark and diagnose tools" below) for anything
+- **Only trust reproducible, seeded methodology** (e.g. `solve` on a seeded
+  subset via `deploy_and_bench.sh` — see "Tree-only runs" below) for anything
   you report as a real result. A one-off unseeded sample is not evidence of a
   trend.
 - **Never declare the algorithm "fully optimal" or "can't be improved
@@ -139,8 +139,8 @@ compute's, so quick local iteration doesn't slow compute down:
   suite), `cargo build`, `cargo clippy`, small/quick checks, anything on
   the order of a few tens of seconds.
 - **Must go to `compute` via the scripts below:** anything exhaustive,
-  full-scale, or open-ended in runtime - `benchmark`, `benchmark-random`,
-  `diagnose`, and especially `full`.
+  full-scale, or open-ended in runtime — tree iteration via `deploy_and_bench.sh`,
+  and especially `full`.
 
 If you're not sure which side of that line something falls on, wrap it in
 a short `timeout` locally rather than guessing.
@@ -192,12 +192,12 @@ a short `timeout` locally rather than guessing.
   you background manually - background it, note it in the progress issue,
   and go do something else in the meantime.
 
-## Tree-only runs: the cost-only modes are being removed
+## Tree-only runs: all runs output the policy tree
 
 Every run's output is the **policy tree**. The cost-only modes - the
 `benchmark` / `benchmark-random` / `diagnose` subcommands, `solve --compare`'s
-cost-only baseline, and the standalone cost-only entry points behind them - are
-being removed (issue #13). A run that reports a cost instead of producing a
+cost-only baseline, and the standalone cost-only entry points behind them -
+have been removed (issue #13). A run that reports a cost instead of producing a
 tree measures the wrong thing: it skips exactly the work the deliverable is
 about, which is how the information the tree needs is determined, stored,
 maintained through the run, and finally serialized. Optimizing the algorithm
@@ -221,45 +221,17 @@ seed included - in `run_history.md`; that is what builds the size-vs-time trend,
 and it is how a full run that got faster while small runs got slower is visible
 rather than hidden.
 
-Until the removal lands, treat the tools below as legacy: don't use them to
-produce new evidence, and prefer a tree-producing run.
+## Benchmark and diagnose tools (removed — see issue #13)
 
-## Benchmark and diagnose tools (legacy, being removed - see above)
+The legacy cost-only subcommands `benchmark`, `benchmark-random`, and `diagnose`
+have been removed (issue #13). All iteration runs now go through `solve` (or
+`deploy_and_bench.sh`) and produce a validated policy tree. The commit stamp
+comes from `WORDLE_OPT_COMMIT` when set, falling back to `git rev-parse` in the
+working directory.
 
-- `benchmark [-n MAX_N]` - a **fixed, deterministic** candidate subset per
-  size (the first N dictionary entries, sorted - the same convention the
-  golden tests use), appended to `benchmark_history.md` stamped with the git
-  commit, hostname and CPU count it ran on. Same N and same host implies the
-  same input and hardware, so a timing or state-count change reflects a real
-  code change, not benchmark noise. Use it for quick, single-sample sanity
-  checks.
-- `benchmark-random [-n MAX_N] [-k SAMPLES]` - `SAMPLES` (default 5)
-  independent random subsets per size, drawn from a single seeded RNG
-  (`BENCHMARK_RANDOM_SEED`), so it is exactly as reproducible as `benchmark`
-  but over a representative spread instead of one arbitrary slice. This is
-  the mode to use when judging real scaling/performance progress. `MAX_N`
-  defaults to 1000, not 1500: `diagnose` found a sharp cost cliff between
-  N=1100 and N=1200 where a single sample can take 1-2 hours (see
-  ARCHITECTURE.md's "Known Scaling Behavior"), so raise it deliberately with
-  a low `-k`.
-- `diagnose [-n N1,N2,...]` - a full metrics breakdown (branching factor,
-  search depth, cache hit rate, prune counters) for one random sample per
-  size, for investigating *why* time scales the way it does. Appends to
-  `diagnose_history.md`.
-
-The commit stamp: these tools (and `full`) label their results with the commit
-that produced them. The hash comes from `WORDLE_OPT_COMMIT` when set, falling
-back to `git rev-parse` in the working directory. Compute's build directory is
-populated by `rsync --exclude '.git'`, so it has no git repo of its own - always
-launch runs through `deploy_and_bench.sh` / `run_full.sh`, which compute the
-commit from the local repo and pass it through, rather than invoking
-`cargo run` on compute directly (which would silently stamp the result
-"unknown").
-
-Earlier benchmarking used randomly sampled candidates and untracked commits,
-which made results non-reproducible and non-comparable; that history is kept
-for reference in `benchmark_history_legacy.md` and should not be used to judge
-whether a change is an improvement or a regression.
+The historical records `benchmark_history.md`, `benchmark_history_legacy.md`,
+and `diagnose_history.md` are preserved for reference (AGENTS.md says not to
+rewrite history files), but all new tree runs are recorded in `run_history.md`.
 
 ## The `full` run: at most once a day, and its output is the tree
 

@@ -84,10 +84,9 @@ cargo run --release -- verify
 ```
 
 Building an `optimal` tree for the full candidate set takes hours, so start
-with `--max-candidates`. Other subcommands exist for measuring and validating
-the engine itself (`benchmark`, `benchmark-random`, `diagnose`, `full`);
-AGENTS.md describes what they do and the dedicated machine they are meant to
-run on.
+with `--max-candidates`. Other subcommands exist for full-scale tree builds
+and verification (`full`, `verify`); AGENTS.md describes what they do and the
+dedicated machine they are meant to run on.
 
 ### `solve` flags
 
@@ -103,12 +102,6 @@ run on.
   rather than only the node-boundary phase. The Parquet file is written with
   `SNAPPY` compression and loads directly into pandas/polars/duckdb for
   plotting.
-- `--compare` - also run the cost-only solve on the same candidate set, print
-  its time and the tree/cost-only ratio, and fail if its exact optimum
-  disagrees with the tree's total. Measured on the compute host, the tree build
-  is about 1.1-1.5x the cost-only solve at N=500-1000 (2-5x at N<=250, where
-  fixed per-node costs dominate), converging toward parity as the root scan
-  dominates.
 - `--no-progress` - silence the periodic stderr progress line.
 - `--cache-entries N` - transposition-table size (power of two).
 

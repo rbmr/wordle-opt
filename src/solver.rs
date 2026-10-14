@@ -1646,52 +1646,56 @@ impl<'a> Solver<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
-    #[test]
-    fn test_golden_n800_exact_cost() {
-        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+    fn assert_golden_tree_cost(n: usize, expected_cost: u64) {
+        let full = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let candidates: Vec<crate::core::Word> = full.candidates[..n].to_vec();
+        let dict = crate::dict::Dictionary::from_words(full.guesses.clone(), candidates);
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
-        let metrics = Metrics::new();
-        let candidates: Vec<usize> = (0..800).collect();
-        let equiv_cache: [_; 1024] =
-            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
+        let root: Vec<usize> = (0..n).collect();
+        let opts = crate::policy::BuildOptions {
+            progress: false,
+            ..Default::default()
+        };
+        let (tree, stats) = crate::policy::build_policy_tree(
+            &matrix,
+            &dict,
+            crate::policy::Strategy::Optimal,
+            &root,
+            &opts,
+        )
+        .expect("build_policy_tree failed");
+        let report = tree
+            .validate(&matrix, &dict)
+            .expect("tree validation failed");
         assert_eq!(
-            cost, 2419,
-            "N=800 golden cost changed - likely correctness bug"
+            report.wins, n as u64,
+            "N={n} tree must cover all candidates"
+        );
+        assert_eq!(
+            report.total_cost, expected_cost,
+            "N={n} golden policy tree total cost changed - likely correctness bug"
+        );
+        assert_eq!(
+            stats.summary.total_cost, expected_cost,
+            "N={n} stats summary cost must match validation report"
         );
     }
 
-    use super::*;
-
     #[test]
     fn test_golden_n100_exact_cost() {
-        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
-        let matrix = crate::matrix::ResponseMatrix::new(&dict);
-        let metrics = Metrics::new();
-        let candidates: Vec<usize> = (0..100).collect();
-        let equiv_cache: [_; 1024] =
-            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
-        assert_eq!(
-            cost, 262,
-            "N=100 golden cost changed - likely correctness bug"
-        );
+        assert_golden_tree_cost(100, 262);
+    }
+
+    #[test]
+    fn test_golden_n250_exact_cost() {
+        assert_golden_tree_cost(250, 702);
     }
 
     #[test]
     fn test_golden_n500_exact_cost() {
-        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
-        let matrix = crate::matrix::ResponseMatrix::new(&dict);
-        let metrics = Metrics::new();
-        let candidates: Vec<usize> = (0..500).collect();
-        let equiv_cache: [_; 1024] =
-            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
-        assert_eq!(
-            cost, 1469,
-            "N=500 golden cost changed - likely correctness bug"
-        );
+        assert_golden_tree_cost(500, 1469);
     }
 
     #[test]
@@ -1702,32 +1706,12 @@ mod tests {
         // to children, who may need it for their own (looser) sub-beta.
         // That bug produced cost=2264 here (wrong, too high) while leaving
         // N=100/250 unaffected. Costs ~10s; worth it for what it catches.
-        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
-        let matrix = crate::matrix::ResponseMatrix::new(&dict);
-        let metrics = Metrics::new();
-        let candidates: Vec<usize> = (0..750).collect();
-        let equiv_cache: [_; 1024] =
-            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
-        assert_eq!(
-            cost, 2256,
-            "N=750 golden cost changed - likely correctness bug"
-        );
+        assert_golden_tree_cost(750, 2256);
     }
 
     #[test]
-    fn test_golden_n250_exact_cost() {
-        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
-        let matrix = crate::matrix::ResponseMatrix::new(&dict);
-        let metrics = Metrics::new();
-        let candidates: Vec<usize> = (0..250).collect();
-        let equiv_cache: [_; 1024] =
-            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
-        let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
-        assert_eq!(
-            cost, 702,
-            "N=250 golden cost changed - likely correctness bug"
-        );
+    fn test_golden_n800_exact_cost() {
+        assert_golden_tree_cost(800, 2419);
     }
 
     #[test]
