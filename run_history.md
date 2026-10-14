@@ -57,6 +57,7 @@ the commit that actually ran.
 | 2026-10-14 | `2058171` | pc01 | 2000 | 1 | optimal | 104.059s (1.73m) | 6723 | 2119 | 4787 | ~283MB | max depth 4, leaves 1674; validation OK |
 | 2026-10-14 | `7786894` | pc01 | 2200 | 1 | optimal | 186.144s (3.10m) | 7477 | 2331 | 21822 | ~320MB | max depth 5, leaves 1804; avg busy cores 15.7; validation OK |
 | 2026-10-14 | `f9b82eb` | pc01 | 2340 | — | optimal | 252.639s (4.21m) | 8001 | 2478 | 26712 | ~2.3GB | full N=2340 run; under the 20-minute milestone (4.21m vs 1.80h at a67dd02, 25.6x speedup); mean guesses 3.419231, max depth 5, avg busy cores 15.6; validation OK |
+| 2026-10-14 | `67418f9` | pc01 | 1000 | 1 | optimal | 14.281s | 3124 | 1049 | — | — | evaluate largest buckets first in root filter; 14.4% faster (14.281s vs 16.679s); validation OK |
 
 
 ## Notes
