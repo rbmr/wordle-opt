@@ -55,6 +55,7 @@ the commit that actually ran.
 | 2026-10-14 | `2058171` | pc01 | 1600 | 1 | optimal | 53.026s | 5256 | 1681 | 240 | ~253MB | tighten large bucket bounds; 7.8x faster than 65bb6be (53.026s vs 414.827s); validation OK |
 | 2026-10-14 | `2058171` | pc01 | 1800 | 1 | optimal | 73.643s (1.23m) | 5974 | 1900 | 235 | ~260MB | max depth 4, leaves 1521; validation OK |
 | 2026-10-14 | `2058171` | pc01 | 2000 | 1 | optimal | 104.059s (1.73m) | 6723 | 2119 | 4787 | ~283MB | max depth 4, leaves 1674; validation OK |
+| 2026-10-14 | `7786894` | pc01 | 2200 | 1 | optimal | 186.144s (3.10m) | 7477 | 2331 | 21822 | ~320MB | max depth 5, leaves 1804; avg busy cores 15.7; validation OK |
 
 
 ## Notes
