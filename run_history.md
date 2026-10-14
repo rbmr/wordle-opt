@@ -41,6 +41,7 @@ the commit that actually ran.
 | 2026-10-14 | `9d5855c` | pc01 | 1000 | 1 | optimal | 37.473s | 3124 | 1049 | — | ~713MB | bucket lower-bound tightening; 8.5% faster than a67dd02 (37.473s vs 40.942s); avg busy cores 15.7; validation OK |
 | 2026-10-14 | `5f84eda` | pc01 | 1100 | 1 | optimal | 66.291s | 3485 | 1163 | — | ~1.2GB | max depth 4, leaves 917; avg busy cores 15.8; validation OK |
 | 2026-10-14 | `c57c4c9` | pc01 | 1200 | 1 | optimal | 98.709s | 3825 | 1252 | — | ~1.65GB | max depth 4, leaves 994; avg busy cores 15.8; validation OK |
+| 2026-10-14 | `8fc1afa` | pc01 | 1300 | 1 | optimal | 283.040s (4.7m) | 4204 | 1370 | — | ~4.2GB | max depth 4, leaves 1080; avg busy cores 15.8; validation OK |
 
 ## Notes
 
@@ -63,5 +64,8 @@ the commit that actually ran.
 - The `c57c4c9` row is taken from that run's own output (`Build time: 98.709s`,
   `Total cost: 3825`, `Nodes: 1252`, `Validation: OK`, peak `rss_mb=1650`), captured
   via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1200 --sample-seed 1 --output /tmp/n1200.json`.
+- The `8fc1afa` row is taken from that run's own output (`Build time: 283.040s`,
+  `Total cost: 4204`, `Nodes: 1370`, `Validation: OK`, peak `rss_mb=4188`), captured
+  via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1300 --sample-seed 1 --output /tmp/n1300.json`.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
