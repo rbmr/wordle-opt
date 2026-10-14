@@ -56,6 +56,7 @@ the commit that actually ran.
 | 2026-10-14 | `2058171` | pc01 | 1800 | 1 | optimal | 73.643s (1.23m) | 5974 | 1900 | 235 | ~260MB | max depth 4, leaves 1521; validation OK |
 | 2026-10-14 | `2058171` | pc01 | 2000 | 1 | optimal | 104.059s (1.73m) | 6723 | 2119 | 4787 | ~283MB | max depth 4, leaves 1674; validation OK |
 | 2026-10-14 | `7786894` | pc01 | 2200 | 1 | optimal | 186.144s (3.10m) | 7477 | 2331 | 21822 | ~320MB | max depth 5, leaves 1804; avg busy cores 15.7; validation OK |
+| 2026-10-14 | `f9b82eb` | pc01 | 2340 | — | optimal | 252.639s (4.21m) | 8001 | 2478 | 26712 | ~2.3GB | full N=2340 run; under the 20-minute milestone (4.21m vs 1.80h at a67dd02, 25.6x speedup); mean guesses 3.419231, max depth 5, avg busy cores 15.6; validation OK |
 
 
 ## Notes
@@ -86,6 +87,7 @@ the commit that actually ran.
   `Total cost: 4204`, `Nodes: 1370`, `Validation: OK`, peak `rss_mb=4321`), captured
   via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1300 --sample-seed 1 --output /tmp/n1300.json`.
 - The `2058171` rows are taken from those runs' own outputs, captured via `./deploy_and_bench.sh` on seeded subsets (seed=1, sizes 1000, 1300, 1600, 1800, 2000). Tightened large-bucket capacity lower bounds via maximum branching factor calculation reduced root DFS states by orders of magnitude (e.g. 105k to 40 for N=1000, 3.0M to 240 for N=1600).
+- The full N=2340 `f9b82eb` row is taken from that run's own summary block (`Wall time: 252.639s (0.07h)`, `Total cost: 8001`, `Nodes: 2478`, `States evaluated: 26712`, peak `rss_mb=2315`, `Validation: OK`), captured via `./check_full.sh`. It solves the complete dictionary in 4.21 minutes (a 25.6x speedup over the 1.80h milestone from a67dd02, beating the 20-minute milestone), with states evaluated reduced by 5,231x (26,712 vs 139,753,702).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
