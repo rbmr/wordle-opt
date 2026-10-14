@@ -43,6 +43,11 @@ the commit that actually ran.
 | 2026-10-14 | `c57c4c9` | pc01 | 1200 | 1 | optimal | 98.709s | 3825 | 1252 | — | ~1.65GB | max depth 4, leaves 994; avg busy cores 15.8; validation OK |
 | 2026-10-14 | `8fc1afa` | pc01 | 1300 | 1 | optimal | 283.040s (4.7m) | 4204 | 1370 | — | ~4.2GB | max depth 4, leaves 1080; avg busy cores 15.8; validation OK |
 | 2026-10-14 | `e77f6b4` | pc01 | 1300 | 1 | optimal | 285.695s (4.76m) | 4204 | 1370 | — | ~4.3GB | max depth 4, leaves 1080; avg busy cores 15.9; validation OK |
+| 2026-10-14 | `13f04b8` | pc01 | 500 | 1 | optimal | 1.532s | 1453 | 517 | — | — | fast in-set partition evaluation for small buckets; 4x faster on N=500; avg busy cores 11.8; validation OK |
+| 2026-10-14 | `13f04b8` | pc01 | 1000 | 1 | optimal | 16.242s | 3124 | 1049 | 105823 | ~423MB | fast in-set partition evaluation; 2.3x faster than 9d5855c (16.242s vs 37.473s); avg busy cores 15.4; validation OK |
+| 2026-10-14 | `13f04b8` | pc01 | 1300 | 1 | optimal | 108.075s (1.80m) | 4204 | 1370 | 832453 | ~1.67GB | fast in-set partition evaluation; 2.6x faster than e77f6b4 (108.075s vs 285.695s); 6x fewer states; validation OK |
+| 2026-10-14 | `13f04b8` | pc01 | 1400 | 1 | optimal | 92.032s (1.53m) | 4525 | 1473 | 686831 | ~1.42GB | max depth 4, leaves 1176; avg busy cores 15.8; validation OK |
+| 2026-10-14 | `13f04b8` | pc01 | 1600 | 1 | optimal | 417.011s (6.95m) | 5256 | 1681 | 2977956 | ~5.07GB | max depth 4, leaves 1321; avg busy cores 15.9; validation OK |
 
 ## Notes
 
