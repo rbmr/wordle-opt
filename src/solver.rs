@@ -1571,13 +1571,15 @@ impl<'a> Solver<'a> {
                     hash ^= self.matrix.zobrist[c];
                 }
 
-                if let Some((cached_val, true)) = self.cache.get(hash) {
+                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
                     let lb = p_lbs[r_idx];
                     let used_val = cached_val.max(lb);
                     cost += used_val - lb;
                     p_lbs[r_idx] = used_val;
-                    exact_vals[r_idx] = used_val;
+                    if is_exact {
+                        exact_vals[r_idx] = used_val;
+                    }
                 }
             }
 
