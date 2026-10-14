@@ -3,8 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-unsigned char* global_d_matrix = NULL;
-uint32_t* global_d_bounds = NULL;
+static uint32_t* global_d_bounds = NULL;
 
 extern "C" {
 
@@ -44,6 +43,7 @@ void* gpu_alloc_context() {
 }
 
 void gpu_free_context(void* ptr) {
+    if (!ptr) return;
     ThreadContext* ctx = (ThreadContext*)ptr;
     cudaFree(ctx->d_active_guesses);
     cudaFree(ctx->d_set);
@@ -61,25 +61,53 @@ void gpu_free_context(void* ptr) {
     free(ctx);
 }
 
-void gpu_init(unsigned char* host_matrix, size_t matrix_size, uint32_t* host_bounds, size_t bounds_size) {
+void gpu_init_bounds(const uint32_t* host_bounds, size_t bounds_size) {
     cudaSetDeviceFlags(cudaDeviceScheduleSpin);
     cudaSetDevice(0);
-    // Re-initialization is allowed (the process may load more than one
-    // dictionary, e.g. across tests), so release any previous buffers first.
-    if (global_d_matrix) { cudaFree(global_d_matrix); global_d_matrix = NULL; }
-    if (global_d_bounds) { cudaFree(global_d_bounds); global_d_bounds = NULL; }
-    cudaMalloc(&global_d_matrix, matrix_size);
-    cudaMemcpy(global_d_matrix, host_matrix, matrix_size, cudaMemcpyHostToDevice);
+    if (!global_d_bounds) {
+        cudaError_t err = cudaMalloc(&global_d_bounds, bounds_size);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMalloc failed for bounds (%zu bytes): %s\n", bounds_size, cudaGetErrorString(err));
+            return;
+        }
+        err = cudaMemcpy(global_d_bounds, host_bounds, bounds_size, cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "cudaMemcpy failed for bounds (%zu bytes): %s\n", bounds_size, cudaGetErrorString(err));
+            cudaFree(global_d_bounds);
+            global_d_bounds = NULL;
+            return;
+        }
+    }
+}
 
-    cudaMalloc(&global_d_bounds, bounds_size);
-    cudaMemcpy(global_d_bounds, host_bounds, bounds_size, cudaMemcpyHostToDevice);
+const unsigned char* gpu_upload_matrix(const unsigned char* host_matrix, size_t matrix_size) {
+    cudaSetDevice(0);
+    unsigned char* d_matrix = NULL;
+    cudaError_t err = cudaMalloc(&d_matrix, matrix_size);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed for matrix (%zu bytes): %s\n", matrix_size, cudaGetErrorString(err));
+        return NULL;
+    }
+    err = cudaMemcpy(d_matrix, host_matrix, matrix_size, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed for matrix (%zu bytes): %s\n", matrix_size, cudaGetErrorString(err));
+        cudaFree(d_matrix);
+        return NULL;
+    }
+    return d_matrix;
+}
+
+void gpu_free_matrix(const unsigned char* d_matrix) {
+    if (d_matrix) {
+        cudaFree((void*)d_matrix);
+    }
 }
 
 } // extern "C"
 
 /*
  * gpu_compute_phase1_kernel is optimized for memory coalescing.
- * The inner loop accesses g_matrix[c * 14855 + g].
+ * The inner loop accesses g_matrix[c * num_guesses + g].
  * For a given iteration `i`, all threads in a block read the same `c`.
  * Since `g` is (mostly) contiguous across threads in a warp, threads will access
  * adjacent memory addresses, resulting in coalesced memory reads.
@@ -91,6 +119,7 @@ __global__ void gpu_compute_phase1_kernel(
     int set_len,
     int parent_max_k,
     const unsigned char* g_matrix,
+    int num_guesses,
     const uint32_t* g_capacity_bounds,
     uint32_t* out_expected_rem,
     uint32_t* out_lb_cost,
@@ -105,7 +134,7 @@ __global__ void gpu_compute_phase1_kernel(
 
     for (int i = 0; i < set_len; i++) {
         int c = set[i];
-        int r = g_matrix[c * 14855 + g];
+        int r = g_matrix[c * num_guesses + g];
         counts[r]++;
     }
 
@@ -137,8 +166,12 @@ void gpu_compute_phase1(
     ThreadContext* ctx,
     int num_active,
     int set_len,
-    int parent_max_k
+    int parent_max_k,
+    const unsigned char* d_matrix,
+    int num_guesses
 ) {
+    if (!ctx || !d_matrix || !global_d_bounds || num_active <= 0) return;
+
     cudaMemcpyAsync(ctx->d_active_guesses, ctx->h_active_guesses, num_active * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
     cudaMemcpyAsync(ctx->d_set, ctx->h_set, set_len * sizeof(uint16_t), cudaMemcpyHostToDevice, ctx->stream);
 
@@ -151,7 +184,8 @@ void gpu_compute_phase1(
         ctx->d_set,
         set_len,
         parent_max_k,
-        global_d_matrix,
+        d_matrix,
+        num_guesses,
         global_d_bounds,
         ctx->d_out_expected_rem,
         ctx->d_out_lb_cost,

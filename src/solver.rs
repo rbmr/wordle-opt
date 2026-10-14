@@ -132,6 +132,8 @@ pub struct Solver<'a> {
     scratch_added_indices: [Vec<usize>; 32],
     scratch_projs: [Vec<u64>; 32],
     scratch_active_bits: [Vec<u64>; 32],
+    #[cfg(cuda_enabled)]
+    pub gpu_matrix_ptr: Option<*const u8>,
 }
 
 impl<'a> Drop for Solver<'a> {
@@ -342,6 +344,8 @@ impl<'a> Solver<'a> {
             scratch_added_indices: scratch.scratch_added_indices,
             scratch_projs: scratch.scratch_projs,
             scratch_active_bits: scratch.scratch_active_bits,
+            #[cfg(cuda_enabled)]
+            gpu_matrix_ptr: matrix.gpu_matrix().map(|m| m.as_ptr()),
         }
     }
 
@@ -404,16 +408,7 @@ impl<'a> Solver<'a> {
             }
         }
         #[cfg(cuda_enabled)]
-        crate::gpu::init_gpu_once(
-            unsafe {
-                std::slice::from_raw_parts(
-                    matrix.data_c_g.as_ptr() as *const u8,
-                    matrix.data_c_g.len(),
-                )
-            },
-            &capacity_bounds_2d,
-            max_k,
-        );
+        let _ = matrix.gpu_matrix();
 
         if !active_guesses.is_empty() {
             let first_g = active_guesses[0];
@@ -932,12 +927,17 @@ impl<'a> Solver<'a> {
         let mut min_val_found = u32::MAX;
 
         #[cfg(cuda_enabled)]
-        let use_gpu1 = (phase1_guesses.len() * set.len()) > 50000;
+        let use_gpu1 = self.matrix.num_guesses <= 14855
+            && set.len() <= 2340
+            && self.gpu_matrix_ptr.is_some()
+            && (phase1_guesses.len() * set.len()) > 50000;
         #[cfg(not(cuda_enabled))]
         let use_gpu1 = false;
         if use_gpu1 {
             #[cfg(cuda_enabled)]
             {
+                let d_matrix = self.gpu_matrix_ptr.unwrap();
+                let num_guesses = self.matrix.num_guesses as i32;
                 crate::gpu::GPU_CTX.with(|ctx_ref| {
                     let ctx = ctx_ref.borrow().0;
                     unsafe {
@@ -960,6 +960,8 @@ impl<'a> Solver<'a> {
                             phase1_guesses.len() as i32,
                             set.len() as i32,
                             parent_max_k as i32,
+                            d_matrix,
+                            num_guesses,
                         );
                         let exps = std::slice::from_raw_parts(
                             crate::gpu::gpu_get_h_out_expected_rem(ctx),
@@ -1109,12 +1111,17 @@ impl<'a> Solver<'a> {
 
         if best_val > local_lb {
             #[cfg(cuda_enabled)]
-            let use_gpu2 = (phase2_guesses.len() * set.len()) > 50000;
+            let use_gpu2 = self.matrix.num_guesses <= 14855
+                && set.len() <= 2340
+                && self.gpu_matrix_ptr.is_some()
+                && (phase2_guesses.len() * set.len()) > 50000;
             #[cfg(not(cuda_enabled))]
             let use_gpu2 = false;
             if use_gpu2 {
                 #[cfg(cuda_enabled)]
                 {
+                    let d_matrix = self.gpu_matrix_ptr.unwrap();
+                    let num_guesses = self.matrix.num_guesses as i32;
                     crate::gpu::GPU_CTX.with(|ctx_ref| {
                         let ctx = ctx_ref.borrow().0;
                         unsafe {
@@ -1137,6 +1144,8 @@ impl<'a> Solver<'a> {
                                 phase2_guesses.len() as i32,
                                 set.len() as i32,
                                 parent_max_k as i32,
+                                d_matrix,
+                                num_guesses,
                             );
                             let exps = std::slice::from_raw_parts(
                                 crate::gpu::gpu_get_h_out_expected_rem(ctx),

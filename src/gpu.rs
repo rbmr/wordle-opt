@@ -2,12 +2,16 @@
 unsafe extern "C" {
     pub fn gpu_alloc_context() -> *mut std::ffi::c_void;
     pub fn gpu_free_context(ctx: *mut std::ffi::c_void);
-    pub fn gpu_init(matrix: *const u8, matrix_size: usize, bounds: *const u32, bounds_size: usize);
+    pub fn gpu_init_bounds(bounds: *const u32, bounds_size: usize);
+    pub fn gpu_upload_matrix(matrix: *const u8, matrix_size: usize) -> *const u8;
+    pub fn gpu_free_matrix(matrix: *const u8);
     pub fn gpu_compute_phase1(
         ctx: *mut std::ffi::c_void,
         num_active: i32,
         set_len: i32,
         parent_max_k: i32,
+        d_matrix: *const u8,
+        num_guesses: i32,
     );
     pub fn gpu_get_h_active_guesses(ctx: *mut std::ffi::c_void) -> *mut u16;
     pub fn gpu_get_h_set(ctx: *mut std::ffi::c_void) -> *mut u16;
@@ -16,44 +20,68 @@ unsafe extern "C" {
     pub fn gpu_get_h_out_num_non_empty(ctx: *mut std::ffi::c_void) -> *mut u8;
 }
 
-/// Uploads the response matrix (and capacity bounds) to the GPU, once per
-/// distinct matrix. The engine can be used with more than one dictionary in a
-/// single process (the test suite does exactly that), and the kernel indexes
-/// the matrix by the full guess count, so re-initializing when the matrix
-/// changes is required for correctness, not just an optimization.
 #[cfg(cuda_enabled)]
-pub fn init_gpu_once(matrix: &[u8], _bounds: &[Vec<u32>], _max_k: usize) {
-    use std::sync::Mutex;
+static INIT_BOUNDS: std::sync::Once = std::sync::Once::new();
 
-    fn content_key(matrix: &[u8]) -> (usize, u64) {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = rustc_hash::FxHasher::default();
-        matrix.hash(&mut hasher);
-        (matrix.len(), hasher.finish())
-    }
+#[cfg(cuda_enabled)]
+pub fn ensure_bounds_init() {
+    INIT_BOUNDS.call_once(|| {
+        let max_possible_k = 2340;
+        let mut flat_bounds = vec![0u32; (max_possible_k + 1) * 2341];
+        for k in 2..=max_possible_k {
+            for c in 0..=2340 {
+                flat_bounds[k * 2341 + c] = crate::heuristic::capacity_bound(c, k);
+            }
+        }
+        unsafe {
+            gpu_init_bounds(
+                flat_bounds.as_ptr(),
+                flat_bounds.len() * std::mem::size_of::<u32>(),
+            );
+        }
+    });
+}
 
-    static INIT: Mutex<Option<(usize, u64)>> = Mutex::new(None);
-    let key = content_key(matrix);
-    let mut guard = INIT.lock().unwrap_or_else(|e| e.into_inner());
-    if *guard == Some(key) {
-        return;
-    }
-    let max_possible_k = 2340;
-    let mut flat_bounds = vec![0u32; (max_possible_k + 1) * 2341];
-    for k in 2..=max_possible_k {
-        for c in 0..=2340 {
-            flat_bounds[k * 2341 + c] = crate::heuristic::capacity_bound(c, k);
+/// A device allocation of the response matrix on the GPU.
+/// Owned by `ResponseMatrix`, guaranteeing that concurrent solves with different
+/// dictionaries access their own distinct device allocations without races.
+#[cfg(cuda_enabled)]
+pub struct DeviceMatrix {
+    ptr: *const u8,
+}
+
+#[cfg(cuda_enabled)]
+unsafe impl Send for DeviceMatrix {}
+#[cfg(cuda_enabled)]
+unsafe impl Sync for DeviceMatrix {}
+
+#[cfg(cuda_enabled)]
+impl DeviceMatrix {
+    pub fn new(matrix: &[u8]) -> Option<Self> {
+        ensure_bounds_init();
+        let ptr = unsafe { gpu_upload_matrix(matrix.as_ptr(), matrix.len()) };
+        if ptr.is_null() {
+            None
+        } else {
+            Some(Self { ptr })
         }
     }
-    unsafe {
-        gpu_init(
-            matrix.as_ptr(),
-            matrix.len(),
-            flat_bounds.as_ptr(),
-            flat_bounds.len() * 4,
-        );
+
+    #[inline]
+    pub fn as_ptr(&self) -> *const u8 {
+        self.ptr
     }
-    *guard = Some(key);
+}
+
+#[cfg(cuda_enabled)]
+impl Drop for DeviceMatrix {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe {
+                gpu_free_matrix(self.ptr);
+            }
+        }
+    }
 }
 
 #[cfg(cuda_enabled)]
@@ -62,6 +90,15 @@ pub struct GpuContextWrapper(pub *mut std::ffi::c_void);
 unsafe impl Send for GpuContextWrapper {}
 #[cfg(cuda_enabled)]
 unsafe impl Sync for GpuContextWrapper {}
+
+#[cfg(cuda_enabled)]
+impl Drop for GpuContextWrapper {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { gpu_free_context(self.0) };
+        }
+    }
+}
 
 #[cfg(cuda_enabled)]
 thread_local! {

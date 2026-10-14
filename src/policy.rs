@@ -1114,17 +1114,11 @@ pub fn build_policy_tree(
     }
 
     // The optimal policy's per-guess evaluations go through the solver's GPU
-    // path, which needs the response matrix uploaded once (exactly as
-    // `Solver::solve` does). Without this the GPU branch would read an
-    // uninitialized matrix on the compute host.
+    // path, which needs the response matrix uploaded once. Pre-warm the upload.
     #[cfg(cuda_enabled)]
-    crate::gpu::init_gpu_once(
-        unsafe {
-            std::slice::from_raw_parts(matrix.data_c_g.as_ptr() as *const u8, matrix.data_c_g.len())
-        },
-        &capacity_bounds_2d,
-        max_k,
-    );
+    if matches!(strategy, Strategy::Optimal) {
+        let _ = matrix.gpu_matrix();
+    }
 
     let optimal;
     let min_remaining;

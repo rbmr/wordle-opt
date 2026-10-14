@@ -76,7 +76,7 @@ echo "Building on compute..."
 ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release"
 
 echo "Running correctness tests on compute (catches a broken change before committing to a multi-hour run)..."
-ssh "$HOST" "cd wordle-opt && timeout 600 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
+ssh "$HOST" "cd wordle-opt && timeout 600 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release"
 
 echo "Launching full N=2340 policy tree build on compute, detached, bounded at ${TIMEOUT_SECS}s."
 echo "Run stamp: $STAMP (artifacts under ~/$RUN_DIR/ on $HOST)"

@@ -43,7 +43,7 @@ echo "Building on compute..."
 ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release"
 
 echo "Running correctness tests on compute (catches a broken change before benchmarking it)..."
-ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release -- --test-threads=1"
+ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release"
 
 # This script is the tree-producing iteration entry point, always foreground
 # and bounded to 10h - it does NOT have a `full` mode. run_full.sh/check_full.sh
