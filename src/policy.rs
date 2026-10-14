@@ -647,6 +647,11 @@ impl<'a> OptimalPolicy<'a> {
                         return None;
                     }
 
+                    // Sort non-empty buckets descending by size so largest buckets are evaluated first.
+                    // Large buckets contribute the largest bound tightening, triggering early cutoff.
+                    non_empty_indices[0..num_non_empty]
+                        .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
+
                     // For guesses that pass capacity bound, partition and tighten via cache + quick_bucket_eval
                     let mut offsets = [0usize; 244];
                     for r_idx in 0..243 {
