@@ -39,6 +39,7 @@ the commit that actually ran.
 | 2026-10-11 | `a67dd02` | pc01 | 1000 | 1 | optimal | 40.942s | 3124 | 1049 | — | — | first post-migration tree run recorded; GPU-backed (avg busy cores 15.7); validation OK |
 | 2026-10-11 | `a67dd02` | pc01 | 2340 | — | optimal | 6470.277s (1.80h) | 8001 | 2478 | 139753702 | ~9.9GB | full N=2340 run; under the 2h milestone; mean guesses 3.419231, max depth 5, avg busy cores 16.0; validation OK |
 | 2026-10-14 | `9d5855c` | pc01 | 1000 | 1 | optimal | 37.473s | 3124 | 1049 | — | ~713MB | bucket lower-bound tightening; 8.5% faster than a67dd02 (37.473s vs 40.942s); avg busy cores 15.7; validation OK |
+| 2026-10-14 | `5f84eda` | pc01 | 1100 | 1 | optimal | 66.291s | 3485 | 1163 | — | ~1.2GB | max depth 4, leaves 917; avg busy cores 15.8; validation OK |
 
 ## Notes
 
@@ -55,5 +56,8 @@ the commit that actually ran.
 - The `9d5855c` row is taken from that run's own output (`Build time: 37.473s`,
   `Total cost: 3124`, `Nodes: 1049`, `Validation: OK`, peak `rss_mb=713`), captured
   via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1000 --sample-seed 1 --output /tmp/n1000.json`.
+- The `5f84eda` row is taken from that run's own output (`Build time: 66.291s`,
+  `Total cost: 3485`, `Nodes: 1163`, `Validation: OK`, peak `rss_mb=1183`), captured
+  via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1100 --sample-seed 1 --output /tmp/n1100.json`.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
