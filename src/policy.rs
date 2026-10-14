@@ -531,7 +531,24 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 let start = offsets[r_idx];
                 let end = start + p_len;
-                bucket_tasks.push(sorted_set[start..end].to_vec());
+                let p = &sorted_set[start..end];
+                let mut hash = 0u64;
+                for &c in p {
+                    hash ^= self.matrix.zobrist[c];
+                }
+                if let Some((cached_val, true)) = self.cache.get(hash) {
+                    base_cost += cached_val;
+                    continue;
+                }
+                if p_len <= 15 {
+                    let (q_val, is_exact) = Solver::quick_bucket_eval(self.matrix, self.dict, p);
+                    if is_exact {
+                        self.cache.insert(hash, q_val, true);
+                        base_cost += q_val;
+                        continue;
+                    }
+                }
+                bucket_tasks.push(p.to_vec());
             }
 
             bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.len()));
@@ -545,6 +562,14 @@ impl<'a> OptimalPolicy<'a> {
                     }
                     if let Some((cached_val, true)) = self.cache.get(hash) {
                         return cached_val;
+                    }
+                    if bucket.len() <= 15 {
+                        let (q_val, is_exact) =
+                            Solver::quick_bucket_eval(self.matrix, self.dict, &bucket);
+                        if is_exact {
+                            self.cache.insert(hash, q_val, true);
+                            return q_val;
+                        }
                     }
                     let mut solver = Solver::new(
                         self.matrix,
@@ -583,7 +608,7 @@ impl<'a> OptimalPolicy<'a> {
             };
             global_best.store(initial_packed, Ordering::Relaxed);
 
-            // Pre-filter remaining alternative guesses using depth-1 capacity bounds.
+            // Pre-filter remaining alternative guesses using tightened bounds.
             let cost_to_beat = if first_guess_cost <= initial_best_val {
                 first_guess_cost
             } else {
@@ -591,26 +616,89 @@ impl<'a> OptimalPolicy<'a> {
             };
 
             let mut filtered: Vec<(usize, usize, u32, u32)> = active[1..]
-                .iter()
+                .par_iter()
                 .enumerate()
                 .filter_map(|(i, &(g, exp))| {
                     let orig_idx = i + 1;
+                    let g_offset = g * self.matrix.num_candidates;
                     let mut counts = [0u16; 243];
+                    let mut non_empty_indices = [0u8; 243];
+                    let mut num_non_empty = 0;
+
                     for &c in candidates {
-                        counts[self.matrix.get(g, c).0 as usize] += 1;
+                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        if counts[r] == 0 {
+                            non_empty_indices[num_non_empty] = r as u8;
+                            num_non_empty += 1;
+                        }
+                        counts[r] += 1;
                     }
+
+                    // Fast capacity bound check first
                     let mut lb = candidates.len() as u32;
-                    for r_idx in 0..243 {
-                        let cnt = counts[r_idx] as usize;
-                        if cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize {
-                            lb += self.capacity_bounds_2d[self.max_k][cnt];
+                    for j in 0..num_non_empty {
+                        let r_idx = non_empty_indices[j] as usize;
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb += self.capacity_bounds_2d[self.max_k][counts[r_idx] as usize];
                         }
                     }
-                    if lb < cost_to_beat {
-                        Some((g, orig_idx, lb, exp))
-                    } else {
-                        None
+
+                    if lb >= cost_to_beat {
+                        return None;
                     }
+
+                    // For guesses that pass capacity bound, partition and tighten via cache + quick_bucket_eval
+                    let mut offsets = [0usize; 244];
+                    for r_idx in 0..243 {
+                        offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+                    }
+
+                    let mut sorted_set = vec![0usize; candidates.len()];
+                    let mut current_offsets = offsets;
+                    for &c in candidates {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        let pos = current_offsets[r];
+                        sorted_set[pos] = c;
+                        current_offsets[r] += 1;
+                    }
+
+                    for j in 0..num_non_empty {
+                        let r_idx = non_empty_indices[j] as usize;
+                        if r_idx == crate::core::Response::WIN.0 as usize {
+                            continue;
+                        }
+                        let p_len = counts[r_idx] as usize;
+                        if p_len <= 2 {
+                            continue;
+                        }
+
+                        let start = offsets[r_idx];
+                        let end = start + p_len;
+                        let p = &sorted_set[start..end];
+
+                        let mut hash = 0u64;
+                        for &c in p {
+                            hash ^= self.matrix.zobrist[c];
+                        }
+
+                        let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
+                        if let Some((cached_val, _)) = self.cache.get(hash) {
+                            let used_val = cached_val.max(cap_lb);
+                            lb += used_val - cap_lb;
+                        } else if p_len <= 15 {
+                            let (q_val, is_exact) =
+                                Solver::quick_bucket_eval(self.matrix, self.dict, p);
+                            let used_val = q_val.max(cap_lb);
+                            lb += used_val - cap_lb;
+                            self.cache.insert(hash, used_val, is_exact);
+                        }
+
+                        if lb >= cost_to_beat {
+                            return None;
+                        }
+                    }
+
+                    Some((g, orig_idx, lb, exp))
                 })
                 .collect();
 
