@@ -45,19 +45,47 @@ pub fn compute_max_branching_factor(
     (0..matrix.num_guesses)
         .into_par_iter()
         .map(|g| {
-            let mut seen = [false; 243];
-            let mut k = 0;
+            let g_offset = g * matrix.num_candidates;
+            let mut mask = [0u64; 4];
             for &c in candidates {
-                let r = matrix.get(g, c);
-                if !seen[r.0 as usize] {
-                    seen[r.0 as usize] = true;
-                    k += 1;
-                }
+                let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+                mask[r / 64] |= 1u64 << (r % 64);
             }
-            k
+            (mask[0].count_ones()
+                + mask[1].count_ones()
+                + mask[2].count_ones()
+                + mask[3].count_ones()) as usize
         })
         .max()
         .unwrap_or(0)
+}
+
+/// Sequential version of `compute_max_branching_factor` with early stopping,
+/// suitable for execution inside worker threads without thread contention.
+pub fn compute_max_branching_factor_seq(
+    matrix: &crate::matrix::ResponseMatrix,
+    candidates: &[usize],
+) -> usize {
+    let mut max_k = 0;
+    for g in 0..matrix.num_guesses {
+        let g_offset = g * matrix.num_candidates;
+        let mut mask = [0u64; 4];
+        for &c in candidates {
+            let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+            mask[r / 64] |= 1u64 << (r % 64);
+        }
+        let k = (mask[0].count_ones()
+            + mask[1].count_ones()
+            + mask[2].count_ones()
+            + mask[3].count_ones()) as usize;
+        if k > max_k {
+            max_k = k;
+            if max_k >= candidates.len() {
+                break;
+            }
+        }
+    }
+    max_k
 }
 
 /// Computes the absolute minimum total cost to solve a subset of size `n`

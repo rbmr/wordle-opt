@@ -691,6 +691,14 @@ impl<'a> OptimalPolicy<'a> {
                             let used_val = q_val.max(cap_lb);
                             lb += used_val - cap_lb;
                             self.cache.insert(hash, used_val, is_exact);
+                        } else {
+                            let k =
+                                crate::heuristic::compute_max_branching_factor_seq(self.matrix, p);
+                            let tight_lb =
+                                crate::heuristic::tight_capacity_bound(p_len, k, self.max_k);
+                            let used_val = tight_lb.max(cap_lb);
+                            lb += used_val - cap_lb;
+                            self.cache.insert(hash, used_val, false);
                         }
 
                         if lb >= cost_to_beat {
