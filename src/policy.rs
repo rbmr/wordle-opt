@@ -485,6 +485,210 @@ impl<'a> OptimalPolicy<'a> {
             return (best_guess, best_val);
         }
 
+        // For large candidate sets (especially root), evaluating the best-ranked guess
+        // across all cores via bucket parallelization quickly establishes an exact tight upper bound.
+        // This tight bound lets us prune >90% of alternative root guesses before any deep search.
+        if candidates.len() >= 48 && !active.is_empty() {
+            let first_g = active[0].0;
+
+            let mut counts = [0u16; 243];
+            let mut non_empty_indices = [0u8; 243];
+            let mut num_non_empty = 0;
+
+            for &c in candidates {
+                let r_idx = self.matrix.get(first_g, c).0 as usize;
+                if counts[r_idx] == 0 {
+                    non_empty_indices[num_non_empty] = r_idx as u8;
+                    num_non_empty += 1;
+                }
+                counts[r_idx] += 1;
+            }
+
+            let mut offsets = [0usize; 244];
+            for r_idx in 0..243 {
+                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+            }
+            let mut sorted_set = vec![0usize; candidates.len()];
+            let mut current_offsets = offsets;
+            for &c in candidates {
+                let r_idx = self.matrix.get(first_g, c).0 as usize;
+                let pos = current_offsets[r_idx];
+                sorted_set[pos] = c;
+                current_offsets[r_idx] += 1;
+            }
+
+            let mut bucket_tasks = Vec::new();
+            let mut base_cost = candidates.len() as u32;
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                if r_idx == crate::core::Response::WIN.0 as usize {
+                    continue;
+                }
+                if p_len <= 2 {
+                    base_cost += self.capacity_bounds_2d[self.max_k][p_len];
+                    continue;
+                }
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                bucket_tasks.push(sorted_set[start..end].to_vec());
+            }
+
+            bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.len()));
+
+            let bucket_costs: u32 = bucket_tasks
+                .into_par_iter()
+                .map(|bucket| {
+                    let mut hash = 0u64;
+                    for &c in &bucket {
+                        hash ^= self.matrix.zobrist[c];
+                    }
+                    if let Some((cached_val, true)) = self.cache.get(hash) {
+                        return cached_val;
+                    }
+                    let mut solver = Solver::new(
+                        self.matrix,
+                        self.max_k,
+                        self.dict,
+                        self.metrics,
+                        self.capacity_bounds_2d,
+                        self.cache,
+                        self.equiv_cache,
+                    );
+                    let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, &bucket);
+                    let val = solver.min_state_val(
+                        &bucket,
+                        self.all_guesses_bits,
+                        bucket_greedy,
+                        2,
+                        self.max_k,
+                    );
+                    let exact_val = val.min(bucket_greedy);
+                    self.cache.insert(hash, exact_val, true);
+                    exact_val
+                })
+                .sum();
+
+            let first_guess_cost = base_cost + bucket_costs;
+            self.metrics
+                .root_guesses_done
+                .fetch_add(1, Ordering::Relaxed);
+
+            let best_val = first_guess_cost.min(initial_best_val);
+            global_beta.store(best_val + 1, Ordering::Relaxed);
+            let initial_packed = if first_guess_cost <= initial_best_val {
+                (first_guess_cost as u64) << 32
+            } else {
+                ((initial_best_val as u64) << 32) | (u32::MAX as u64)
+            };
+            global_best.store(initial_packed, Ordering::Relaxed);
+
+            // Pre-filter remaining alternative guesses using depth-1 capacity bounds.
+            let cost_to_beat = if first_guess_cost <= initial_best_val {
+                first_guess_cost
+            } else {
+                initial_best_val + 1
+            };
+
+            let mut filtered: Vec<(usize, usize, u32, u32)> = active[1..]
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &(g, exp))| {
+                    let orig_idx = i + 1;
+                    let mut counts = [0u16; 243];
+                    for &c in candidates {
+                        counts[self.matrix.get(g, c).0 as usize] += 1;
+                    }
+                    let mut lb = candidates.len() as u32;
+                    for r_idx in 0..243 {
+                        let cnt = counts[r_idx] as usize;
+                        if cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize {
+                            lb += self.capacity_bounds_2d[self.max_k][cnt];
+                        }
+                    }
+                    if lb < cost_to_beat {
+                        Some((g, orig_idx, lb, exp))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if filtered.is_empty() {
+                let final_best = global_best.load(Ordering::Relaxed);
+                let best_val = (final_best >> 32) as u32;
+                let best_idx = (final_best & 0xFFFFFFFF) as u32;
+                let best_guess = if best_idx == u32::MAX {
+                    usize::MAX
+                } else {
+                    active[best_idx as usize].0
+                };
+                return (best_guess, best_val);
+            }
+
+            filtered.sort_unstable_by_key(|&(_, _, lb, exp)| (lb, exp));
+
+            let next = AtomicUsize::new(0);
+            (0..rayon::current_num_threads())
+                .into_par_iter()
+                .with_max_len(1)
+                .for_each(|_| {
+                    let mut solver = Solver::new_with_global_beta(
+                        self.matrix,
+                        self.max_k,
+                        self.dict,
+                        self.metrics,
+                        self.capacity_bounds_2d,
+                        self.cache,
+                        &global_beta,
+                        self.equiv_cache,
+                    );
+
+                    loop {
+                        let item_idx = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(&(g, orig_idx, lb, _)) = filtered.get(item_idx) else {
+                            break;
+                        };
+
+                        let current_best_val = global_beta.load(Ordering::Relaxed);
+                        if lb >= current_best_val {
+                            continue;
+                        }
+
+                        let v = solver.min_guess_val(
+                            candidates,
+                            self.all_guesses_bits,
+                            g,
+                            current_best_val,
+                            1,
+                            self.max_k,
+                        );
+                        self.metrics
+                            .root_guesses_done
+                            .fetch_add(1, Ordering::Relaxed);
+
+                        let packed = ((v as u64) << 32) | (orig_idx as u64);
+                        let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                        let old_val = (old >> 32) as u32;
+                        if v < old_val {
+                            global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                        }
+                    }
+                });
+
+            let final_best = global_best.load(Ordering::Relaxed);
+            let best_val = (final_best >> 32) as u32;
+            let best_idx = (final_best & 0xFFFFFFFF) as u32;
+
+            let best_guess = if best_idx == u32::MAX {
+                usize::MAX
+            } else {
+                active[best_idx as usize].0
+            };
+
+            return (best_guess, best_val);
+        }
+
         // Dynamic, rank-ordered claiming: every worker repeatedly takes the
         // next-best-ranked unevaluated guess from a shared counter. The
         // guesses' costs are wildly uneven, so a static one-chunk-per-thread
