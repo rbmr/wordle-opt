@@ -37,8 +37,6 @@ pub fn solve_parallel_depth2<'a>(
     }
 
     active_guesses.par_iter().for_each(|&g| {
-        let current_beta = beta.load(Ordering::Relaxed);
-
         let mut counts = [0u16; 243];
         let mut non_empty_indices = [0u8; 243];
         let mut num_non_empty = 0;
@@ -57,25 +55,6 @@ pub fn solve_parallel_depth2<'a>(
             offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
         }
 
-        let mut lb = initial_candidates.len() as u32;
-        let mut p_lbs = [0u32; 243];
-
-        for i in 0..num_non_empty {
-            let r_idx = non_empty_indices[i] as usize;
-            if r_idx == crate::core::Response::WIN.0 as usize {
-                continue;
-            }
-            let p_len = counts[r_idx] as usize;
-            let p_lb = capacity_bounds_2d[max_k][p_len];
-            p_lbs[r_idx] = p_lb;
-            lb += p_lb;
-        }
-
-        // Alpha-beta: Early prune the entire guess before sorting/allocating buckets
-        if lb >= current_beta {
-            return;
-        }
-
         let mut sorted_set = vec![0usize; initial_candidates.len()];
         let mut current_offsets = offsets;
         for &c in initial_candidates {
@@ -85,16 +64,67 @@ pub fn solve_parallel_depth2<'a>(
             current_offsets[r_idx] += 1;
         }
 
-        let mut bucket_tasks = Vec::new();
+        let mut lb = initial_candidates.len() as u32;
+        let mut p_lbs = [0u32; 243];
+        let mut exact_vals = [false; 243];
+
         for i in 0..num_non_empty {
             let r_idx = non_empty_indices[i] as usize;
-            let p_len = counts[r_idx] as usize;
             if r_idx == crate::core::Response::WIN.0 as usize {
                 continue;
             }
+            let p_len = counts[r_idx] as usize;
+            let cap_lb = capacity_bounds_2d[max_k][p_len];
+
             if p_len <= 2 {
+                p_lbs[r_idx] = cap_lb;
+                lb += cap_lb;
+                exact_vals[r_idx] = true;
                 continue;
             }
+
+            let start = offsets[r_idx];
+            let end = start + p_len;
+            let p = &sorted_set[start..end];
+
+            let mut hash = 0u64;
+            for &c in p {
+                hash ^= matrix.zobrist[c];
+            }
+
+            if let Some((cached_val, is_exact)) = global_cache.get(hash) {
+                let used_val = cached_val.max(cap_lb);
+                p_lbs[r_idx] = used_val;
+                lb += used_val;
+                if is_exact {
+                    exact_vals[r_idx] = true;
+                }
+            } else if p_len <= 15 {
+                let (q_val, is_exact) = Solver::quick_bucket_eval(matrix, dict, p);
+                let used_val = q_val.max(cap_lb);
+                p_lbs[r_idx] = used_val;
+                lb += used_val;
+                if is_exact {
+                    exact_vals[r_idx] = true;
+                }
+                global_cache.insert(hash, used_val, is_exact);
+            } else {
+                p_lbs[r_idx] = cap_lb;
+                lb += cap_lb;
+            }
+
+            if lb >= beta.load(Ordering::Relaxed) {
+                return;
+            }
+        }
+
+        let mut bucket_tasks = Vec::new();
+        for i in 0..num_non_empty {
+            let r_idx = non_empty_indices[i] as usize;
+            if r_idx == crate::core::Response::WIN.0 as usize || exact_vals[r_idx] {
+                continue;
+            }
+            let p_len = counts[r_idx] as usize;
             let start = offsets[r_idx];
             let end = start + p_len;
             bucket_tasks.push((r_idx, sorted_set[start..end].to_vec()));
