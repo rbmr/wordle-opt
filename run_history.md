@@ -50,6 +50,11 @@ the commit that actually ran.
 | 2026-10-14 | `13f04b8` | pc01 | 1600 | 1 | optimal | 417.011s (6.95m) | 5256 | 1681 | 2977956 | ~5.07GB | max depth 4, leaves 1321; avg busy cores 15.9; validation OK |
 | 2026-10-14 | `65bb6be` | pc01 | 1300 | 1 | optimal | 107.953s (1.80m) | 4204 | 1370 | 832836 | ~1.67GB | parallel quick_bucket_eval root bound filter; avg busy cores 15.8; validation OK |
 | 2026-10-14 | `65bb6be` | pc01 | 1600 | 1 | optimal | 414.827s (6.91m) | 5256 | 1681 | 2986415 | ~5.09GB | parallel quick_bucket_eval root bound filter; avg busy cores 15.9; validation OK |
+| 2026-10-14 | `2058171` | pc01 | 1000 | 1 | optimal | 16.679s | 3124 | 1049 | 40 | ~231MB | tighten large bucket bounds; root states dropped from 105k to 40; validation OK |
+| 2026-10-14 | `2058171` | pc01 | 1300 | 1 | optimal | 32.695s | 4204 | 1370 | 67 | ~243MB | tighten large bucket bounds; 3.3x faster than 65bb6be (32.695s vs 107.953s); validation OK |
+| 2026-10-14 | `2058171` | pc01 | 1600 | 1 | optimal | 53.026s | 5256 | 1681 | 240 | ~253MB | tighten large bucket bounds; 7.8x faster than 65bb6be (53.026s vs 414.827s); validation OK |
+| 2026-10-14 | `2058171` | pc01 | 1800 | 1 | optimal | 73.643s (1.23m) | 5974 | 1900 | 235 | ~260MB | max depth 4, leaves 1521; validation OK |
+| 2026-10-14 | `2058171` | pc01 | 2000 | 1 | optimal | 104.059s (1.73m) | 6723 | 2119 | 4787 | ~283MB | max depth 4, leaves 1674; validation OK |
 
 
 ## Notes
@@ -79,6 +84,7 @@ the commit that actually ran.
 - The `e77f6b4` row is taken from that run's own output (`Build time: 285.695s`,
   `Total cost: 4204`, `Nodes: 1370`, `Validation: OK`, peak `rss_mb=4321`), captured
   via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1300 --sample-seed 1 --output /tmp/n1300.json`.
+- The `2058171` rows are taken from those runs' own outputs, captured via `./deploy_and_bench.sh` on seeded subsets (seed=1, sizes 1000, 1300, 1600, 1800, 2000). Tightened large-bucket capacity lower bounds via maximum branching factor calculation reduced root DFS states by orders of magnitude (e.g. 105k to 40 for N=1000, 3.0M to 240 for N=1600).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
