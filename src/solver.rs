@@ -1,5 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 use crate::core::Response;
+use crate::dict::Dictionary;
 use crate::heuristic;
 use crate::matrix::ResponseMatrix;
 use rayon::prelude::*;
@@ -360,6 +361,12 @@ impl<'a> Solver<'a> {
         metrics: &'a Metrics,
         equiv_cache: &'a EquivCache,
     ) -> u32 {
+        match initial_candidates.len() {
+            0 => return 0,
+            1 => return 1,
+            2 => return 3,
+            _ => {}
+        }
         let cache_size = if crate::is_compute_host() {
             // 512 M units x 16 bytes each (two AtomicU64 slots per unit) =
             // 8 GB, which is the whole reason the cost-only full run is tight
@@ -557,13 +564,81 @@ impl<'a> Solver<'a> {
                     &scan_beta,
                     &root_candidates,
                 );
-                return result_beta.min(first_guess_cost);
+                return result_beta.min(greedy_cost_to_beat);
             }
 
-            return first_guess_cost;
+            return greedy_cost_to_beat;
         }
 
         initial_greedy_cost
+    }
+
+    /// Quickly evaluates small candidate sets (<= 15) using in-set partitions.
+    /// Returns (cost, is_exact).
+    /// - If an in-set guess partitions the remaining n-1 candidates into n-1 distinct buckets,
+    ///   the exact cost is 2*n - 1.
+    /// - If no in-set guess achieves n-1, but at least one achieves n-2 distinct buckets,
+    ///   the exact cost is 2*n.
+    /// - Otherwise, no guess (in-set or out-of-set) can achieve < 2*n, so 2*n is a guaranteed
+    ///   lower bound.
+    #[inline(always)]
+    pub fn quick_bucket_eval(
+        matrix: &ResponseMatrix,
+        dict: &Dictionary,
+        bucket: &[usize],
+    ) -> (u32, bool) {
+        let n = bucket.len();
+        match n {
+            0 => (0, true),
+            1 => (1, true),
+            2 => (3, true),
+            _ => {
+                let mut best_inside = u32::MAX;
+                for i in 0..n {
+                    let ci = bucket[i];
+                    let gi = dict.candidate_to_guess[ci];
+                    let g_offset = gi * matrix.num_candidates;
+
+                    let mut mask = [0u64; 4];
+                    let mut num_distinct = 0;
+                    let mut collisions = 0;
+
+                    for j in 0..n {
+                        if i != j {
+                            let cj = bucket[j];
+                            let r = unsafe { matrix.data.get_unchecked(g_offset + cj).0 as usize };
+                            let word_idx = r / 64;
+                            let bit = 1u64 << (r % 64);
+                            if (mask[word_idx] & bit) == 0 {
+                                mask[word_idx] |= bit;
+                                num_distinct += 1;
+                            } else {
+                                collisions += 1;
+                                if best_inside == (2 * n) as u32 {
+                                    break;
+                                }
+                                if collisions >= 2 {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if num_distinct == n - 1 {
+                        return ((2 * n - 1) as u32, true);
+                    }
+                    if num_distinct == n - 2 {
+                        best_inside = (2 * n) as u32;
+                    }
+                }
+
+                if best_inside == (2 * n) as u32 {
+                    ((2 * n) as u32, true)
+                } else {
+                    ((2 * n) as u32, false)
+                }
+            }
+        }
     }
 
     /// Computes the minimum expected cost to solve `set`, minimizing over every guess in
@@ -628,43 +703,15 @@ impl<'a> Solver<'a> {
             return 3;
         }
         if c_len <= 15 {
-            let mut best_inside = u32::MAX;
-            for i in 0..c_len {
-                let ci = set[i];
-                let gi = self.dict.candidate_to_guess[ci];
-
-                let mut counts = [0u8; 243];
-                let mut num_distinct = 0;
-
-                for j in 0..c_len {
-                    if i != j {
-                        let cj = set[j];
-                        let r = self.matrix.get(gi, cj).0 as usize;
-                        if counts[r] == 0 {
-                            num_distinct += 1;
-                        }
-                        counts[r] += 1;
-                    }
-                }
-
-                // Fast theoretical-minimum short circuits:
-                // An in-set guess has an absolute theoretical minimum cost of 2*c_len - 1.
-                // An out-of-set guess has an absolute theoretical minimum cost of 2*c_len.
-                // Therefore, if we find an in-set guess achieving 2*c_len - 1 (num_distinct == c_len - 1),
-                // it is perfectly optimal and we can return it immediately.
-                // If we find an in-set guess achieving 2*c_len (num_distinct == c_len - 2), we can safely
-                // record it as the best possible fallback (best_inside) because no out-of-set guess could
-                // possibly beat 2*c_len anyway. We don't return immediately in case another in-set guess
-                // can achieve 2*c_len - 1.
-                if num_distinct == c_len - 1 {
-                    return (2 * c_len - 1) as u32;
-                }
-                if num_distinct == c_len - 2 {
-                    best_inside = best_inside.min((2 * c_len) as u32);
-                }
+            let (val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, set);
+            if is_exact {
+                self.cache.insert(hash, val, true);
+                return val;
             }
-            if best_inside == (2 * c_len) as u32 {
-                return best_inside;
+            cached_lower_bound = cached_lower_bound.max(val);
+            if cached_lower_bound >= beta {
+                self.cache.insert(hash, cached_lower_bound, false);
+                return cached_lower_bound;
             }
         }
 
@@ -1449,6 +1496,20 @@ impl<'a> Solver<'a> {
                     }
                 }
 
+                let (quick_val, is_exact) =
+                    Self::quick_bucket_eval(self.matrix, self.dict, &p[0..p_len]);
+                let lb = p_lbs_local[i];
+                let used_val = quick_val.max(lb);
+                cost += used_val - lb;
+                p_lbs_local[i] = used_val;
+
+                if is_exact {
+                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                        return cost;
+                    }
+                    continue;
+                }
+
                 let b = cost - p_lbs_local[i];
                 let new_beta = beta - b;
                 let effective_beta =
@@ -1580,6 +1641,20 @@ impl<'a> Solver<'a> {
                     if is_exact {
                         exact_vals[r_idx] = used_val;
                     }
+                } else if p_len <= 15 {
+                    let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
+                    let lb = p_lbs[r_idx];
+                    let used_val = quick_val.max(lb);
+                    cost += used_val - lb;
+                    p_lbs[r_idx] = used_val;
+                    if is_exact {
+                        exact_vals[r_idx] = used_val;
+                    }
+                    self.cache.insert(hash, used_val, is_exact);
+                }
+
+                if cost >= beta {
+                    break;
                 }
             }
 
@@ -1794,5 +1869,39 @@ mod solver_cache_tests {
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
         let cost = Solver::solve(&matrix, &candidates, &dict, &metrics, &equiv_cache);
         assert_eq!(cost, 0);
+    }
+
+    #[test]
+    fn test_quick_bucket_eval_exactness() {
+        let dict = crate::dict::Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let metrics = Metrics::new();
+        let equiv_cache: [_; 1024] =
+            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
+
+        // Test multiple small subsets of candidates (sizes 2, 3, 4)
+        for offset in (0..15).step_by(5) {
+            for size in 2..=4 {
+                let bucket: Vec<usize> = (offset..offset + size).collect();
+                let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
+                let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);
+
+                if is_exact {
+                    assert_eq!(
+                        q_val, true_cost,
+                        "quick_bucket_eval returned exact {} but true_cost is {} for {:?}",
+                        q_val, true_cost, bucket
+                    );
+                } else {
+                    assert!(
+                        q_val <= true_cost,
+                        "quick_bucket_eval returned lower bound {} > true_cost {} for {:?}",
+                        q_val,
+                        true_cost,
+                        bucket
+                    );
+                }
+            }
+        }
     }
 }
