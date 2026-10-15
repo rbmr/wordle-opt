@@ -231,7 +231,9 @@ fn active_guesses(
     matrix: &ResponseMatrix,
     dict: &Dictionary,
     candidates: &[usize],
-) -> Vec<(usize, u32)> {
+    capacity_bounds_2d: &[Vec<u32>],
+    max_k: usize,
+) -> Vec<(usize, u32, u32)> {
     use rayon::prelude::*;
 
     let mut c_mask = 0u32;
@@ -252,7 +254,7 @@ fn active_guesses(
             .collect()
     };
 
-    let mut out: Vec<(usize, u32)> = if candidates.len() >= 48 {
+    let mut out: Vec<(usize, u32, u32)> = if candidates.len() >= 48 {
         surviving_guesses
             .into_par_iter()
             .filter_map(|g| {
@@ -275,12 +277,16 @@ fn active_guesses(
                     return None;
                 }
                 let mut expected_rem = 0u32;
+                let mut base_lb = candidates.len() as u32;
                 for i in 0..num_non_empty {
                     let r = non_empty_indices[i] as usize;
-                    let v = counts[r] as u32;
-                    expected_rem += v * v;
+                    let v = counts[r] as usize;
+                    expected_rem += (v as u32) * (v as u32);
+                    if r != crate::core::Response::WIN.0 as usize {
+                        base_lb += capacity_bounds_2d[max_k][v];
+                    }
                 }
-                Some((g, expected_rem))
+                Some((g, expected_rem, base_lb))
             })
             .collect()
     } else {
@@ -308,18 +314,22 @@ fn active_guesses(
                 continue;
             }
             let mut expected_rem = 0u32;
+            let mut base_lb = candidates.len() as u32;
             for i in 0..num_non_empty {
                 let r = non_empty_indices[i] as usize;
-                let v = counts[r] as u32;
-                expected_rem += v * v;
+                let v = counts[r] as usize;
+                expected_rem += (v as u32) * (v as u32);
+                if r != crate::core::Response::WIN.0 as usize {
+                    base_lb += capacity_bounds_2d[max_k][v];
+                }
                 counts[r] = 0;
             }
-            out.push((g, expected_rem));
+            out.push((g, expected_rem, base_lb));
         }
         out
     };
 
-    out.sort_unstable_by_key(|&(g, e)| (e, g));
+    out.sort_unstable_by_key(|&(g, e, _)| (e, g));
     out
 }
 
@@ -503,7 +513,13 @@ impl<'a> OptimalPolicy<'a> {
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-        let active = active_guesses(self.matrix, self.dict, candidates);
+        let active = active_guesses(
+            self.matrix,
+            self.dict,
+            candidates,
+            self.capacity_bounds_2d,
+            self.max_k,
+        );
 
         // For large candidate sets (especially root), evaluating the best-ranked guess
         // across all cores via bucket parallelization quickly establishes an exact tight upper bound.
@@ -618,7 +634,10 @@ impl<'a> OptimalPolicy<'a> {
             let mut filtered: Vec<(usize, usize, u32, u32)> = active[1..]
                 .par_iter()
                 .enumerate()
-                .filter_map(|(i, &(g, exp))| {
+                .filter_map(|(i, &(g, exp, base_lb))| {
+                    if base_lb >= cost_to_beat {
+                        return None;
+                    }
                     let orig_idx = i + 1;
                     let g_offset = g * self.matrix.num_candidates;
                     let g_row = unsafe {
@@ -637,8 +656,6 @@ impl<'a> OptimalPolicy<'a> {
                         counts[r] += 1;
                     }
 
-                    // Fast capacity bound check first
-                    let mut lb = candidates.len() as u32;
                     let mut max_p_len = 0;
                     let mut eval_indices = [0u8; 243];
                     let mut num_eval = 0;
@@ -654,17 +671,14 @@ impl<'a> OptimalPolicy<'a> {
                                 eval_indices[num_eval] = r as u8;
                                 num_eval += 1;
                             }
-                            lb += self.capacity_bounds_2d[self.max_k][p_len];
                         }
                     }
 
-                    if lb >= cost_to_beat {
-                        return None;
+                    if max_p_len <= 2 {
+                        return Some((g, orig_idx, base_lb, exp));
                     }
 
-                    if max_p_len <= 2 {
-                        return Some((g, orig_idx, lb, exp));
-                    }
+                    let mut lb = base_lb;
 
                     let mut bucket_hashes = [0u64; 243];
                     for &c in candidates {
@@ -840,11 +854,11 @@ impl<'a> OptimalPolicy<'a> {
             );
             let mut best_val = initial_best_val;
             let mut best_guess = usize::MAX;
-            for (g, _) in &active {
+            for &(g, _, _) in &active {
                 let v = solver.min_guess_val(
                     candidates,
                     self.all_guesses_bits,
-                    *g,
+                    g,
                     best_val + 1,
                     1,
                     self.max_k,
@@ -854,9 +868,9 @@ impl<'a> OptimalPolicy<'a> {
                     .fetch_add(1, Ordering::Relaxed);
                 if v < best_val {
                     best_val = v;
-                    best_guess = *g;
+                    best_guess = g;
                 } else if v == best_val && best_guess == usize::MAX {
-                    best_guess = *g;
+                    best_guess = g;
                 }
             }
             return (best_guess, best_val);
@@ -897,7 +911,7 @@ impl<'a> OptimalPolicy<'a> {
 
                 loop {
                     let idx = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(g, _)) = active.get(idx) else {
+                    let Some(&(g, _, _)) = active.get(idx) else {
                         break;
                     };
 
