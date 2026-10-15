@@ -290,13 +290,21 @@ fn active_guesses(
         let mut out = Vec::with_capacity(surviving_guesses.len());
         let mut counts = [0u16; NUM_RESPONSES];
         let mut non_empty_indices = [0u8; NUM_RESPONSES];
-        let matrix_data_ptr = matrix.data.as_ptr();
         let cap_bounds_ptr = cap_bounds.as_ptr();
+        let num_guesses = matrix.num_guesses;
+        let data_c_g_ptr = matrix.data_c_g.as_ptr();
+        let mut stack_c_ptrs = [std::ptr::null::<crate::core::Response>(); 48];
+        for (i, &c) in candidates.iter().enumerate() {
+            unsafe {
+                *stack_c_ptrs.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+            }
+        }
+        let c_ptrs = &stack_c_ptrs[..candidates.len()];
+
         for g in surviving_guesses {
-            let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
             let mut num_non_empty = 0;
-            for &c in candidates {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
+            for &c_base in c_ptrs {
+                let r = unsafe { (*c_base.add(g)).0 as usize };
                 non_empty_indices[num_non_empty] = r as u8;
                 num_non_empty += (counts[r] == 0) as usize;
                 counts[r] += 1;
