@@ -692,165 +692,6 @@ impl<'a> OptimalPolicy<'a> {
 
             let global_beta = AtomicU32::new(first_guess_cost + 1);
             let global_best = AtomicU64::new((first_guess_cost as u64) << 32);
-            let cost_to_beat = first_guess_cost;
-
-            let mut filtered: Vec<(usize, usize, u32, u32)> = active[1..]
-                .par_iter()
-                .enumerate()
-                .filter_map(|(i, &(g, exp, base_lb))| {
-                    if base_lb >= cost_to_beat {
-                        return None;
-                    }
-                    let orig_idx = i + 1;
-                    let g_ptr = unsafe {
-                        self.matrix
-                            .data
-                            .as_ptr()
-                            .add(g * self.matrix.num_candidates)
-                    };
-                    let zobrist_ptr = self.matrix.zobrist.as_ptr();
-                    let cap_bounds_ptr = cap_bounds.as_ptr();
-                    let mut counts = [0u16; 243];
-                    let mut non_empty_indices = [0u8; 243];
-                    let mut num_non_empty = 0;
-                    let mut bucket_hashes = [0u64; 243];
-
-                    for &c in candidates {
-                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                        unsafe {
-                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                            num_non_empty += (*counts.get_unchecked(r) == 0) as usize;
-                            *counts.get_unchecked_mut(r) += 1;
-                            *bucket_hashes.get_unchecked_mut(r) ^= *zobrist_ptr.add(c);
-                        }
-                    }
-
-                    let mut max_p_len = 0;
-                    let mut eval_indices = [0u8; 243];
-                    let mut num_eval = 0;
-
-                    for j in 0..num_non_empty {
-                        let r = unsafe { *non_empty_indices.get_unchecked(j) as usize };
-                        if r != crate::core::Response::WIN.0 as usize {
-                            let p_len = unsafe { *counts.get_unchecked(r) as usize };
-                            if p_len > max_p_len {
-                                max_p_len = p_len;
-                            }
-                            if p_len > 2 {
-                                unsafe {
-                                    *eval_indices.get_unchecked_mut(num_eval) = r as u8;
-                                }
-                                num_eval += 1;
-                            }
-                        }
-                    }
-
-                    if max_p_len <= 2 {
-                        return Some((g, orig_idx, base_lb, exp));
-                    }
-
-                    let mut lb = base_lb;
-
-                    // Sort only non-trivial buckets (size > 2) descending by size so largest buckets are evaluated first.
-                    // Large buckets contribute the largest bound tightening, triggering early cutoff.
-                    eval_indices[0..num_eval].sort_unstable_by_key(|&r| {
-                        std::cmp::Reverse(unsafe { *counts.get_unchecked(r as usize) })
-                    });
-
-                    let split_idx = eval_indices[0..num_eval]
-                        .partition_point(|&r| unsafe { *counts.get_unchecked(r as usize) > 15 });
-
-                    // First pass: check cached bounds descending by bucket size without partitioning.
-                    // Fused with uncached slack calculation to eliminate a redundant second pass over non-empty indices.
-                    let mut cached_mask = [0u64; 4];
-                    let mut has_uncached = false;
-                    let mut max_possible_slack = 0u32;
-                    for j in 0..num_eval {
-                        let r_idx = unsafe { *eval_indices.get_unchecked(j) as usize };
-                        let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
-                        let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
-                        if let Some((cached_val, _)) = self.cache.get(hash) {
-                            let cap_lb = unsafe { *cap_bounds_ptr.add(p_len) };
-                            let used_val = cached_val.max(cap_lb);
-                            lb += used_val - cap_lb;
-                            cached_mask[r_idx >> 6] |= 1u64 << (r_idx & 63);
-                            if lb >= cost_to_beat {
-                                return None;
-                            }
-                        } else if p_len <= 15 {
-                            has_uncached = true;
-                            max_possible_slack += 1;
-                        }
-                    }
-
-                    if !has_uncached || lb + max_possible_slack < cost_to_beat {
-                        return Some((g, orig_idx, lb, exp));
-                    }
-
-                    // Second pass: only partition into thread-local scratch buffer if uncached buckets need evaluation.
-                    let mut offsets = [0usize; 244];
-                    for r_idx in 0..243 {
-                        unsafe {
-                            *offsets.get_unchecked_mut(r_idx + 1) = *offsets.get_unchecked(r_idx)
-                                + *counts.get_unchecked(r_idx) as usize;
-                        }
-                    }
-
-                    SCRATCH_SORTED_SET.with(|cell| {
-                        let mut sorted_set = cell.borrow_mut();
-                        sorted_set.resize(candidates.len(), 0);
-                        let mut current_offsets = offsets;
-                        for &c in candidates {
-                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                            let pos = unsafe { *current_offsets.get_unchecked(r) };
-                            unsafe {
-                                *sorted_set.get_unchecked_mut(pos) = c;
-                                *current_offsets.get_unchecked_mut(r) += 1;
-                            }
-                        }
-
-                        for j in split_idx..num_eval {
-                            let r_idx = unsafe { *eval_indices.get_unchecked(j) as usize };
-                            if (cached_mask[r_idx >> 6] & (1u64 << (r_idx & 63))) != 0 {
-                                continue;
-                            }
-
-                            let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
-                            let start = unsafe { *offsets.get_unchecked(r_idx) };
-                            let end = start + p_len;
-                            let p = unsafe { sorted_set.get_unchecked(start..end) };
-                            let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
-                            let cap_lb = unsafe { *cap_bounds_ptr.add(p_len) };
-
-                            let (q_val, is_exact) =
-                                Solver::quick_bucket_eval(self.matrix, self.dict, p);
-                            let used_val = q_val.max(cap_lb);
-                            lb += used_val - cap_lb;
-                            self.cache.insert(hash, used_val, is_exact);
-
-                            if lb >= cost_to_beat {
-                                return None;
-                            }
-                        }
-
-                        Some((g, orig_idx, lb, exp))
-                    })
-                })
-                .collect();
-
-            if filtered.is_empty() {
-                let final_best = global_best.load(Ordering::Relaxed);
-                let best_val = (final_best >> 32) as u32;
-                let best_idx = (final_best & 0xFFFFFFFF) as u32;
-                let best_guess = if best_idx == u32::MAX {
-                    usize::MAX
-                } else {
-                    active[best_idx as usize].0
-                };
-                return (best_guess, best_val);
-            }
-
-            filtered.sort_unstable_by_key(|&(_, orig_idx, _, exp)| (exp, orig_idx));
 
             let next = AtomicUsize::new(0);
             (0..rayon::current_num_threads())
@@ -869,10 +710,11 @@ impl<'a> OptimalPolicy<'a> {
                     );
 
                     loop {
-                        let item_idx = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(&(g, orig_idx, lb, _)) = filtered.get(item_idx) else {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(&(g, _, base_lb)) = active[1..].get(i) else {
                             break;
                         };
+                        let orig_idx = i + 1;
 
                         let best_packed = global_best.load(Ordering::Relaxed);
                         let best_val = (best_packed >> 32) as u32;
@@ -883,7 +725,7 @@ impl<'a> OptimalPolicy<'a> {
                             best_val
                         };
 
-                        if lb >= guess_beta {
+                        if base_lb >= guess_beta {
                             continue;
                         }
 
