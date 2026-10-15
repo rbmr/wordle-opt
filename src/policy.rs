@@ -831,7 +831,7 @@ impl<'a> OptimalPolicy<'a> {
                 return (best_guess, best_val);
             }
 
-            filtered.sort_unstable_by_key(|&(_, _, lb, exp)| (lb, exp));
+            filtered.sort_unstable_by_key(|&(_, orig_idx, _, exp)| (exp, orig_idx));
 
             let next = AtomicUsize::new(0);
             (0..rayon::current_num_threads())
