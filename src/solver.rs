@@ -198,11 +198,13 @@ impl<'a> Solver<'a> {
             return (set.len() * (set.len() + 1) / 2) as u32;
         }
 
-        let mut active_tuples = Vec::with_capacity(dict.guesses.len());
         let mut c_mask = 0u32;
         for &c in set {
             c_mask |= matrix.candidate_masks[c];
         }
+
+        let mut best_guess = usize::MAX;
+        let mut min_expected_rem = u32::MAX;
 
         let mut seen_projections = rustc_hash::FxHashSet::default();
         for g in 0..dict.guesses.len() {
@@ -222,18 +224,18 @@ impl<'a> Solver<'a> {
                 continue;
             }
 
+            let g_offset = g * matrix.num_candidates;
             let mut counts = [0u16; 243];
             let mut num_non_empty = 0;
             for &c in set {
-                let r = matrix.get(g, c).0 as usize;
+                let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
                 if counts[r] == 0 {
                     num_non_empty += 1;
                 }
                 counts[r] += 1;
             }
 
-            let useless = num_non_empty == 1;
-            if useless {
+            if num_non_empty <= 1 {
                 continue;
             }
 
@@ -241,19 +243,34 @@ impl<'a> Solver<'a> {
             for &count in &counts {
                 expected_rem += (count as u32) * (count as u32);
             }
-            active_tuples.push((g, expected_rem));
+            if expected_rem < min_expected_rem {
+                min_expected_rem = expected_rem;
+                best_guess = g;
+            }
         }
 
-        active_tuples.sort_unstable_by_key(|&(_, exp)| exp);
-        if active_tuples.is_empty() {
+        if best_guess == usize::MAX {
             return u32::MAX; // Should not happen
         }
 
-        let best_guess = active_tuples[0].0;
-
+        let best_g_offset = best_guess * matrix.num_candidates;
         let mut counts = [0u16; 243];
         for &c in set {
-            counts[matrix.get(best_guess, c).0 as usize] += 1;
+            let r = unsafe { matrix.data.get_unchecked(best_g_offset + c).0 as usize };
+            counts[r] += 1;
+        }
+
+        let mut offsets = [0usize; 244];
+        for r_idx in 0..243 {
+            offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+        }
+        let mut sorted_set = vec![0usize; set.len()];
+        let mut current_offsets = offsets;
+        for &c in set {
+            let r = unsafe { matrix.data.get_unchecked(best_g_offset + c).0 as usize };
+            let pos = current_offsets[r];
+            sorted_set[pos] = c;
+            current_offsets[r] += 1;
         }
 
         let mut cost = set.len() as u32;
@@ -262,13 +279,9 @@ impl<'a> Solver<'a> {
             if p_len == 0 || r_idx == crate::core::Response::WIN.0 as usize {
                 continue;
             }
-            let mut subset = Vec::with_capacity(p_len);
-            for &c in set {
-                if matrix.get(best_guess, c).0 as usize == r_idx {
-                    subset.push(c);
-                }
-            }
-            cost += Self::greedy_solve(matrix, dict, &subset);
+            let start = offsets[r_idx];
+            let end = start + p_len;
+            cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
         }
         cost
     }
