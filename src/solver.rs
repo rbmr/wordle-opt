@@ -1600,53 +1600,86 @@ impl<'a> Solver<'a> {
                 current_offsets[r_idx] += 1;
             }
 
-            // Pass 2: Uncached buckets evaluation (quick_bucket_eval or tight capacity bound)
+            // Pass 2a: Cheap uncached buckets evaluation (quick_bucket_eval on p_len <= 15).
+            // Evaluating small buckets first takes nanoseconds and often prunes cost >= beta
+            // immediately, completely bypassing expensive full-dictionary branching factor searches
+            // on any p_len > 15 buckets for this guess.
             for i in 0..num_eval {
                 let r_idx = eval_indices[i] as usize;
                 if cached_mask[r_idx] {
                     continue;
                 }
                 let p_len = counts[r_idx] as usize;
+                if p_len > 15 {
+                    continue;
+                }
                 let start = offsets[r_idx] as usize;
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
                 let hash = bucket_hashes[r_idx];
 
+                let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
+                let lb = p_lbs[r_idx];
+                let used_val = quick_val.max(lb);
+                cost += used_val - lb;
+                p_lbs[r_idx] = used_val;
+                if is_exact {
+                    exact_vals[r_idx] = used_val;
+                }
+                self.cache.insert(hash, used_val, is_exact);
+                child_max_ks[r_idx] = p_len.min(parent_max_k);
+
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                    break;
+                }
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, Ordering::Relaxed);
+                self.scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+
+            // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
+            // Only reached if small buckets alone did not exceed beta.
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
+                if cached_mask[r_idx] {
+                    continue;
+                }
+                let p_len = counts[r_idx] as usize;
                 if p_len <= 15 {
-                    let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
-                    let lb = p_lbs[r_idx];
-                    let used_val = quick_val.max(lb);
+                    continue;
+                }
+                let start = offsets[r_idx] as usize;
+                let end = start + p_len;
+                let p = &sorted_set[start..end];
+                let hash = bucket_hashes[r_idx];
+
+                let k_cand = crate::heuristic::compute_candidate_branching_factor(self.matrix, p);
+                let lb = p_lbs[r_idx];
+                let max_tight_lb =
+                    crate::heuristic::tight_capacity_bound(p_len, k_cand, parent_max_k);
+                if max_tight_lb <= lb {
+                    child_max_ks[r_idx] = p_len.min(child_max_ks[r_idx]);
+                    self.cache.insert(hash, lb, false);
+                } else {
+                    let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
+                        self.matrix,
+                        p,
+                        k_cand,
+                        p_len,
+                    );
+                    child_max_ks[r_idx] = k.min(child_max_ks[r_idx]);
+                    let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                    let used_val = tight_lb.max(lb);
                     cost += used_val - lb;
                     p_lbs[r_idx] = used_val;
-                    if is_exact {
-                        exact_vals[r_idx] = used_val;
-                    }
-                    self.cache.insert(hash, used_val, is_exact);
-                    child_max_ks[r_idx] = p_len.min(parent_max_k);
-                } else {
-                    let k_cand =
-                        crate::heuristic::compute_candidate_branching_factor(self.matrix, p);
-                    let lb = p_lbs[r_idx];
-                    let max_tight_lb =
-                        crate::heuristic::tight_capacity_bound(p_len, k_cand, parent_max_k);
-                    if max_tight_lb <= lb {
-                        child_max_ks[r_idx] = p_len.min(child_max_ks[r_idx]);
-                        self.cache.insert(hash, lb, false);
-                    } else {
-                        let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
-                            self.matrix,
-                            p,
-                            k_cand,
-                            p_len,
-                        );
-                        child_max_ks[r_idx] = k.min(child_max_ks[r_idx]);
-                        let tight_lb =
-                            crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
-                        let used_val = tight_lb.max(lb);
-                        cost += used_val - lb;
-                        p_lbs[r_idx] = used_val;
-                        self.cache.insert(hash, used_val, false);
-                    }
+                    self.cache.insert(hash, used_val, false);
                 }
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
