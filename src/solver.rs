@@ -1601,33 +1601,6 @@ impl<'a> Solver<'a> {
             }
 
             // Pass 2: Uncached buckets evaluation (quick_bucket_eval or tight capacity bound)
-            let mut uncached_max_slacks = [0u32; 243];
-            let mut total_max_slack = 0u32;
-            for i in 0..num_eval {
-                let r_idx = eval_indices[i] as usize;
-                if cached_mask[r_idx] {
-                    continue;
-                }
-                let p_len = counts[r_idx] as usize;
-                if p_len <= 15 {
-                    uncached_max_slacks[r_idx] = 1;
-                    total_max_slack += 1;
-                } else {
-                    let start = offsets[r_idx] as usize;
-                    let end = start + p_len;
-                    let p = &sorted_set[start..end];
-                    let k_cand =
-                        crate::heuristic::compute_candidate_branching_factor(self.matrix, p);
-                    if k_cand < p_len {
-                        let max_tight_lb =
-                            crate::heuristic::tight_capacity_bound(p_len, k_cand, parent_max_k);
-                        let s = max_tight_lb.saturating_sub(p_lbs[r_idx]);
-                        uncached_max_slacks[r_idx] = s;
-                        total_max_slack += s;
-                    }
-                }
-            }
-
             for i in 0..num_eval {
                 let r_idx = eval_indices[i] as usize;
                 if cached_mask[r_idx] {
@@ -1650,18 +1623,7 @@ impl<'a> Solver<'a> {
                     }
                     self.cache.insert(hash, used_val, is_exact);
                     child_max_ks[r_idx] = p_len.min(parent_max_k);
-                    total_max_slack = total_max_slack.saturating_sub(uncached_max_slacks[r_idx]);
                 } else {
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    let beta_budget =
-                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                    if cost + total_max_slack < beta_budget {
-                        child_max_ks[r_idx] = p_len.min(child_max_ks[r_idx]);
-                        total_max_slack =
-                            total_max_slack.saturating_sub(uncached_max_slacks[r_idx]);
-                        continue;
-                    }
-
                     let k = crate::heuristic::compute_max_branching_factor_seq(self.matrix, p);
                     child_max_ks[r_idx] = k.min(child_max_ks[r_idx]);
                     let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
@@ -1670,7 +1632,6 @@ impl<'a> Solver<'a> {
                     cost += used_val - lb;
                     p_lbs[r_idx] = used_val;
                     self.cache.insert(hash, used_val, false);
-                    total_max_slack = total_max_slack.saturating_sub(uncached_max_slacks[r_idx]);
                 }
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
