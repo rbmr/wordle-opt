@@ -70,6 +70,9 @@ the commit that actually ran.
 | 2026-10-15 | `5d402a1` | pc01 | 1800 | 1 | optimal | 61.327s (1.02m) | 5974 | 1900 | 235 | ~276MB | dynamically refresh global beta across buckets in min_guess_val; validation OK |
 | 2026-10-15 | `5d402a1` | pc01 | 2000 | 1 | optimal | 86.694s (1.44m) | 6723 | 2119 | 4636 | ~284MB | dynamically refresh global beta across buckets in min_guess_val; 3.5% faster (86.694s vs 89.852s); validation OK |
 | 2026-10-15 | `5d402a1` | pc01 | 2200 | 1 | optimal | 168.940s (2.82m) | 7477 | 2331 | 22107 | ~322MB | dynamically refresh global beta across buckets in min_guess_val; validation OK |
+| 2026-10-15 | `1643fe8` | pc01 | 1000 | 1 | optimal | 13.837s | 3124 | 1049 | — | — | cache-first root filter with thread-local scratch buffer; validation OK |
+| 2026-10-15 | `1643fe8` | pc01 | 1600 | 1 | optimal | 42.422s | 5256 | 1681 | 240 | ~254MB | cache-first root filter with thread-local scratch buffer; validation OK |
+| 2026-10-15 | `1643fe8` | pc01 | 2000 | 1 | optimal | 86.641s (1.44m) | 6723 | 2119 | 4636 | ~285MB | cache-first root filter with thread-local scratch buffer; validation OK |
 
 
 ## Notes
