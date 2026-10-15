@@ -1568,6 +1568,7 @@ impl<'a> Solver<'a> {
             cost
         } else {
             let mut counts = [0u16; 243];
+            let mut bucket_hashes = [0u64; 243];
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
 
@@ -1575,14 +1576,13 @@ impl<'a> Solver<'a> {
             for &c in set {
                 let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
                 unsafe {
-                    *counts.get_unchecked_mut(r) += 1;
-                }
-            }
-
-            for r_idx in 0..243 {
-                if counts[r_idx] > 0 {
-                    non_empty_indices[num_non_empty] = r_idx as u8;
-                    num_non_empty += 1;
+                    let cnt = counts.get_unchecked_mut(r);
+                    if *cnt == 0 {
+                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                        num_non_empty += 1;
+                    }
+                    *cnt += 1;
+                    *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
                 }
             }
 
@@ -1594,9 +1594,9 @@ impl<'a> Solver<'a> {
             // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
             // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
             // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
-            // Benchmarks show this sorting step halves the total number of evaluated states.
+            // Ties broken by response index for deterministic order.
             non_empty_indices[0..num_non_empty]
-                .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
+                .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
 
             let mut cost = set.len() as u32;
             let mut p_lbs = [0u32; 243];
@@ -1625,6 +1625,59 @@ impl<'a> Solver<'a> {
                 return cost;
             }
 
+            // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
+            // If cached bounds alone push cost >= beta or current_cost_so_far + cost >= current_global_beta,
+            // we prune immediately without spending time on counting sort or scratch buffer partitioning.
+            let mut exact_vals = [0u32; 243];
+            let mut cached_mask = [false; 243];
+
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
+                    continue;
+                }
+
+                let hash = bucket_hashes[r_idx];
+                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                    let lb = p_lbs[r_idx];
+                    let used_val = cached_val.max(lb);
+                    cost += used_val - lb;
+                    p_lbs[r_idx] = used_val;
+                    if is_exact {
+                        exact_vals[r_idx] = used_val;
+                    }
+                    cached_mask[r_idx] = true;
+
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, Ordering::Relaxed);
+                        return cost;
+                    }
+                }
+            }
+
+            // If all buckets with p_len > 2 were exact in cache, no partitioning or evaluation is needed.
+            let mut needs_partition = false;
+            for i in 0..num_non_empty {
+                let r_idx = non_empty_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
+                    continue;
+                }
+                if exact_vals[r_idx] == 0 {
+                    needs_partition = true;
+                    break;
+                }
+            }
+
+            if !needs_partition {
+                return cost;
+            }
+
             // Fast slice partition using counting sort
             let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
             sorted_set.clear();
@@ -1646,34 +1699,23 @@ impl<'a> Solver<'a> {
                 current_offsets[r_idx] += 1;
             }
 
-            let mut exact_vals = [0u32; 243];
-
+            // Pass 2: Uncached buckets evaluation (quick_bucket_eval or tight capacity bound)
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
                 if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
                     continue;
                 }
+                if cached_mask[r_idx] {
+                    continue;
+                }
 
                 let start = offsets[r_idx] as usize;
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
+                let hash = bucket_hashes[r_idx];
 
-                let mut hash = 0;
-                for &c in p {
-                    hash ^= self.matrix.zobrist[c];
-                }
-
-                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    let lb = p_lbs[r_idx];
-                    let used_val = cached_val.max(lb);
-                    cost += used_val - lb;
-                    p_lbs[r_idx] = used_val;
-                    if is_exact {
-                        exact_vals[r_idx] = used_val;
-                    }
-                } else if p_len <= 15 {
+                if p_len <= 15 {
                     let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
                     let lb = p_lbs[r_idx];
                     let used_val = quick_val.max(lb);
