@@ -253,6 +253,10 @@ the commit that actually ran.
 | 2026-10-15 | `bc30e14` | pc01 | 1600 | 1 | optimal | 22.008s | 5256 | 1681 | — | ~157MB | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 21.7s; validation OK |
 | 2026-10-15 | `bc30e14` | pc01 | 2000 | 1 | optimal | 44.188s | 6723 | 2119 | 8252 | ~174MB | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 43.8s; validation OK |
 | 2026-10-15 | `bc30e14` | pc01 | 2200 | 1 | optimal | 82.437s (1.37m) | 7477 | 2331 | 22659 | ~205MB | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 81.8s; validation OK |
+| 2026-10-15 | `1ceb066` | pc01 | 1000 | 1 | optimal | 4.857s | 3124 | 1049 | — | — | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 4.7s; validation OK |
+| 2026-10-15 | `1ceb066` | pc01 | 1600 | 1 | optimal | 21.895s | 5256 | 1681 | — | ~157MB | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 21.5s; validation OK |
+| 2026-10-15 | `1ceb066` | pc01 | 2000 | 1 | optimal | 44.035s | 6723 | 2119 | 8266 | ~174MB | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 43.7s; validation OK |
+| 2026-10-15 | `1ceb066` | pc01 | 2200 | 1 | optimal | 81.654s (1.36m) | 7477 | 2331 | 22602 | ~204MB | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 81.0s; validation OK |
 
 
 
@@ -330,6 +334,7 @@ the commit that actually ran.
 - The `daf2f0b` rows demonstrated that replacing 972-byte `exact_vals` and 243-byte `cached_mask` arrays with compact 256-bit `[u64; 4]` bitmasks, shrinking `child_max_ks` from 8-byte `usize` to 2-byte `u16` (saving 2.6 KB stack frame footprint per DFS frame), and pre-computing `target_k` to early-exit candidate branching searches in Pass 2b maintained top performance (N=1000 at 4.847s, N=1600 at 21.649s with pick 21.3s, N=2000 at 43.486s, N=2200 at 81.004s with pick 80.3s). All runs passed policy tree validation with invariant golden costs.
 - The `377569e` rows demonstrated that adding midpoint capacity pruning to `compute_candidate_branching_factor_with_target` introduced branch and popcount overhead on small candidate subsets (16-30 words) where a tight unrolled loop with target early exit is faster, regressing runtimes across all sizes (N=2200 from 81.004s to 82.608s). Midpoint check in candidate branching reverted.
 - The `bc30e14` rows confirmed that reverting the midpoint check in `compute_candidate_branching_factor_with_target` while keeping unchecked mask indexing stabilized candidate branching factor evaluation. All runs passed policy tree validation with invariant golden costs.
+- The `1ceb066` rows demonstrated that vectorizing chunked projection accumulation via `projs_chunk.iter_mut().zip(c_slice.iter())` and removing bounds checks in equivalence class projection logic improved performance across all benchmarks (N=1000 down to **4.857s**, N=1600 down to **21.895s**, N=2000 down to **44.035s**, and N=2200 down to **81.654s** with pick time down to **81.0s**). All runs passed policy tree validation with invariant golden costs.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
