@@ -1080,6 +1080,25 @@ impl<'a> Solver<'a> {
                     *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
                 }
             }
+            let num_guesses = self.dict.guesses.len();
+            let data_c_g_ptr = self.matrix.data_c_g.as_ptr();
+            let mut stack_c_ptrs = [std::ptr::null::<Response>(); 256];
+            let mut heap_c_ptrs = Vec::new();
+            let c_ptrs: &[*const Response] = if c_len <= 256 {
+                for (i, &c) in set.iter().enumerate() {
+                    unsafe {
+                        *stack_c_ptrs.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+                    }
+                }
+                &stack_c_ptrs[..c_len]
+            } else {
+                heap_c_ptrs.reserve(c_len);
+                for &c in set {
+                    heap_c_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                }
+                &heap_c_ptrs
+            };
+
             for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
                 if block == 0 {
                     continue;
@@ -1091,10 +1110,8 @@ impl<'a> Solver<'a> {
                     b &= b - 1;
 
                     let mut num_non_empty = 0;
-                    let g_off = g * self.matrix.num_candidates;
-                    let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
-                    for &c in set {
-                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                    for &c_base in c_ptrs {
+                        let r = unsafe { (*c_base.add(g)).0 as usize };
                         unsafe {
                             let cnt = counts.get_unchecked_mut(r);
                             *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
