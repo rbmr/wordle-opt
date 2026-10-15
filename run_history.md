@@ -213,6 +213,10 @@ the commit that actually ran.
 | 2026-10-15 | `a59f7eb` | pc01 | 1600 | 1 | optimal | 22.042s | 5256 | 1681 | — | ~157MB | unify candidate counting in min_state_val; pick time 21.7s; validation OK |
 | 2026-10-15 | `a59f7eb` | pc01 | 2000 | 1 | optimal | 44.372s | 6723 | 2119 | 8179 | ~174MB | unify candidate counting in min_state_val; pick time 44.0s; validation OK |
 | 2026-10-15 | `a59f7eb` | pc01 | 2200 | 1 | optimal | 84.570s (1.41m) | 7477 | 2331 | 24973 | ~208MB | unify candidate counting in min_state_val; pick time 83.8s; validation OK |
+| 2026-10-15 | `b03d676` | pc01 | 1000 | 1 | optimal | 4.915s | 3124 | 1049 | — | — | sort filtered root guesses by exp in scan; pick time 4.7s; validation OK |
+| 2026-10-15 | `b03d676` | pc01 | 1600 | 1 | optimal | 21.993s | 5256 | 1681 | — | ~157MB | sort filtered root guesses by exp in scan; pick time 21.6s; validation OK |
+| 2026-10-15 | `b03d676` | pc01 | 2000 | 1 | optimal | 44.208s | 6723 | 2119 | 8408 | ~175MB | sort filtered root guesses by exp in scan; pick time 43.8s; validation OK |
+| 2026-10-15 | `b03d676` | pc01 | 2200 | 1 | optimal | 82.675s (1.38m) | 7477 | 2331 | 23006 | ~205MB | sort filtered root guesses by exp in scan; new all-time record N=2200 (82.675s vs 83.408s, pick 81.9s, -1.9k states); validation OK |
 
 ## Notes
 
@@ -278,6 +282,7 @@ the commit that actually ran.
 - The `a1018db` rows demonstrated that fast-pathing in-set candidate guesses achieving the theoretical minimum cost $2n - 1$ (all-singleton partition) directly in `OptimalPolicy::guess_and_cost` for candidate sets $n \le 15$ preserved exact optimal tie-breaking and reduced N=2200 build time to **84.005s** (pick time down to **83.2s**).
 - The `2fae855` rows demonstrated that avoiding per-node 243-vector allocations in `build_into` (reusing an array across DFS iterations) and fast-pathing singleton candidates directly without partitioning overhead eliminated >560,000 vector allocations across tree construction, tying the N=1600 record at **21.992s** and delivering **44.243s** at N=2000 while preserving exact policy tree structure.
 - The `a59f7eb` rows demonstrated that unifying candidate counting across Phase 1 and Phase 2 in `min_state_val` (replacing the `c_len <= 8` linear search over `local_counts` with branchless direct indexing into `counts` and non-empty tracking) eliminated inner loop comparisons and branches across thousands of guess evaluations, setting a new all-time record for N=1000 at **4.856s** (pick 4.7s).
+- The `b03d676` rows demonstrated that sorting surviving root guesses in `OptimalPolicy::scan` Phase C by `(exp, orig_idx)` rather than `(lb, exp)` prioritized evaluating well-balanced partitions with lower expected remaining first. This reduced explored states at N=2200 from 24,973 to 23,006 and established a new all-time record of **82.675s** (pick time down to **81.9s**, 1.33s faster than previous best).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
