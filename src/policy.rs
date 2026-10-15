@@ -259,17 +259,13 @@ fn active_guesses(
         surviving_guesses
             .into_par_iter()
             .filter_map(|g| {
-                let g_offset = g * matrix.num_candidates;
-                let g_row = unsafe {
-                    matrix
-                        .data
-                        .get_unchecked(g_offset..g_offset + matrix.num_candidates)
-                };
+                let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                let cap_bounds_ptr = cap_bounds.as_ptr();
                 let mut counts = [0u16; NUM_RESPONSES];
                 let mut non_empty_indices = [0u8; NUM_RESPONSES];
                 let mut num_non_empty = 0;
                 for &c in candidates {
-                    let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
                     non_empty_indices[num_non_empty] = r as u8;
                     num_non_empty += (counts[r] == 0) as usize;
                     counts[r] += 1;
@@ -284,7 +280,7 @@ fn active_guesses(
                     let v = counts[r] as usize;
                     expected_rem += (v as u32) * (v as u32);
                     if r != crate::core::Response::WIN.0 as usize {
-                        base_lb += unsafe { *cap_bounds.get_unchecked(v) };
+                        base_lb += unsafe { *cap_bounds_ptr.add(v) };
                     }
                 }
                 Some((g, expected_rem, base_lb))
@@ -294,16 +290,13 @@ fn active_guesses(
         let mut out = Vec::with_capacity(surviving_guesses.len());
         let mut counts = [0u16; NUM_RESPONSES];
         let mut non_empty_indices = [0u8; NUM_RESPONSES];
+        let matrix_data_ptr = matrix.data.as_ptr();
+        let cap_bounds_ptr = cap_bounds.as_ptr();
         for g in surviving_guesses {
-            let g_offset = g * matrix.num_candidates;
-            let g_row = unsafe {
-                matrix
-                    .data
-                    .get_unchecked(g_offset..g_offset + matrix.num_candidates)
-            };
+            let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
             let mut num_non_empty = 0;
             for &c in candidates {
-                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 non_empty_indices[num_non_empty] = r as u8;
                 num_non_empty += (counts[r] == 0) as usize;
                 counts[r] += 1;
@@ -321,7 +314,7 @@ fn active_guesses(
                 let v = counts[r] as usize;
                 expected_rem += (v as u32) * (v as u32);
                 if r != crate::core::Response::WIN.0 as usize {
-                    base_lb += unsafe { *cap_bounds.get_unchecked(v) };
+                    base_lb += unsafe { *cap_bounds_ptr.add(v) };
                 }
                 counts[r] = 0;
             }
@@ -519,20 +512,16 @@ impl<'a> OptimalPolicy<'a> {
         }
         cand_guesses[0..n].sort_unstable();
 
+        let matrix_data_ptr = self.matrix.data.as_ptr();
         for &g in &cand_guesses[0..n] {
-            let g_offset = g * self.matrix.num_candidates;
-            let g_row = unsafe {
-                self.matrix
-                    .data
-                    .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
-            };
+            let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
 
             let mut mask = [0u64; 4];
             let mut num_distinct = 0;
             let mut has_collision = false;
 
             for &c in candidates {
-                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 let word_idx = r >> 6;
                 let bit = 1u64 << (r & 63);
                 let word = unsafe { mask.get_unchecked_mut(word_idx) };
@@ -593,18 +582,16 @@ impl<'a> OptimalPolicy<'a> {
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
 
-            let g_offset = first_g * self.matrix.num_candidates;
-            let g_row = unsafe {
-                self.matrix
-                    .data
-                    .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
-            };
+            let matrix_data_ptr = self.matrix.data.as_ptr();
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let cap_bounds_ptr = cap_bounds.as_ptr();
+            let g_ptr = unsafe { matrix_data_ptr.add(first_g * self.matrix.num_candidates) };
             for &c in candidates {
-                let r_idx = unsafe { g_row.get_unchecked(c).0 as usize };
+                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
                 non_empty_indices[num_non_empty] = r_idx as u8;
                 num_non_empty += (counts[r_idx] == 0) as usize;
                 counts[r_idx] += 1;
-                bucket_hashes[r_idx] ^= unsafe { *self.matrix.zobrist.get_unchecked(c) };
+                bucket_hashes[r_idx] ^= unsafe { *zobrist_ptr.add(c) };
             }
 
             let mut offsets = [0usize; 244];
@@ -614,10 +601,12 @@ impl<'a> OptimalPolicy<'a> {
             let mut sorted_set = vec![0usize; candidates.len()];
             let mut current_offsets = offsets;
             for &c in candidates {
-                let r_idx = unsafe { g_row.get_unchecked(c).0 as usize };
-                let pos = current_offsets[r_idx];
-                sorted_set[pos] = c;
-                current_offsets[r_idx] += 1;
+                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
+                let pos = unsafe { *current_offsets.get_unchecked(r_idx) };
+                unsafe {
+                    *sorted_set.get_unchecked_mut(pos) = c;
+                    *current_offsets.get_unchecked_mut(r_idx) += 1;
+                }
             }
 
             let mut bucket_tasks = Vec::new();
@@ -629,7 +618,7 @@ impl<'a> OptimalPolicy<'a> {
                     continue;
                 }
                 if p_len <= 2 {
-                    base_cost += unsafe { *cap_bounds.get_unchecked(p_len) };
+                    base_cost += unsafe { *cap_bounds_ptr.add(p_len) };
                     continue;
                 }
                 let hash = bucket_hashes[r_idx];
@@ -700,23 +689,25 @@ impl<'a> OptimalPolicy<'a> {
                         return None;
                     }
                     let orig_idx = i + 1;
-                    let g_offset = g * self.matrix.num_candidates;
-                    let g_row = unsafe {
+                    let g_ptr = unsafe {
                         self.matrix
                             .data
-                            .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
+                            .as_ptr()
+                            .add(g * self.matrix.num_candidates)
                     };
+                    let zobrist_ptr = self.matrix.zobrist.as_ptr();
+                    let cap_bounds_ptr = cap_bounds.as_ptr();
                     let mut counts = [0u16; 243];
                     let mut non_empty_indices = [0u8; 243];
                     let mut num_non_empty = 0;
                     let mut bucket_hashes = [0u64; 243];
 
                     for &c in candidates {
-                        let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
                         non_empty_indices[num_non_empty] = r as u8;
                         num_non_empty += (counts[r] == 0) as usize;
                         counts[r] += 1;
-                        bucket_hashes[r] ^= unsafe { *self.matrix.zobrist.get_unchecked(c) };
+                        bucket_hashes[r] ^= unsafe { *zobrist_ptr.add(c) };
                     }
 
                     let mut max_p_len = 0;
@@ -748,20 +739,23 @@ impl<'a> OptimalPolicy<'a> {
                     eval_indices[0..num_eval]
                         .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
 
+                    let split_idx =
+                        eval_indices[0..num_eval].partition_point(|&r| counts[r as usize] > 15);
+
                     // First pass: check cached bounds descending by bucket size without partitioning.
                     // Fused with uncached slack calculation to eliminate a redundant second pass over non-empty indices.
-                    let mut cached_mask = [false; 243];
+                    let mut cached_mask = [0u64; 4];
                     let mut has_uncached = false;
                     let mut max_possible_slack = 0u32;
                     for j in 0..num_eval {
-                        let r_idx = eval_indices[j] as usize;
-                        let p_len = counts[r_idx] as usize;
-                        let hash = bucket_hashes[r_idx];
+                        let r_idx = unsafe { *eval_indices.get_unchecked(j) as usize };
+                        let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                        let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
                         if let Some((cached_val, _)) = self.cache.get(hash) {
-                            let cap_lb = unsafe { *cap_bounds.get_unchecked(p_len) };
+                            let cap_lb = unsafe { *cap_bounds_ptr.add(p_len) };
                             let used_val = cached_val.max(cap_lb);
                             lb += used_val - cap_lb;
-                            cached_mask[r_idx] = true;
+                            cached_mask[r_idx >> 6] |= 1u64 << (r_idx & 63);
                             if lb >= cost_to_beat {
                                 return None;
                             }
@@ -778,7 +772,8 @@ impl<'a> OptimalPolicy<'a> {
                     // Second pass: only partition into thread-local scratch buffer if uncached buckets need evaluation.
                     let mut offsets = [0usize; 244];
                     for r_idx in 0..243 {
-                        offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+                        offsets[r_idx + 1] =
+                            offsets[r_idx] + unsafe { *counts.get_unchecked(r_idx) as usize };
                     }
 
                     SCRATCH_SORTED_SET.with(|cell| {
@@ -786,24 +781,26 @@ impl<'a> OptimalPolicy<'a> {
                         sorted_set.resize(candidates.len(), 0);
                         let mut current_offsets = offsets;
                         for &c in candidates {
-                            let r = unsafe { g_row.get_unchecked(c).0 as usize };
-                            let pos = current_offsets[r];
-                            sorted_set[pos] = c;
-                            current_offsets[r] += 1;
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            let pos = unsafe { *current_offsets.get_unchecked(r) };
+                            unsafe {
+                                *sorted_set.get_unchecked_mut(pos) = c;
+                                *current_offsets.get_unchecked_mut(r) += 1;
+                            }
                         }
 
-                        for j in 0..num_eval {
-                            let r_idx = eval_indices[j] as usize;
-                            let p_len = counts[r_idx] as usize;
-                            if p_len > 15 || cached_mask[r_idx] {
+                        for j in split_idx..num_eval {
+                            let r_idx = unsafe { *eval_indices.get_unchecked(j) as usize };
+                            if (cached_mask[r_idx >> 6] & (1u64 << (r_idx & 63))) != 0 {
                                 continue;
                             }
 
-                            let start = offsets[r_idx];
+                            let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                            let start = unsafe { *offsets.get_unchecked(r_idx) };
                             let end = start + p_len;
-                            let p = &sorted_set[start..end];
-                            let hash = bucket_hashes[r_idx];
-                            let cap_lb = unsafe { *cap_bounds.get_unchecked(p_len) };
+                            let p = unsafe { sorted_set.get_unchecked(start..end) };
+                            let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
+                            let cap_lb = unsafe { *cap_bounds_ptr.add(p_len) };
 
                             let (q_val, is_exact) =
                                 Solver::quick_bucket_eval(self.matrix, self.dict, p);

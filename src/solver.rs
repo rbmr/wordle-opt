@@ -205,6 +205,7 @@ impl<'a> Solver<'a> {
             )
         };
 
+        let matrix_data_ptr = matrix.data.as_ptr();
         for g in 0..dict.guesses.len() {
             if !skip_projections {
                 let chars = &dict.guess_chars[g];
@@ -225,9 +226,10 @@ impl<'a> Solver<'a> {
             }
 
             let g_offset = g * matrix.num_candidates;
+            let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
             let mut num_non_empty = 0;
             for &c in set {
-                let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 if counts[r] == 0 {
                     non_empty_indices[num_non_empty] = r as u8;
                     num_non_empty += 1;
@@ -260,9 +262,10 @@ impl<'a> Solver<'a> {
         }
 
         let best_g_offset = best_guess * matrix.num_candidates;
+        let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
         let mut counts = [0u16; 243];
         for &c in set {
-            let r = unsafe { matrix.data.get_unchecked(best_g_offset + c).0 as usize };
+            let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
             counts[r] += 1;
         }
 
@@ -273,7 +276,7 @@ impl<'a> Solver<'a> {
         let mut sorted_set = vec![0usize; set.len()];
         let mut current_offsets = offsets;
         for &c in set {
-            let r = unsafe { matrix.data.get_unchecked(best_g_offset + c).0 as usize };
+            let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
             let pos = current_offsets[r];
             sorted_set[pos] = c;
             current_offsets[r] += 1;
@@ -954,6 +957,9 @@ impl<'a> Solver<'a> {
         let mut counts = [0u16; 243];
         let mut non_empty_indices = [0u8; 243];
 
+        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
+        let matrix_data_ptr = self.matrix.data.as_ptr();
+
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
         phase1_tuples.clear();
         let mut phase2_tuples = std::mem::take(&mut self.scratch_phase2_tuples[depth]);
@@ -970,13 +976,9 @@ impl<'a> Solver<'a> {
             }
             let mut num_non_empty = 0;
             let g_off = g * self.matrix.num_candidates;
-            let g_row = unsafe {
-                self.matrix
-                    .data
-                    .get_unchecked(g_off..g_off + self.matrix.num_candidates)
-            };
+            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
             for &c in set {
-                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
                     let cnt = counts.get_unchecked_mut(r);
                     *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
@@ -1004,7 +1006,7 @@ impl<'a> Solver<'a> {
                 }
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != Response::WIN.0 as usize {
-                    lb_cost += unsafe { *parent_cap_bounds.get_unchecked(count as usize) };
+                    lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
                 }
             }
             if lb_cost < beta {
@@ -1075,13 +1077,9 @@ impl<'a> Solver<'a> {
 
                     let mut num_non_empty = 0;
                     let g_off = g * self.matrix.num_candidates;
-                    let g_row = unsafe {
-                        self.matrix
-                            .data
-                            .get_unchecked(g_off..g_off + self.matrix.num_candidates)
-                    };
+                    let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
                     for &c in set {
-                        let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
                         unsafe {
                             let cnt = counts.get_unchecked_mut(r);
                             *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
@@ -1106,7 +1104,7 @@ impl<'a> Solver<'a> {
                         }
                         expected_rem += (count as u32) * (count as u32);
                         if r_idx != Response::WIN.0 as usize {
-                            lb_cost += unsafe { *parent_cap_bounds.get_unchecked(count as usize) };
+                            lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
                         }
                     }
                     if num_non_empty == 2

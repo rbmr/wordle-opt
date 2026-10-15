@@ -45,10 +45,10 @@ pub fn compute_max_branching_factor(
     (0..matrix.num_guesses)
         .into_par_iter()
         .map(|g| {
-            let g_offset = g * matrix.num_candidates;
+            let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
             let mut mask = [0u64; 4];
             for &c in candidates {
-                let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 mask[r >> 6] |= 1u64 << (r & 63);
             }
             (mask[0].count_ones()
