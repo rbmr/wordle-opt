@@ -648,12 +648,14 @@ impl<'a> OptimalPolicy<'a> {
                     let mut counts = [0u16; 243];
                     let mut non_empty_indices = [0u8; 243];
                     let mut num_non_empty = 0;
+                    let mut bucket_hashes = [0u64; 243];
 
                     for &c in candidates {
                         let r = unsafe { g_row.get_unchecked(c).0 as usize };
                         non_empty_indices[num_non_empty] = r as u8;
                         num_non_empty += (counts[r] == 0) as usize;
                         counts[r] += 1;
+                        bucket_hashes[r] ^= unsafe { *self.matrix.zobrist.get_unchecked(c) };
                     }
 
                     let mut max_p_len = 0;
@@ -679,12 +681,6 @@ impl<'a> OptimalPolicy<'a> {
                     }
 
                     let mut lb = base_lb;
-
-                    let mut bucket_hashes = [0u64; 243];
-                    for &c in candidates {
-                        let r = unsafe { g_row.get_unchecked(c).0 as usize };
-                        bucket_hashes[r] ^= self.matrix.zobrist[c];
-                    }
 
                     // Sort only non-trivial buckets (size > 2) descending by size so largest buckets are evaluated first.
                     // Large buckets contribute the largest bound tightening, triggering early cutoff.
