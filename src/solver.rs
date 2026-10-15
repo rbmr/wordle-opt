@@ -1282,9 +1282,13 @@ impl<'a> Solver<'a> {
 
         if c_len <= 8 {
             let mut local_counts = [(0u8, 0u8, 0u32); 8];
+            let mut c_responses = [0u8; 8];
             let mut num_non_empty = 0;
-            for &c in set {
+            for (cand_idx, &c) in set.iter().enumerate() {
                 let r = unsafe { (*g_ptr.add(c)).0 };
+                unsafe {
+                    *c_responses.get_unchecked_mut(cand_idx) = r;
+                }
                 let mut found = false;
                 for i in 0..num_non_empty {
                     let entry = unsafe { local_counts.get_unchecked_mut(i) };
@@ -1348,8 +1352,8 @@ impl<'a> Solver<'a> {
 
                 let mut p = [0usize; 8];
                 let mut p_idx = 0;
-                for &c in set {
-                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                for (cand_idx, &c) in set.iter().enumerate() {
+                    let r = unsafe { *c_responses.get_unchecked(cand_idx) as usize };
                     if r == r_idx {
                         unsafe {
                             *p.get_unchecked_mut(p_idx) = c;
