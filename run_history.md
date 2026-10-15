@@ -185,6 +185,10 @@ the commit that actually ran.
 | 2026-10-15 | `6356bd5` | pc01 | 1600 | 1 | optimal | 23.016s | 5256 | 1681 | — | ~159MB | defer Phase 2 guess gathering until Phase 1 fails to reach lower bound; pick time 22.6s; validation OK |
 | 2026-10-15 | `6356bd5` | pc01 | 2000 | 1 | optimal | 46.771s | 6723 | 2119 | 8213 | ~178MB | defer Phase 2 guess gathering until Phase 1 fails to reach lower bound; pick time 46.3s; validation OK |
 | 2026-10-15 | `6356bd5` | pc01 | 2200 | 1 | optimal | 88.434s (1.47m) | 7477 | 2331 | 24941 | ~214MB | defer Phase 2 guess gathering until Phase 1 fails to reach lower bound; pick time 87.5s; validation OK |
+| 2026-10-15 | `780f05c` | pc01 | 1000 | 1 | optimal | 5.140s | 3124 | 1049 | — | — | fuse candidate counting and Zobrist hashing in Phase B; pick time 4.9s; validation OK |
+| 2026-10-15 | `780f05c` | pc01 | 1600 | 1 | optimal | 22.948s | 5256 | 1681 | — | ~160MB | fuse candidate counting and Zobrist hashing in Phase B; pick time 22.5s; validation OK |
+| 2026-10-15 | `780f05c` | pc01 | 2000 | 1 | optimal | 46.572s | 6723 | 2119 | 8244 | ~178MB | fuse candidate counting and Zobrist hashing in Phase B; pick time 46.1s; validation OK |
+| 2026-10-15 | `780f05c` | pc01 | 2200 | 1 | optimal | 88.148s (1.47m) | 7477 | 2331 | 24852 | ~214MB | fuse candidate counting and Zobrist hashing in Phase B; pick time 87.2s; validation OK |
 
 ## Notes
 
@@ -243,6 +247,7 @@ the commit that actually ran.
 - The `e955f88` rows demonstrated that splitting Pass 2 of `min_guess_val` into Pass 2a (evaluating cheap $p\_len \le 15$ buckets via fast $O(|p|^2)$ `quick_bucket_eval`) and Pass 2b (evaluating large $p\_len > 15$ buckets via tight branching factor bounds) allowed the tight exact costs of small buckets to trigger early alpha-beta cutoffs in nanoseconds before ever running full-dictionary branching factor scans on large buckets. This achieved a monumental sweep of all-time records across all benchmark sizes: N=1000 dropped to **5.126s** (pick 4.9s, breaking the 5s barrier), N=1600 dropped to **23.078s** (pick 22.6s, 12.5% faster), N=2000 dropped by 9.7s to **46.015s** (pick 45.5s, 17.4% faster, breaking the 50s barrier), and N=2200 dropped by 23.5s to **88.527s** (pick 87.6s, 21.0% faster, breaking the 90s barrier).
 - The `e9e613e` rows demonstrated that passing `target_k = min_k_for_target_bound(p_len, parent_max_k, lb)` into `compute_max_branching_factor_seq_with_target` truncates the 14,855-word dictionary scan early the instant any guess achieves $k \ge target\_k$ (where $tight\_capacity\_bound \le lb$ is mathematically guaranteed), shaving further runtime from N=1600 (down to 22.763s, pick 22.3s) and setting a new all-time record for N=2200 (**87.589s**, pick 86.7s).
 - The `6356bd5` rows demonstrated that gathering Phase 1 guesses directly from `set` in $O(|set|)$ (checking only active bits for candidate words) and deferring the gathering and unpacking of ~14,000 Phase 2 guesses until after Phase 1 fails to reach `local_lb` eliminated hundreds of megabytes of redundant memory writes across tree search. All benchmark sizes verified with identical costs and passing validation.
+- The `780f05c` rows demonstrated that fusing candidate counting and Zobrist hashing into a single memory pass in Phase B of `OptimalPolicy::scan` maintained top performance across all sizes (N=1000 at 5.140s, N=1600 at 22.948s, N=2000 at 46.572s, and N=2200 at 88.148s with pick time 87.2s). All runs passed policy tree validation with identical golden costs.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
