@@ -125,6 +125,10 @@ the commit that actually ran.
 | 2026-10-15 | `40bdff9` | pc01 | 1600 | 1 | optimal | 40.882s | 5256 | 1681 | 240 | ~247MB | optimize root pre-filter by tracking non-empty indices and fusing slack loop; pick time 39.7s; validation OK |
 | 2026-10-15 | `40bdff9` | pc01 | 2000 | 1 | optimal | 79.705s (1.33m) | 6723 | 2119 | 7416 | ~284MB | optimize root pre-filter by tracking non-empty indices and fusing slack loop; new all-time record N=2000 (79.705s vs 80.020s, pick time 78.8s); validation OK |
 | 2026-10-15 | `40bdff9` | pc01 | 2200 | 1 | optimal | 144.699s (2.41m) | 7477 | 2331 | 20540 | ~316MB | optimize root pre-filter by tracking non-empty indices and fusing slack loop; new all-time record N=2200 build time 144.699s and pick time 142.1s; validation OK |
+| 2026-10-15 | `854315b` | pc01 | 1000 | 1 | optimal | 12.990s | 3124 | 1049 | — | — | accelerate branching factor search with candidate pre-pass and letter pruning; new all-time record N=1000 (<13s); pick time 12.5s; validation OK |
+| 2026-10-15 | `854315b` | pc01 | 1600 | 1 | optimal | 40.278s | 5256 | 1681 | 240 | ~247MB | accelerate branching factor search with candidate pre-pass and letter pruning; new all-time record N=1600 (40.278s vs 40.829s); pick time 39.2s; validation OK |
+| 2026-10-15 | `854315b` | pc01 | 2000 | 1 | optimal | 79.188s (1.32m) | 6723 | 2119 | 7353 | ~285MB | accelerate branching factor search with candidate pre-pass and letter pruning; new all-time record N=2000 (79.188s vs 79.705s, pick time 78.3s); validation OK |
+| 2026-10-15 | `854315b` | pc01 | 2200 | 1 | optimal | 143.724s (2.40m) | 7477 | 2331 | 20607 | ~317MB | accelerate branching factor search with candidate pre-pass and letter pruning; new all-time record N=2200 build time 143.724s and pick time 141.2s; validation OK |
 
 
 ## Notes
@@ -165,6 +169,7 @@ the commit that actually ran.
 - The `07f9b48` rows demonstrated that propagating tightened child branching factors down into child subtrees reduced explored states at N=2200 from 20.5k to 19.9k and improved N=1600 build time to 40.908s (pick time 39.8s), while sequential max_k computation on large root buckets in Phase A introduced minor parallel overhead.
 - The `9f0c8eb` rows demonstrated that using an instant O(1) `bucket_k` bound in Phase A eliminated the sequential branching factor computation overhead across large opener buckets, setting a new all-time best N=1600 build time of 40.829s (pick time 39.7s) and reducing N=2200 build time to 147.385s (pick time 144.8s).
 - The `40bdff9` rows demonstrated that tracking `non_empty_indices` branchlessly during candidate counting to evaluate initial capacity bounds strictly across non-empty buckets and fusing the uncached bucket slack check directly into the first cache pass set new all-time records for both N=2000 (79.705s build, 78.8s pick) and N=2200 (144.699s build, 142.1s pick).
+- The `854315b` rows demonstrated that evaluating candidate guesses first in `compute_max_branching_factor_seq` to rapidly establish high branching lower bounds and soundly pruning guesses with zero letter overlap (always $k=1$) or $\le 2$ distinct-letter overlaps when $max\_k \ge 9$ achieved a clean sweep of new all-time records across all benchmark sizes: N=1000 down to 12.990s (pick 12.5s), N=1600 down to 40.278s (pick 39.2s), N=2000 down to 79.188s (pick 78.3s), and N=2200 down to 143.724s (pick 141.2s).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
