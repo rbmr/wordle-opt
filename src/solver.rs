@@ -794,12 +794,17 @@ impl<'a> Solver<'a> {
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
+                let projs_chunk = unsafe { projs.get_unchecked_mut(chunk_start..chunk_end) };
                 for &c in set {
                     let c_off = c * num_guesses;
-                    let z = self.matrix.zobrist[c];
-                    for g in chunk_start..chunk_end {
-                        let r = unsafe { self.matrix.data_c_g.get_unchecked(c_off + g).0 as usize };
-                        projs[g] ^= z.wrapping_mul(r as u64 + 1);
+                    let z = unsafe { *self.matrix.zobrist.get_unchecked(c) };
+                    let c_slice = unsafe {
+                        self.matrix
+                            .data_c_g
+                            .get_unchecked(c_off + chunk_start..c_off + chunk_end)
+                    };
+                    for (p, &r) in projs_chunk.iter_mut().zip(c_slice.iter()) {
+                        *p ^= z.wrapping_mul(r.0 as u64 + 1);
                     }
                 }
             }
@@ -809,7 +814,7 @@ impl<'a> Solver<'a> {
                 let mut p = 0u64;
                 let m = r as u64 + 1;
                 for &c in set {
-                    p ^= self.matrix.zobrist[c].wrapping_mul(m);
+                    p ^= unsafe { *self.matrix.zobrist.get_unchecked(c) }.wrapping_mul(m);
                 }
                 if p == 0 {
                     p = 1;
@@ -840,7 +845,7 @@ impl<'a> Solver<'a> {
                         if g >= num_guesses {
                             break;
                         }
-                        let mut proj = projs[g];
+                        let mut proj = unsafe { *projs.get_unchecked(g) };
                         if proj == 0 {
                             proj = 1;
                         }
@@ -849,7 +854,9 @@ impl<'a> Solver<'a> {
                             let slot = table[idx];
                             if slot == 0 {
                                 table[idx] = proj;
-                                active_bits_scratch[block_idx] |= 1 << tz;
+                                unsafe {
+                                    *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
+                                }
                                 added_indices.push(idx);
                                 break;
                             }
@@ -864,7 +871,7 @@ impl<'a> Solver<'a> {
                     while b != 0 {
                         let tz = b.trailing_zeros();
                         let g = block_idx * 64 + tz as usize;
-                        let mut proj = projs[g];
+                        let mut proj = unsafe { *projs.get_unchecked(g) };
                         if proj == 0 {
                             proj = 1;
                         }
