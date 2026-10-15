@@ -177,44 +177,25 @@ pub fn compute_max_branching_factor_seq_with_target(
         let g_ones = g_mask.count_ones();
         let overlap_count = overlap.count_ones();
 
-        let can_prune = if overlap_count == 1 {
-            if max_k >= 3 {
-                if g_ones == 5 {
-                    continue;
-                }
-                true
-            } else {
-                false
-            }
-        } else if overlap_count == 2 {
-            max_k >= 9
-        } else if overlap_count == 3 {
-            max_k >= 27
+        let var_pos = if g_ones == 5 {
+            overlap_count
+        } else if overlap_count == g_ones {
+            5
         } else {
-            overlap_count == 4 && max_k >= 81
+            let [c0, c1, c2, c3, c4] = unsafe { *matrix.guess_chars.get_unchecked(g) };
+            ((c_mask >> c0) & 1)
+                + ((c_mask >> c1) & 1)
+                + ((c_mask >> c2) & 1)
+                + ((c_mask >> c3) & 1)
+                + ((c_mask >> c4) & 1)
         };
 
-        if can_prune {
-            let var_pos = if g_ones == 5 {
-                overlap_count
-            } else if overlap_count == g_ones {
-                5
-            } else {
-                let [c0, c1, c2, c3, c4] = unsafe { *matrix.guess_chars.get_unchecked(g) };
-                ((c_mask >> c0) & 1)
-                    + ((c_mask >> c1) & 1)
-                    + ((c_mask >> c2) & 1)
-                    + ((c_mask >> c3) & 1)
-                    + ((c_mask >> c4) & 1)
-            };
-
-            if (var_pos <= 1 && max_k >= 3)
-                || (var_pos <= 2 && (max_k >= 9 || (overlap_count == 1 && max_k >= 8)))
-                || (var_pos <= 3 && (max_k >= 27 || (overlap_count == 1 && max_k >= 12)))
-                || (var_pos <= 4 && max_k >= 81)
-            {
-                continue;
-            }
+        if (var_pos <= 1 && max_k >= 3)
+            || (var_pos <= 2 && (max_k >= 9 || (overlap_count == 1 && max_k >= 8)))
+            || (var_pos <= 3 && (max_k >= 27 || (overlap_count == 1 && max_k >= 12)))
+            || (var_pos <= 4 && max_k >= 81)
+        {
+            continue;
         }
 
         let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
