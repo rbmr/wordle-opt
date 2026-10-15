@@ -20,6 +20,7 @@ pub struct ResponseMatrix {
     /// for a fixed candidate. This is critical for the `is_equivalent` check which compares two
     /// candidates across all possible guesses.
     pub data_c_g: Vec<Response>,
+    pub candidate_to_guess: Vec<usize>,
     #[cfg(cuda_enabled)]
     gpu_matrix: std::sync::OnceLock<Option<crate::gpu::DeviceMatrix>>,
 }
@@ -79,6 +80,8 @@ impl ResponseMatrix {
             }
         }
 
+        let candidate_to_guess = dict.candidate_to_guess.clone();
+
         Self {
             num_guesses,
             num_candidates,
@@ -87,6 +90,7 @@ impl ResponseMatrix {
             zobrist,
             data,
             data_c_g,
+            candidate_to_guess,
             #[cfg(cuda_enabled)]
             gpu_matrix: std::sync::OnceLock::new(),
         }

@@ -49,7 +49,7 @@ pub fn compute_max_branching_factor(
             let mut mask = [0u64; 4];
             for &c in candidates {
                 let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
-                mask[r / 64] |= 1u64 << (r % 64);
+                mask[r >> 6] |= 1u64 << (r & 63);
             }
             (mask[0].count_ones()
                 + mask[1].count_ones()
@@ -75,11 +75,14 @@ pub fn compute_max_branching_factor_seq(
     }
 
     let mut max_k = 0;
+    let target_k = candidates.len().min(243);
 
-    // Fast pass: evaluate candidate words first. Candidates contain letter combinations
-    // specifically tailored to this subset, quickly raising max_k and triggering early exit.
+    // Fast pass: evaluate actual candidate words first via candidate_to_guess mapping.
+    // Candidates contain letter combinations specifically tailored to this subset,
+    // quickly raising max_k and triggering early exit.
     for &c in candidates {
-        let g_offset = c * matrix.num_candidates;
+        let g = matrix.candidate_to_guess[c];
+        let g_offset = g * matrix.num_candidates;
         let mut mask = [0u64; 4];
         for &other in candidates {
             let r = unsafe { matrix.data.get_unchecked(g_offset + other).0 as usize };
@@ -91,7 +94,7 @@ pub fn compute_max_branching_factor_seq(
             + mask[3].count_ones()) as usize;
         if k > max_k {
             max_k = k;
-            if max_k >= candidates.len() {
+            if max_k >= target_k {
                 return max_k;
             }
         }
@@ -100,22 +103,26 @@ pub fn compute_max_branching_factor_seq(
     let mid = candidates.len() / 2;
 
     // Main scan: skip words with zero overlap (which generate only 1 response)
-    // or <= 2-3 overlap on distinct-letter words when max_k is already high.
+    // or <= 2-4 overlap on distinct-letter words when max_k is already high.
     for g in 0..matrix.num_guesses {
         let g_mask = matrix.guess_masks[g];
         let overlap = g_mask & c_mask;
         if overlap == 0 {
             continue;
         }
-        if g_mask.count_ones() == 5 {
-            let overlap_count = overlap.count_ones();
+        let g_ones = g_mask.count_ones();
+        let overlap_count = overlap.count_ones();
+        if g_ones == 5 {
             if (overlap_count <= 1 && max_k >= 3)
                 || (overlap_count <= 2 && max_k >= 9)
                 || (overlap_count <= 3 && max_k >= 27)
+                || (overlap_count <= 4 && max_k >= 81)
             {
                 continue;
             }
-        } else if max_k >= 27 && overlap.count_ones() <= 1 {
+        } else if (max_k >= 27 && overlap_count <= 1)
+            || (max_k >= 81 && overlap_count <= 2 && g_ones >= 3)
+        {
             continue;
         }
 
@@ -142,7 +149,7 @@ pub fn compute_max_branching_factor_seq(
             + mask[3].count_ones()) as usize;
         if k > max_k {
             max_k = k;
-            if max_k >= candidates.len() {
+            if max_k >= target_k {
                 break;
             }
         }
