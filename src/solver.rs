@@ -1603,7 +1603,7 @@ impl<'a> Solver<'a> {
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
-                    parent_max_k,
+                    p_len.min(parent_max_k).max(2),
                 );
                 self.current_cost_so_far -= b;
 
@@ -1647,6 +1647,7 @@ impl<'a> Solver<'a> {
 
             let mut cost = set.len() as u32;
             let mut p_lbs = [0u32; 243];
+            let mut child_max_ks = [parent_max_k; 243];
 
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
@@ -1772,8 +1773,10 @@ impl<'a> Solver<'a> {
                         exact_vals[r_idx] = used_val;
                     }
                     self.cache.insert(hash, used_val, is_exact);
+                    child_max_ks[r_idx] = p_len.min(parent_max_k);
                 } else {
                     let k = crate::heuristic::compute_max_branching_factor_seq(self.matrix, p);
+                    child_max_ks[r_idx] = k.min(parent_max_k);
                     let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                     let lb = p_lbs[r_idx];
                     let used_val = tight_lb.max(lb);
@@ -1839,7 +1842,7 @@ impl<'a> Solver<'a> {
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
-                    parent_max_k,
+                    child_max_ks[r_idx].max(2),
                 );
                 self.current_cost_so_far -= b;
                 if b + val >= beta {

@@ -573,12 +573,19 @@ impl<'a> OptimalPolicy<'a> {
                         self.equiv_cache,
                     );
                     let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, &bucket);
+                    let bucket_k = if bucket.len() > 15 {
+                        crate::heuristic::compute_max_branching_factor_seq(self.matrix, &bucket)
+                            .min(self.max_k)
+                            .max(2)
+                    } else {
+                        bucket.len().min(self.max_k).max(2)
+                    };
                     let val = solver.min_state_val(
                         &bucket,
                         self.all_guesses_bits,
                         bucket_greedy,
                         2,
-                        self.max_k,
+                        bucket_k,
                     );
                     let exact_val = val.min(bucket_greedy);
                     self.cache.insert(hash, exact_val, true);
