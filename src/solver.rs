@@ -1003,7 +1003,7 @@ impl<'a> Solver<'a> {
                     *counts.get_unchecked_mut(r_idx) = 0;
                 }
                 expected_rem += (count as u32) * (count as u32);
-                if r_idx != 242 {
+                if r_idx != Response::WIN.0 as usize {
                     lb_cost += unsafe { *parent_cap_bounds.get_unchecked(count as usize) };
                 }
             }
@@ -1095,7 +1095,7 @@ impl<'a> Solver<'a> {
                             *counts.get_unchecked_mut(r_idx) = 0;
                         }
                         expected_rem += (count as u32) * (count as u32);
-                        if r_idx != 242 {
+                        if r_idx != Response::WIN.0 as usize {
                             lb_cost += unsafe { *parent_cap_bounds.get_unchecked(count as usize) };
                         }
                     }
