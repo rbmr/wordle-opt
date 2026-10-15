@@ -1402,9 +1402,11 @@ impl<'a> Solver<'a> {
             cost
         } else {
             let mut counts = [0u16; 243];
+            let mut bucket_hashes = [0u64; 243];
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
 
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             for &c in set {
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
@@ -1412,6 +1414,7 @@ impl<'a> Solver<'a> {
                     *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
                     num_non_empty += (*cnt == 0) as usize;
                     *cnt += 1;
+                    *bucket_hashes.get_unchecked_mut(r) ^= *zobrist_ptr.add(c);
                 }
             }
 
@@ -1472,15 +1475,6 @@ impl<'a> Solver<'a> {
                 unsafe {
                     *p_lbs.get_unchecked_mut(r_idx) = *parent_cap_bounds_ptr.add(p_len);
                     *child_max_ks.get_unchecked_mut(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-            }
-
-            let mut bucket_hashes = [0u64; 243];
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                unsafe {
-                    *bucket_hashes.get_unchecked_mut(r) ^= *zobrist_ptr.add(c);
                 }
             }
 
