@@ -265,6 +265,10 @@ the commit that actually ran.
 | 2026-10-15 | `d8bde76` | pc01 | 1600 | 1 | optimal | 21.817s | 5256 | 1681 | — | ~157MB | break early in Phase 1 and 2 guess loops when monotonic lower bound meets cutoff; pick time 21.5s; validation OK |
 | 2026-10-15 | `d8bde76` | pc01 | 2000 | 1 | optimal | 43.686s | 6723 | 2119 | 8223 | ~176MB | break early in Phase 1 and 2 guess loops when monotonic lower bound meets cutoff; pick time 43.3s; validation OK |
 | 2026-10-15 | `d8bde76` | pc01 | 2200 | 1 | optimal | 81.818s (1.36m) | 7477 | 2331 | 22683 | ~204MB | break early in Phase 1 and 2 guess loops when monotonic lower bound meets cutoff; pick time 81.1s; validation OK |
+| 2026-10-15 | `a66897a` | pc01 | 1000 | 1 | optimal | 4.860s | 3124 | 1049 | — | — | track num_exact in min_guess_val to eliminate partition check loop and bypass Pass 2b when all buckets exact; pick time 4.7s; validation OK |
+| 2026-10-15 | `a66897a` | pc01 | 1600 | 1 | optimal | 21.890s | 5256 | 1681 | — | ~157MB | track num_exact in min_guess_val to eliminate partition check loop and bypass Pass 2b when all buckets exact; pick time 21.6s; validation OK |
+| 2026-10-15 | `a66897a` | pc01 | 2000 | 1 | optimal | 43.896s | 6723 | 2119 | 8192 | ~175MB | track num_exact in min_guess_val to eliminate partition check loop and bypass Pass 2b when all buckets exact; pick time 43.5s; validation OK |
+| 2026-10-15 | `a66897a` | pc01 | 2200 | 1 | optimal | 81.672s (1.36m) | 7477 | 2331 | 22679 | ~204MB | track num_exact in min_guess_val to eliminate partition check loop and bypass Pass 2b when all buckets exact; pick time 81.0s; validation OK |
 
 
 
@@ -345,6 +349,7 @@ the commit that actually ran.
 - The `1ceb066` rows demonstrated that vectorizing chunked projection accumulation via `projs_chunk.iter_mut().zip(c_slice.iter())` and removing bounds checks in equivalence class projection logic improved performance across all benchmarks (N=1000 down to **4.857s**, N=1600 down to **21.895s**, N=2000 down to **44.035s**, and N=2200 down to **81.654s** with pick time down to **81.0s**). All runs passed policy tree validation with invariant golden costs.
 - The `d596ab9` rows demonstrated that caching `mask = size - 1` directly in `GlobalCache` to bypass vector length reads and division on every lookup, using unchecked indexing for atomic entry loads and stores, and skipping redundant atomic stores when `packed == old_slot` maintained top performance and slightly improved N=2000 build time to **43.912s** (pick time down to **43.5s**). All runs passed policy tree validation with invariant golden costs.
 - The `d8bde76` rows demonstrated that breaking early out of Phase 1 and Phase 2 guess loops when `g_lb >= best_val` or `current_cost_so_far + g_lb >= current_global_beta` (guaranteed monotonic by `(lb, exp, g)` sort order) eliminated tens of thousands of redundant loop iterations and atomic metrics increments, improving N=1000 build time to **4.856s**, N=1600 to **21.817s**, and N=2000 to **43.686s** (pick time down to **43.3s**). All runs passed policy tree validation with invariant golden costs.
+- The `a66897a` rows demonstrated that tracking `num_exact` in `min_guess_val` across Pass 1 and Pass 2a eliminated the redundant `needs_partition` scan over `eval_indices` and allowed early exit whenever all `num_eval` buckets reached exact status, maintaining top performance and shaving N=2200 build time down to **81.672s** (pick time down to **81.0s**). All runs passed policy tree validation with invariant golden costs.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
