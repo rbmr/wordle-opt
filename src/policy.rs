@@ -615,24 +615,22 @@ impl<'a> OptimalPolicy<'a> {
                     let orig_idx = i + 1;
                     let g_offset = g * self.matrix.num_candidates;
                     let mut counts = [0u16; 243];
+                    let mut non_empty_indices = [0u8; 243];
+                    let mut num_non_empty = 0;
 
                     for &c in candidates {
                         let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        non_empty_indices[num_non_empty] = r as u8;
+                        num_non_empty += (counts[r] == 0) as usize;
                         counts[r] += 1;
                     }
 
                     // Fast capacity bound check first
                     let mut lb = candidates.len() as u32;
-                    let mut non_empty_indices = [0u8; 243];
-                    let mut num_non_empty = 0;
-                    for r in 0..243 {
-                        let cnt = counts[r] as usize;
-                        if cnt > 0 {
-                            non_empty_indices[num_non_empty] = r as u8;
-                            num_non_empty += 1;
-                            if r != crate::core::Response::WIN.0 as usize {
-                                lb += self.capacity_bounds_2d[self.max_k][cnt];
-                            }
+                    for j in 0..num_non_empty {
+                        let r = non_empty_indices[j] as usize;
+                        if r != crate::core::Response::WIN.0 as usize {
+                            lb += self.capacity_bounds_2d[self.max_k][counts[r] as usize];
                         }
                     }
 
@@ -652,7 +650,10 @@ impl<'a> OptimalPolicy<'a> {
                         .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
 
                     // First pass: check cached bounds descending by bucket size without partitioning.
+                    // Fused with uncached slack calculation to eliminate a redundant second pass over non-empty indices.
                     let mut cached_mask = [false; 243];
+                    let mut has_uncached = false;
+                    let mut max_possible_slack = 0u32;
                     for j in 0..num_non_empty {
                         let r_idx = non_empty_indices[j] as usize;
                         if r_idx == crate::core::Response::WIN.0 as usize {
@@ -671,22 +672,7 @@ impl<'a> OptimalPolicy<'a> {
                             if lb >= cost_to_beat {
                                 return None;
                             }
-                        }
-                    }
-
-                    // Check if any uncached bucket with p_len > 2 remains.
-                    // Also calculate the maximum possible bound tightening that could theoretically occur.
-                    // If even the maximum possible bound tightening cannot reach cost_to_beat, the guess
-                    // is guaranteed to survive into `filtered`, so we skip partitioning and expensive bucket scans.
-                    let mut has_uncached = false;
-                    let mut max_possible_slack = 0u32;
-                    for j in 0..num_non_empty {
-                        let r_idx = non_empty_indices[j] as usize;
-                        if r_idx == crate::core::Response::WIN.0 as usize {
-                            continue;
-                        }
-                        let p_len = counts[r_idx] as usize;
-                        if p_len > 2 && !cached_mask[r_idx] {
+                        } else {
                             has_uncached = true;
                             max_possible_slack += if p_len <= 15 { 1 } else { (p_len - 2) as u32 };
                         }
