@@ -684,9 +684,9 @@ impl<'a> OptimalPolicy<'a> {
                             if lb >= cost_to_beat {
                                 return None;
                             }
-                        } else {
+                        } else if p_len <= 15 {
                             has_uncached = true;
-                            max_possible_slack += if p_len <= 15 { 1 } else { (p_len - 2) as u32 };
+                            max_possible_slack += 1;
                         }
                     }
 
@@ -711,115 +711,30 @@ impl<'a> OptimalPolicy<'a> {
                             current_offsets[r] += 1;
                         }
 
-                        // Pre-compute candidate branching slack for all uncached buckets
-                        let mut cand_slacks = [0u16; 243];
-                        let mut cand_ks = [0u8; 243];
-                        let mut total_cand_slack = 0u32;
-                        let mut uncached_indices = [0u8; 243];
-                        let mut num_uncached = 0;
-
                         for j in 0..num_non_empty {
                             let r_idx = non_empty_indices[j] as usize;
                             if r_idx == crate::core::Response::WIN.0 as usize {
                                 continue;
                             }
                             let p_len = counts[r_idx] as usize;
-                            if p_len <= 2 || cached_mask[r_idx] {
+                            if p_len <= 2 || p_len > 15 || cached_mask[r_idx] {
                                 continue;
                             }
-                            uncached_indices[num_uncached] = r_idx as u8;
-                            num_uncached += 1;
 
-                            if p_len <= 15 {
-                                cand_slacks[r_idx] = 1;
-                                total_cand_slack += 1;
-                            } else {
-                                let start = offsets[r_idx];
-                                let end = start + p_len;
-                                let p = &sorted_set[start..end];
-                                let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
-                                let k_cand = crate::heuristic::compute_candidate_branching_factor(
-                                    self.matrix,
-                                    p,
-                                );
-                                cand_ks[r_idx] = k_cand.min(255) as u8;
-                                let cand_tight_lb = crate::heuristic::tight_capacity_bound(
-                                    p_len, k_cand, self.max_k,
-                                );
-                                let slack = cand_tight_lb.saturating_sub(cap_lb);
-                                cand_slacks[r_idx] = slack as u16;
-                                total_cand_slack += slack;
-                            }
-                        }
-
-                        // If even with the worst-case candidate branching slack across all uncached buckets
-                        // the lower bound cannot reach cost_to_beat, this guess is mathematically guaranteed
-                        // to survive Phase B! Completely bypass all 14,855-guess dictionary scans!
-                        if lb + total_cand_slack < cost_to_beat {
-                            return Some((g, orig_idx, lb, exp));
-                        }
-
-                        let mut remaining_slack = total_cand_slack;
-                        for j in 0..num_uncached {
-                            let r_idx = uncached_indices[j] as usize;
-                            let p_len = counts[r_idx] as usize;
                             let start = offsets[r_idx];
                             let end = start + p_len;
                             let p = &sorted_set[start..end];
                             let hash = bucket_hashes[r_idx];
                             let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
-                            let this_slack = cand_slacks[r_idx] as u32;
-                            remaining_slack = remaining_slack.saturating_sub(this_slack);
 
-                            if p_len <= 15 {
-                                let (q_val, is_exact) =
-                                    Solver::quick_bucket_eval(self.matrix, self.dict, p);
-                                let used_val = q_val.max(cap_lb);
-                                lb += used_val - cap_lb;
-                                self.cache.insert(hash, used_val, is_exact);
-                            } else {
-                                let required_slack =
-                                    cost_to_beat.saturating_sub(lb + remaining_slack);
-                                let target_k = if required_slack > 0 {
-                                    let target_bound = cap_lb.saturating_add(required_slack - 1);
-                                    crate::heuristic::min_k_for_target_bound(
-                                        p_len,
-                                        self.max_k,
-                                        target_bound,
-                                    )
-                                } else {
-                                    p_len.min(243) + 1
-                                };
-
-                                let initial_k = cand_ks[r_idx] as usize;
-                                if initial_k >= target_k {
-                                    break;
-                                }
-
-                                let k =
-                                    crate::heuristic::compute_max_branching_factor_seq_with_target(
-                                        self.matrix,
-                                        p,
-                                        initial_k,
-                                        target_k,
-                                    );
-                                if k >= target_k {
-                                    break;
-                                }
-
-                                let tight_lb =
-                                    crate::heuristic::tight_capacity_bound(p_len, k, self.max_k);
-                                let used_val = tight_lb.max(cap_lb);
-                                lb += used_val - cap_lb;
-                                self.cache.insert(hash, used_val, false);
-                            }
+                            let (q_val, is_exact) =
+                                Solver::quick_bucket_eval(self.matrix, self.dict, p);
+                            let used_val = q_val.max(cap_lb);
+                            lb += used_val - cap_lb;
+                            self.cache.insert(hash, used_val, is_exact);
 
                             if lb >= cost_to_beat {
                                 return None;
-                            }
-
-                            if lb + remaining_slack < cost_to_beat {
-                                break;
                             }
                         }
 
