@@ -29,10 +29,8 @@ codegen-units = 1
 debug = true
 
 
+
 [[bench]]
 name = "solver_bench"
 harness = false
-
-[build-dependencies]
-cc = "1.5.1"
 

@@ -45,9 +45,6 @@ while guaranteeing the final answer is still exactly optimal:
   shared atomic beta, so threads prune against each other's progress. Root
   candidates are sorted by their lower bounds first, so promising guesses
   tighten the shared beta earlier.
-- **CUDA GPU acceleration**: capacity-bound work and phase filtering are
-  offloaded to an RTX 2060 (`gpu_kernel.cu`), with L1-tuned kernels and
-  spin-waiting stream syncs.
 
 The reasoning behind each of these, the scaling behaviour at large N, and the
 memory layout are in `ARCHITECTURE.md`.

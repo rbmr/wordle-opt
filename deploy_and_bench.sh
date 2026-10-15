@@ -39,16 +39,11 @@ echo "Syncing to $HOST (commit $COMMIT)..."
 # there forever since rsync only ever adds/updates, never removes.
 rsync -aP --delete --exclude 'target' --exclude '.git' . "$HOST:~/wordle-opt/"
 
-CUDA_ENV=""
-if [ -n "$WORDLE_OPT_DISABLE_CUDA" ]; then
-	CUDA_ENV="WORDLE_OPT_DISABLE_CUDA=1"
-fi
-
 echo "Building on compute..."
-ssh "$HOST" "cd wordle-opt && env $CUDA_ENV RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release"
+ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release"
 
 echo "Running correctness tests on compute (catches a broken change before benchmarking it)..."
-ssh "$HOST" "cd wordle-opt && timeout 1800 env $CUDA_ENV RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release"
+ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release"
 
 # This script is the tree-producing iteration entry point, always foreground
 # and bounded to 10h - it does NOT have a `full` mode. run_full.sh/check_full.sh
@@ -60,4 +55,4 @@ if [ -z "$CMD_ARGS" ]; then
 fi
 
 echo "Running tree iteration on compute (bounded by timeout 36000): $CMD_ARGS"
-ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env $CUDA_ENV RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- $CMD_ARGS"
+ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release -- $CMD_ARGS"

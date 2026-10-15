@@ -21,8 +21,6 @@ pub struct ResponseMatrix {
     /// candidates across all possible guesses.
     pub data_c_g: Vec<Response>,
     pub candidate_to_guess: Vec<usize>,
-    #[cfg(cuda_enabled)]
-    gpu_matrix: std::sync::OnceLock<Option<crate::gpu::DeviceMatrix>>,
 }
 
 impl ResponseMatrix {
@@ -91,29 +89,12 @@ impl ResponseMatrix {
             data,
             data_c_g,
             candidate_to_guess,
-            #[cfg(cuda_enabled)]
-            gpu_matrix: std::sync::OnceLock::new(),
         }
     }
 
     #[inline]
     pub fn get(&self, guess_idx: usize, candidate_idx: usize) -> Response {
         self.data[guess_idx * self.num_candidates + candidate_idx]
-    }
-
-    #[cfg(cuda_enabled)]
-    pub fn gpu_matrix(&self) -> Option<&crate::gpu::DeviceMatrix> {
-        self.gpu_matrix
-            .get_or_init(|| {
-                let slice = unsafe {
-                    std::slice::from_raw_parts(
-                        self.data_c_g.as_ptr() as *const u8,
-                        self.data_c_g.len(),
-                    )
-                };
-                crate::gpu::DeviceMatrix::new(slice)
-            })
-            .as_ref()
     }
 }
 

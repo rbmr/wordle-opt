@@ -133,8 +133,6 @@ pub struct Solver<'a> {
     scratch_added_indices: [Vec<usize>; 32],
     scratch_projs: [Vec<u64>; 32],
     scratch_active_bits: [Vec<u64>; 32],
-    #[cfg(cuda_enabled)]
-    pub gpu_matrix_ptr: Option<*const u8>,
 }
 
 impl<'a> Drop for Solver<'a> {
@@ -378,8 +376,6 @@ impl<'a> Solver<'a> {
             scratch_added_indices: scratch.scratch_added_indices,
             scratch_projs: scratch.scratch_projs,
             scratch_active_bits: scratch.scratch_active_bits,
-            #[cfg(cuda_enabled)]
-            gpu_matrix_ptr: matrix.gpu_matrix().map(|m| m.as_ptr()),
         }
     }
 
@@ -447,8 +443,6 @@ impl<'a> Solver<'a> {
                 capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
             }
         }
-        #[cfg(cuda_enabled)]
-        let _ = matrix.gpu_matrix();
 
         if !active_guesses.is_empty() {
             let first_g = active_guesses[0];
@@ -1017,170 +1011,96 @@ impl<'a> Solver<'a> {
         let mut valid_max_k = 0;
         let mut min_val_found = u32::MAX;
 
-        #[cfg(cuda_enabled)]
-        let use_gpu1 = self.matrix.num_guesses <= 14855
-            && set.len() <= 2340
-            && self.gpu_matrix_ptr.is_some()
-            && (phase1_guesses.len() * set.len()) > 50000;
-        #[cfg(not(cuda_enabled))]
-        let use_gpu1 = false;
-        if use_gpu1 {
-            #[cfg(cuda_enabled)]
-            {
-                let d_matrix = self.gpu_matrix_ptr.unwrap();
-                let num_guesses = self.matrix.num_guesses as i32;
-                crate::gpu::GPU_CTX.with(|ctx_ref| {
-                    let ctx = ctx_ref.borrow().0;
-                    unsafe {
-                        let in_g = std::slice::from_raw_parts_mut(
-                            crate::gpu::gpu_get_h_active_guesses(ctx),
-                            phase1_guesses.len(),
-                        );
-                        for i in 0..phase1_guesses.len() {
-                            in_g[i] = phase1_guesses[i] as u16;
-                        }
-                        let in_s = std::slice::from_raw_parts_mut(
-                            crate::gpu::gpu_get_h_set(ctx),
-                            set.len(),
-                        );
-                        for i in 0..set.len() {
-                            in_s[i] = set[i] as u16;
-                        }
-                        crate::gpu::gpu_compute_phase1(
-                            ctx,
-                            phase1_guesses.len() as i32,
-                            set.len() as i32,
-                            parent_max_k as i32,
-                            d_matrix,
-                            num_guesses,
-                        );
-                        let exps = std::slice::from_raw_parts(
-                            crate::gpu::gpu_get_h_out_expected_rem(ctx),
-                            phase1_guesses.len(),
-                        );
-                        let lbs = std::slice::from_raw_parts(
-                            crate::gpu::gpu_get_h_out_lb_cost(ctx),
-                            phase1_guesses.len(),
-                        );
-                        let nums = std::slice::from_raw_parts(
-                            crate::gpu::gpu_get_h_out_num_non_empty(ctx),
-                            phase1_guesses.len(),
-                        );
-                        for i in 0..phase1_guesses.len() {
-                            let num_non_empty = nums[i] as usize;
-                            if num_non_empty == 1 {
-                                continue;
-                            }
-                            let lb_cost = lbs[i];
-                            let expected_rem = exps[i];
-                            let g = phase1_guesses[i];
-                            if num_non_empty > local_max_k {
-                                local_max_k = num_non_empty;
-                            }
-                            if num_non_empty > valid_max_k {
-                                valid_max_k = num_non_empty;
-                            }
-                            if lb_cost < beta {
-                                phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                            } else {
-                                min_val_found = min_val_found.min(lb_cost);
-                            }
-                        }
-                    }
-                });
-            }
-        } else {
-            if c_len <= 8 {
-                for &g in &phase1_guesses {
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
-                    let mut num_non_empty = 0;
-                    let mut local_counts = [(0u8, 0u8); 8];
-                    let g_off = g * self.matrix.num_candidates;
-                    for &c in set {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
-                        let mut found = false;
-                        for i in 0..num_non_empty {
-                            if local_counts[i].0 == r {
-                                local_counts[i].1 += 1;
-                                found = true;
-                                break;
-                            }
-                        }
-                        if !found {
-                            local_counts[num_non_empty] = (r, 1);
-                            num_non_empty += 1;
-                        }
-                    }
-                    if num_non_empty == 1 {
-                        continue;
-                    }
+        if c_len <= 8 {
+            for &g in &phase1_guesses {
+                let mut expected_rem = 0u32;
+                let mut lb_cost = c_len as u32;
+                let mut num_non_empty = 0;
+                let mut local_counts = [(0u8, 0u8); 8];
+                let g_off = g * self.matrix.num_candidates;
+                for &c in set {
+                    let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
+                    let mut found = false;
                     for i in 0..num_non_empty {
-                        let r_idx = local_counts[i].0 as usize;
-                        let count = local_counts[i].1 as usize;
-                        expected_rem += (count as u32) * (count as u32);
-                        if r_idx != crate::core::Response::WIN.0 as usize {
-                            lb_cost += self.capacity_bounds_2d[parent_max_k][count];
+                        if local_counts[i].0 == r {
+                            local_counts[i].1 += 1;
+                            found = true;
+                            break;
                         }
                     }
-                    if num_non_empty > local_max_k {
-                        local_max_k = num_non_empty;
-                    }
-                    if num_non_empty > valid_max_k {
-                        valid_max_k = num_non_empty;
-                    }
-                    if lb_cost < beta {
-                        phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                    } else {
-                        min_val_found = min_val_found.min(lb_cost);
+                    if !found {
+                        local_counts[num_non_empty] = (r, 1);
+                        num_non_empty += 1;
                     }
                 }
-            } else {
-                for &g in &phase1_guesses {
-                    let mut num_non_empty = 0;
-                    let g_off = g * self.matrix.num_candidates;
-                    for &c in set {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                        let cnt = unsafe { counts.get_unchecked_mut(r) };
-                        if *cnt == 0 {
-                            unsafe {
-                                *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                            }
-                            num_non_empty += 1;
-                        }
-                        *cnt += 1;
+                if num_non_empty == 1 {
+                    continue;
+                }
+                for i in 0..num_non_empty {
+                    let r_idx = local_counts[i].0 as usize;
+                    let count = local_counts[i].1 as usize;
+                    expected_rem += (count as u32) * (count as u32);
+                    if r_idx != crate::core::Response::WIN.0 as usize {
+                        lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                     }
-                    if num_non_empty == 1 {
+                }
+                if num_non_empty > local_max_k {
+                    local_max_k = num_non_empty;
+                }
+                if num_non_empty > valid_max_k {
+                    valid_max_k = num_non_empty;
+                }
+                if lb_cost < beta {
+                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                } else {
+                    min_val_found = min_val_found.min(lb_cost);
+                }
+            }
+        } else {
+            for &g in &phase1_guesses {
+                let mut num_non_empty = 0;
+                let g_off = g * self.matrix.num_candidates;
+                for &c in set {
+                    let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
+                    let cnt = unsafe { counts.get_unchecked_mut(r) };
+                    if *cnt == 0 {
                         unsafe {
-                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                            *counts.get_unchecked_mut(r_idx) = 0;
+                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
                         }
-                        continue;
+                        num_non_empty += 1;
                     }
-                    if num_non_empty > local_max_k {
-                        local_max_k = num_non_empty;
+                    *cnt += 1;
+                }
+                if num_non_empty == 1 {
+                    unsafe {
+                        let r_idx = *non_empty_indices.get_unchecked(0) as usize;
+                        *counts.get_unchecked_mut(r_idx) = 0;
                     }
-                    if num_non_empty > valid_max_k {
-                        valid_max_k = num_non_empty;
+                    continue;
+                }
+                if num_non_empty > local_max_k {
+                    local_max_k = num_non_empty;
+                }
+                if num_non_empty > valid_max_k {
+                    valid_max_k = num_non_empty;
+                }
+                let mut expected_rem = 0u32;
+                let mut lb_cost = c_len as u32;
+                for i in 0..num_non_empty {
+                    let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                    let count = unsafe { *counts.get_unchecked(r_idx) };
+                    unsafe {
+                        *counts.get_unchecked_mut(r_idx) = 0;
                     }
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
-                    for i in 0..num_non_empty {
-                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                        let count = unsafe { *counts.get_unchecked(r_idx) };
-                        unsafe {
-                            *counts.get_unchecked_mut(r_idx) = 0;
-                        }
-                        expected_rem += (count as u32) * (count as u32);
-                        if r_idx != 242 {
-                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                        }
+                    expected_rem += (count as u32) * (count as u32);
+                    if r_idx != 242 {
+                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                     }
-                    if lb_cost < beta {
-                        phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                    } else {
-                        min_val_found = min_val_found.min(lb_cost);
-                    }
+                }
+                if lb_cost < beta {
+                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                } else {
+                    min_val_found = min_val_found.min(lb_cost);
                 }
             }
         }
@@ -1218,186 +1138,106 @@ impl<'a> Solver<'a> {
 
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         if best_val > local_lb && self.current_cost_so_far + local_lb < current_global_beta {
-            #[cfg(cuda_enabled)]
-            let use_gpu2 = self.matrix.num_guesses <= 14855
-                && set.len() <= 2340
-                && self.gpu_matrix_ptr.is_some()
-                && (phase2_guesses.len() * set.len()) > 50000;
-            #[cfg(not(cuda_enabled))]
-            let use_gpu2 = false;
-            if use_gpu2 {
-                #[cfg(cuda_enabled)]
-                {
-                    let d_matrix = self.gpu_matrix_ptr.unwrap();
-                    let num_guesses = self.matrix.num_guesses as i32;
-                    crate::gpu::GPU_CTX.with(|ctx_ref| {
-                        let ctx = ctx_ref.borrow().0;
-                        unsafe {
-                            let in_g = std::slice::from_raw_parts_mut(
-                                crate::gpu::gpu_get_h_active_guesses(ctx),
-                                phase2_guesses.len(),
-                            );
-                            for i in 0..phase2_guesses.len() {
-                                in_g[i] = phase2_guesses[i] as u16;
-                            }
-                            let in_s = std::slice::from_raw_parts_mut(
-                                crate::gpu::gpu_get_h_set(ctx),
-                                set.len(),
-                            );
-                            for i in 0..set.len() {
-                                in_s[i] = set[i] as u16;
-                            }
-                            crate::gpu::gpu_compute_phase1(
-                                ctx,
-                                phase2_guesses.len() as i32,
-                                set.len() as i32,
-                                parent_max_k as i32,
-                                d_matrix,
-                                num_guesses,
-                            );
-                            let exps = std::slice::from_raw_parts(
-                                crate::gpu::gpu_get_h_out_expected_rem(ctx),
-                                phase2_guesses.len(),
-                            );
-                            let lbs = std::slice::from_raw_parts(
-                                crate::gpu::gpu_get_h_out_lb_cost(ctx),
-                                phase2_guesses.len(),
-                            );
-                            let nums = std::slice::from_raw_parts(
-                                crate::gpu::gpu_get_h_out_num_non_empty(ctx),
-                                phase2_guesses.len(),
-                            );
-                            for i in 0..phase2_guesses.len() {
-                                let num_non_empty = nums[i] as usize;
-                                if num_non_empty == 1 {
-                                    continue;
-                                }
-                                let lb_cost = lbs[i];
-                                let expected_rem = exps[i];
-                                if num_non_empty == 2
-                                    && expected_rem
-                                        == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                                {
-                                    continue;
-                                }
-                                let g = phase2_guesses[i];
-                                if num_non_empty > local_max_k {
-                                    local_max_k = num_non_empty;
-                                }
-                                if num_non_empty > valid_max_k {
-                                    valid_max_k = num_non_empty;
-                                }
-                                if lb_cost < best_val {
-                                    phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                                } else {
-                                    min_val_found = min_val_found.min(lb_cost);
-                                }
-                            }
-                        }
-                    });
-                }
-            } else {
-                if c_len <= 8 {
-                    for &g in &phase2_guesses {
-                        let mut expected_rem = 0u32;
-                        let mut lb_cost = c_len as u32;
-                        let mut num_non_empty = 0;
-                        let mut local_counts = [(0u8, 0u8); 8];
-                        let g_off = g * self.matrix.num_candidates;
-                        for &c in set {
-                            let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
-                            let mut found = false;
-                            for i in 0..num_non_empty {
-                                if local_counts[i].0 == r {
-                                    local_counts[i].1 += 1;
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if !found {
-                                local_counts[num_non_empty] = (r, 1);
-                                num_non_empty += 1;
-                            }
-                        }
-                        if num_non_empty == 1 {
-                            continue;
-                        }
+            if c_len <= 8 {
+                for &g in &phase2_guesses {
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    let mut num_non_empty = 0;
+                    let mut local_counts = [(0u8, 0u8); 8];
+                    let g_off = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
+                        let mut found = false;
                         for i in 0..num_non_empty {
-                            let r_idx = local_counts[i].0 as usize;
-                            let count = local_counts[i].1 as usize;
-                            expected_rem += (count as u32) * (count as u32);
-                            if r_idx != crate::core::Response::WIN.0 as usize {
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count];
+                            if local_counts[i].0 == r {
+                                local_counts[i].1 += 1;
+                                found = true;
+                                break;
                             }
                         }
-                        if num_non_empty == 2
-                            && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                        {
-                            continue;
-                        }
-                        if num_non_empty > local_max_k {
-                            local_max_k = num_non_empty;
-                        }
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
-                        if lb_cost < best_val {
-                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
+                        if !found {
+                            local_counts[num_non_empty] = (r, 1);
+                            num_non_empty += 1;
                         }
                     }
-                } else {
-                    for &g in &phase2_guesses {
-                        let mut num_non_empty = 0;
-                        let g_off = g * self.matrix.num_candidates;
-                        for &c in set {
-                            let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                            let cnt = unsafe { counts.get_unchecked_mut(r) };
-                            if *cnt == 0 {
-                                unsafe {
-                                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                                }
-                                num_non_empty += 1;
-                            }
-                            *cnt += 1;
+                    if num_non_empty == 1 {
+                        continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = local_counts[i].0 as usize;
+                        let count = local_counts[i].1 as usize;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                         }
-                        if num_non_empty == 1 {
+                    }
+                    if num_non_empty == 2
+                        && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
+                    {
+                        continue;
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
+                    }
+                }
+            } else {
+                for &g in &phase2_guesses {
+                    let mut num_non_empty = 0;
+                    let g_off = g * self.matrix.num_candidates;
+                    for &c in set {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
+                        let cnt = unsafe { counts.get_unchecked_mut(r) };
+                        if *cnt == 0 {
                             unsafe {
-                                let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                                *counts.get_unchecked_mut(r_idx) = 0;
+                                *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
                             }
-                            continue;
+                            num_non_empty += 1;
                         }
-                        let mut expected_rem = 0u32;
-                        let mut lb_cost = c_len as u32;
-                        for i in 0..num_non_empty {
-                            let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                            let count = unsafe { *counts.get_unchecked(r_idx) };
-                            unsafe {
-                                *counts.get_unchecked_mut(r_idx) = 0;
-                            }
-                            expected_rem += (count as u32) * (count as u32);
-                            if r_idx != 242 {
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                            }
+                        *cnt += 1;
+                    }
+                    if num_non_empty == 1 {
+                        unsafe {
+                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
+                            *counts.get_unchecked_mut(r_idx) = 0;
                         }
-                        if num_non_empty == 2
-                            && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                        {
-                            continue;
+                        continue;
+                    }
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    for i in 0..num_non_empty {
+                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                        let count = unsafe { *counts.get_unchecked(r_idx) };
+                        unsafe {
+                            *counts.get_unchecked_mut(r_idx) = 0;
                         }
-                        if num_non_empty > local_max_k {
-                            local_max_k = num_non_empty;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != 242 {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
-                        if lb_cost < best_val {
-                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
-                        }
+                    }
+                    if num_non_empty == 2
+                        && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
+                    {
+                        continue;
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
             }

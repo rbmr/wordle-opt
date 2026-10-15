@@ -1486,13 +1486,6 @@ pub fn build_policy_tree(
         all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
     }
 
-    // The optimal policy's per-guess evaluations go through the solver's GPU
-    // path, which needs the response matrix uploaded once. Pre-warm the upload.
-    #[cfg(cuda_enabled)]
-    if matches!(strategy, Strategy::Optimal) {
-        let _ = matrix.gpu_matrix();
-    }
-
     let optimal;
     let min_remaining;
     let max_freq;

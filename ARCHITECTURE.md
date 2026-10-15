@@ -162,8 +162,9 @@ Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) a
 
 To mitigate the straggler problem at extreme depths (e.g. `N=2340`) where a single root guess can take over 17 hours to evaluate, the solver pushes work-stealing parallelism (`rayon`) down to the `depth=2` layer. Rather than exclusively evaluating root guesses in parallel, `parallel_depth.rs` distributes the top-level subtrees across cores while sharing a unified global beta limit to maximize hardware utilization and prevent individual hard subtrees from stalling the cluster wall clock.
 
-## 9. GPU Acceleration (CUDA)
+## 9. GPU Acceleration Evaluation and Removal
 
-For moderately sized nodes (`set.len() > 3`), the CPU's scalar execution of 14,855 guesses takes ~150 microseconds. To drastically reduce this, `wordle-opt` offloads the node histogram counting and capacity bound calculations to the RTX 2060 GPU using a custom CUDA kernel (`src/gpu_kernel.cu`).
-- **L1 Cache Tuning**: The CUDA block size is specifically tuned to `64` threads so that the `243 * sizeof(uint16_t)` local `counts` array (totaling ~31 KB) perfectly fits inside the RTX 2060's 64 KB L1 cache per Streaming Multiprocessor. This prevents register spilling and VRAM thrashing and allows up to two blocks to be scheduled per SM concurrently.
-- **Spin Sync**: The driver is configured with `cudaSetDeviceFlags(cudaDeviceScheduleSpin)`, so CPU threads spin on `cudaStreamSynchronize` instead of yielding to the OS. This replaced the earlier blocking-sync configuration (commit `ff4dc9b`) for lower kernel launch latency; the effect on end-to-end time at full scale is not verified. 
+An RTX 2060 GPU offload path (`gpu_kernel.cu`, `gpu.rs`) was evaluated to accelerate node histogram counting and capacity bound calculations. On 2026-10-15, direct head-to-head benchmarking on the compute host `pc01` (commit `cf283ed`) across identical candidate sets showed negligible wall-time differences (CPU was 2.3% faster at N=1000; difference was 2.4% / 0.67s at N=1600 within measurement noise) while the CPU path consumed 40% less memory (163MB vs 269MB).
+
+In policy tree construction, candidate sets after the opener partition rapidly into small buckets (size $\le 50$), well below the threshold where GPU offload kernel launches break even with cache-local CPU execution. Consequently, the GPU path was removed completely in favor of pure CPU SIMD/Rayon parallelism, eliminating external toolchain dependencies (`nvcc`, `g++-13`, `cc`), build scripts, and FFI maintenance overhead.
+ 
