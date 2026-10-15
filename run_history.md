@@ -64,6 +64,12 @@ the commit that actually ran.
 | 2026-10-15 | `67418f9` | pc01 | 2000 | 1 | optimal | 89.852s (1.50m) | 6723 | 2119 | 4636 | ~282MB | evaluate largest buckets first in root filter; 13.7% faster (89.852s vs 104.059s); validation OK |
 | 2026-10-15 | `67418f9` | pc01 | 2200 | 1 | optimal | 168.980s (2.82m) | 7477 | 2331 | 22053 | ~321MB | evaluate largest buckets first in root filter; 9.2% faster (168.980s vs 186.144s); validation OK |
 | 2026-10-15 | `0c58727` | pc01 | 2340 | — | optimal | 231.972s (3.87m) | 8001 | 2478 | 26641 | ~2.3GB | full N=2340 run; evaluate largest buckets first in root filter; 8.2% faster (231.972s vs 252.639s); 27.9x faster than a67dd02 baseline; validation OK |
+| 2026-10-15 | `5d402a1` | pc01 | 1000 | 1 | optimal | 13.962s | 3124 | 1049 | — | — | dynamically refresh global beta across buckets in min_guess_val; validation OK |
+| 2026-10-15 | `5d402a1` | pc01 | 1300 | 1 | optimal | 27.554s | 4204 | 1370 | 67 | ~242MB | dynamically refresh global beta across buckets in min_guess_val; validation OK |
+| 2026-10-15 | `5d402a1` | pc01 | 1600 | 1 | optimal | 42.942s | 5256 | 1681 | 240 | ~252MB | dynamically refresh global beta across buckets in min_guess_val; 5.8% faster (42.942s vs 45.561s); validation OK |
+| 2026-10-15 | `5d402a1` | pc01 | 1800 | 1 | optimal | 61.327s (1.02m) | 5974 | 1900 | 235 | ~276MB | dynamically refresh global beta across buckets in min_guess_val; validation OK |
+| 2026-10-15 | `5d402a1` | pc01 | 2000 | 1 | optimal | 86.694s (1.44m) | 6723 | 2119 | 4636 | ~284MB | dynamically refresh global beta across buckets in min_guess_val; 3.5% faster (86.694s vs 89.852s); validation OK |
+| 2026-10-15 | `5d402a1` | pc01 | 2200 | 1 | optimal | 168.940s (2.82m) | 7477 | 2331 | 22107 | ~322MB | dynamically refresh global beta across buckets in min_guess_val; validation OK |
 
 
 ## Notes
