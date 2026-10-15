@@ -736,7 +736,7 @@ impl<'a> Solver<'a> {
 
         let set_hash = hash;
 
-        let should_cache_equiv = set.len() >= 10;
+        let should_cache_equiv = set.len() >= 10 && set.len() < 40;
         let shard_idx = (set_hash as usize) % 1024;
         let mut active_bits_scratch = std::mem::take(&mut self.scratch_active_bits[depth]);
         let rc_opt = if should_cache_equiv {
@@ -754,7 +754,10 @@ impl<'a> Solver<'a> {
         };
 
         let slice_ptr: *const [u64];
-        let _keep_alive = if let Some(rc) = &rc_opt {
+        let _keep_alive = if set.len() >= 40 {
+            slice_ptr = parent_active_guesses as *const _;
+            None
+        } else if let Some(rc) = &rc_opt {
             slice_ptr = rc.as_slice() as *const _;
             None
         } else {
