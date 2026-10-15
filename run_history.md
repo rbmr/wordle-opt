@@ -169,6 +169,10 @@ the commit that actually ran.
 | 2026-10-15 | `f26ff5e` | pc01 | 1600 | 1 | optimal | 26.479s | 5256 | 1681 | — | ~161MB | precompute base_lb in active_guesses to instantly filter guesses in Phase B; pick time 26.0s; validation OK |
 | 2026-10-15 | `f26ff5e` | pc01 | 2000 | 1 | optimal | 55.626s | 6723 | 2119 | 8127 | ~179MB | precompute base_lb in active_guesses to instantly filter guesses in Phase B; pick time 55.2s; validation OK |
 | 2026-10-15 | `f26ff5e` | pc01 | 2200 | 1 | optimal | 112.814s (1.88m) | 7477 | 2331 | 25193 | ~213MB | precompute base_lb in active_guesses to instantly filter guesses in Phase B; pick time 111.8s; validation OK |
+| 2026-10-15 | `1012c2a` | pc01 | 1000 | 1 | optimal | 5.901s | 3124 | 1049 | — | — | bypass full branching factor search in min_guess_val when candidate bound proves tight_lb <= lb; pick time 5.7s; validation OK |
+| 2026-10-15 | `1012c2a` | pc01 | 1600 | 1 | optimal | 26.369s | 5256 | 1681 | — | ~160MB | bypass full branching factor search in min_guess_val when candidate bound proves tight_lb <= lb; pick time 25.9s; validation OK |
+| 2026-10-15 | `1012c2a` | pc01 | 2000 | 1 | optimal | 55.687s | 6723 | 2119 | 8159 | ~179MB | bypass full branching factor search in min_guess_val when candidate bound proves tight_lb <= lb; pick time 55.2s; validation OK |
+| 2026-10-15 | `1012c2a` | pc01 | 2200 | 1 | optimal | 111.988s (1.87m) | 7477 | 2331 | 25119 | ~214MB | bypass full branching factor search in min_guess_val when candidate bound proves tight_lb <= lb; pick time 111.0s; validation OK |
 
 ## Notes
 
@@ -223,6 +227,7 @@ the commit that actually ran.
   - *Decision*: Because the GPU provided zero measurable speedup while adding substantial complexity (~600 lines across `gpu.rs`, `gpu_kernel.cu`, `build.rs`, `cc` dependency, `nvcc` and `g++-13` toolchain requirements), the GPU path was removed completely in favor of pure CPU SIMD/Rayon.
 - The `2fbed58` rows demonstrated that fast-pathing exact `p_len <= 2` buckets (bypassing hashing and sorting) and restricting bucket loops to `eval_indices` established a new all-time record for N=1000 (**5.878s**, pick 5.6s). Identifying and reverting the slack bypass in Pass 2 of `min_guess_val` (which had previously widened child beta and increased recursive branch exploration) restored tight child bounds and brought N=2000 back down from 66.078s to 55.944s (states reduced from 14.4k to 8.1k).
 - The `f26ff5e` rows demonstrated that precomputing `base_lb` directly in `active_guesses` (which already computes candidate counts across all guesses) allowed Phase B in `OptimalPolicy::scan` to instantly prune 90%+ of guesses (over 13,000 guesses) with a 1-cycle capacity check before touching candidates or matrix rows, shaving pick time on N=1600 down to 26.0s and N=2000 down to 55.2s.
+- The `1012c2a` rows demonstrated that computing candidate branching factor $k_{cand}$ in `min_guess_val` Pass 2 provides an immediate upper bound on $tight\_capacity\_bound$. When this upper bound is $\le lb$, $tight\_capacity\_bound \le lb$ is mathematically guaranteed across all 14,855 dictionary guesses, allowing an instant bypass of the full dictionary scan while preserving strict mathematical lower bounds and zero tree regression. All candidate sizes verified with identical optimal costs and passing policy tree validation.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
