@@ -58,6 +58,10 @@ pub const FORMAT_READABLE: &str = "wordle-policy-tree";
 /// handle. Readers reject a version they don't know rather than guessing.
 pub const FORMAT_VERSION: u32 = 1;
 
+thread_local! {
+    static SCRATCH_SORTED_SET: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 // ---------------------------------------------------------------------------
 // Dictionary hash
 // ---------------------------------------------------------------------------
@@ -622,6 +626,7 @@ impl<'a> OptimalPolicy<'a> {
                     let orig_idx = i + 1;
                     let g_offset = g * self.matrix.num_candidates;
                     let mut counts = [0u16; 243];
+                    let mut bucket_hashes = [0u64; 243];
                     let mut non_empty_indices = [0u8; 243];
                     let mut num_non_empty = 0;
 
@@ -632,6 +637,7 @@ impl<'a> OptimalPolicy<'a> {
                             num_non_empty += 1;
                         }
                         counts[r] += 1;
+                        bucket_hashes[r] ^= self.matrix.zobrist[c];
                     }
 
                     // Fast capacity bound check first
@@ -652,21 +658,8 @@ impl<'a> OptimalPolicy<'a> {
                     non_empty_indices[0..num_non_empty]
                         .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
 
-                    // For guesses that pass capacity bound, partition and tighten via cache + quick_bucket_eval
-                    let mut offsets = [0usize; 244];
-                    for r_idx in 0..243 {
-                        offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
-                    }
-
-                    let mut sorted_set = vec![0usize; candidates.len()];
-                    let mut current_offsets = offsets;
-                    for &c in candidates {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                        let pos = current_offsets[r];
-                        sorted_set[pos] = c;
-                        current_offsets[r] += 1;
-                    }
-
+                    // First pass: check cached bounds descending by bucket size without partitioning.
+                    let mut cached_mask = [false; 243];
                     for j in 0..num_non_empty {
                         let r_idx = non_empty_indices[j] as usize;
                         if r_idx == crate::core::Response::WIN.0 as usize {
@@ -676,42 +669,96 @@ impl<'a> OptimalPolicy<'a> {
                         if p_len <= 2 {
                             continue;
                         }
-
-                        let start = offsets[r_idx];
-                        let end = start + p_len;
-                        let p = &sorted_set[start..end];
-
-                        let mut hash = 0u64;
-                        for &c in p {
-                            hash ^= self.matrix.zobrist[c];
-                        }
-
-                        let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
+                        let hash = bucket_hashes[r_idx];
                         if let Some((cached_val, _)) = self.cache.get(hash) {
+                            let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
                             let used_val = cached_val.max(cap_lb);
                             lb += used_val - cap_lb;
-                        } else if p_len <= 15 {
-                            let (q_val, is_exact) =
-                                Solver::quick_bucket_eval(self.matrix, self.dict, p);
-                            let used_val = q_val.max(cap_lb);
-                            lb += used_val - cap_lb;
-                            self.cache.insert(hash, used_val, is_exact);
-                        } else {
-                            let k =
-                                crate::heuristic::compute_max_branching_factor_seq(self.matrix, p);
-                            let tight_lb =
-                                crate::heuristic::tight_capacity_bound(p_len, k, self.max_k);
-                            let used_val = tight_lb.max(cap_lb);
-                            lb += used_val - cap_lb;
-                            self.cache.insert(hash, used_val, false);
-                        }
-
-                        if lb >= cost_to_beat {
-                            return None;
+                            cached_mask[r_idx] = true;
+                            if lb >= cost_to_beat {
+                                return None;
+                            }
                         }
                     }
 
-                    Some((g, orig_idx, lb, exp))
+                    // Check if any uncached bucket with p_len > 2 remains.
+                    let mut has_uncached = false;
+                    for j in 0..num_non_empty {
+                        let r_idx = non_empty_indices[j] as usize;
+                        if r_idx == crate::core::Response::WIN.0 as usize {
+                            continue;
+                        }
+                        let p_len = counts[r_idx] as usize;
+                        if p_len > 2 && !cached_mask[r_idx] {
+                            has_uncached = true;
+                            break;
+                        }
+                    }
+
+                    if !has_uncached {
+                        return Some((g, orig_idx, lb, exp));
+                    }
+
+                    // Second pass: only partition into thread-local scratch buffer if uncached buckets need evaluation.
+                    let mut offsets = [0usize; 244];
+                    for r_idx in 0..243 {
+                        offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+                    }
+
+                    SCRATCH_SORTED_SET.with(|cell| {
+                        let mut sorted_set = cell.borrow_mut();
+                        sorted_set.clear();
+                        sorted_set.resize(candidates.len(), 0);
+                        let mut current_offsets = offsets;
+                        for &c in candidates {
+                            let r =
+                                unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                            let pos = current_offsets[r];
+                            sorted_set[pos] = c;
+                            current_offsets[r] += 1;
+                        }
+
+                        for j in 0..num_non_empty {
+                            let r_idx = non_empty_indices[j] as usize;
+                            if r_idx == crate::core::Response::WIN.0 as usize {
+                                continue;
+                            }
+                            let p_len = counts[r_idx] as usize;
+                            if p_len <= 2 || cached_mask[r_idx] {
+                                continue;
+                            }
+
+                            let start = offsets[r_idx];
+                            let end = start + p_len;
+                            let p = &sorted_set[start..end];
+                            let hash = bucket_hashes[r_idx];
+                            let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
+
+                            if p_len <= 15 {
+                                let (q_val, is_exact) =
+                                    Solver::quick_bucket_eval(self.matrix, self.dict, p);
+                                let used_val = q_val.max(cap_lb);
+                                lb += used_val - cap_lb;
+                                self.cache.insert(hash, used_val, is_exact);
+                            } else {
+                                let k = crate::heuristic::compute_max_branching_factor_seq(
+                                    self.matrix,
+                                    p,
+                                );
+                                let tight_lb =
+                                    crate::heuristic::tight_capacity_bound(p_len, k, self.max_k);
+                                let used_val = tight_lb.max(cap_lb);
+                                lb += used_val - cap_lb;
+                                self.cache.insert(hash, used_val, false);
+                            }
+
+                            if lb >= cost_to_beat {
+                                return None;
+                            }
+                        }
+
+                        Some((g, orig_idx, lb, exp))
+                    })
                 })
                 .collect();
 
