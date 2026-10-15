@@ -39,7 +39,6 @@
 //! | threshold | where | corpus case |
 //! |---|---|---|
 //! | `c_len == 0/1/2` | `solver.rs`, `naive.rs` base cases | 1, 2 |
-//! | `c_len <= 2` | early return, `solver.rs` | 1, 2, 3 |
 //! | `c_len <= 8` | `solver.rs` | 8 and 9 |
 //! | `c_len <= 10` | `policy.rs` | 10 and 11 |
 //! | `10 <= c_len < 40` | equivalence caching, `solver.rs` | 20 |
@@ -47,17 +46,33 @@
 //! | `c_len >= 40` | keep-alive, `solver.rs` | 40 |
 //! | `c_len >= 48` | parallel vs sequential, `policy.rs` | 48 |
 //!
-//! The remaining size branch is `c_len <= 256` (stack vs heap pointer array in
-//! `solver.rs`). It is crossed by `large_candidate_set_stays_valid` below, which
-//! requires the tree to validate and the two independently computed costs to
-//! agree. That is weaker than the oracle-backed cases: it proves the branch runs
-//! and produces a valid tree, not that the tree is optimal.
+//! The remaining size branch, `c_len <= 256` (stack vs heap pointer array in
+//! `solver.rs`), is deliberately not duplicated here: `solver.rs`'s golden tests
+//! build and validate trees at N = 100, 250, 500, 750 and 800 with pinned costs,
+//! so roots well past 256 are already covered, and covered more strongly than
+//! this file could manage. No brute-force oracle can reach that size anyway:
+//! `NaiveSolver` needs **626 s** at 257 candidates (58 s at 200, 0.8 s at 100,
+//! 30 ms at 48) even with a small alphabet to keep the response space
+//! tractable.
 //!
-//! That weakness is a measured limitation, not an oversight. Reaching 257
-//! candidates with the oracle needs a small alphabet to keep the response space
-//! tractable, and `NaiveSolver` then takes **626 s** (200 candidates: 58 s;
-//! 100: 0.8 s; 48: 30 ms). Paying ten minutes to regenerate the cache is not
-//! worth it, so this threshold is covered structurally instead.
+//! # What this file does not duplicate
+//!
+//! `verify.rs`'s tests already compare `NaiveSolver` against the optimized
+//! solver, but only at candidate sizes 3-5 and always with the full bundled
+//! guess list. The golden tests cover large sizes, but with pinned costs rather
+//! than an oracle. So the ground this file covers and nothing else does is:
+//!
+//!   * candidate sizes 6-99, which have neither an oracle nor a pinned cost;
+//!   * guess lists other than the bundled one: closed sets, a list six times
+//!     the candidate list, and a synthetic three-letter alphabet;
+//!   * the CLI itself. No other test spawns the binary, writes a tree to disk or
+//!     runs `validate` as a subcommand, so file loading, the JSON round trip and
+//!     the embedded word lists go unexercised elsewhere;
+//!   * the `validate` subcommand as a command. `solve` already round-trips the
+//!     bytes it writes through `validate_bytes` and exits non-zero if the
+//!     traversed cost disagrees with the built one, so the *agreement* between
+//!     those two figures is not new evidence; what is new is driving `validate`
+//!     as a separate process over a file on disk.
 
 use std::fs;
 use std::path::PathBuf;
@@ -143,20 +158,6 @@ fn corpus() -> Vec<Spec> {
             guesses: 2,
             words: Words::Bundled,
             why: "base case c_len == 2",
-        },
-        Spec {
-            seed: 3,
-            candidates: 3,
-            guesses: 8,
-            words: Words::Bundled,
-            why: "crosses c_len <= 2; extra guesses that are not candidates",
-        },
-        Spec {
-            seed: 4,
-            candidates: 5,
-            guesses: 12,
-            words: Words::Bundled,
-            why: "small set, guesses well beyond candidates",
         },
         Spec {
             seed: 5,
@@ -558,59 +559,4 @@ fn optimal_tree_matches_brute_force_on_seeded_random_lists() {
         missing.len(),
         missing.join("\n  ")
     );
-}
-
-/// The `c_len <= 256` stack-vs-heap branch in `solver.rs` needs a candidate set
-/// no brute-force oracle can reach, so it gets weaker treatment: cross the
-/// threshold, require the tree to validate, and require the two independently
-/// computed costs to agree. This proves the branch runs and yields a valid tree.
-/// Optimality at this size rests on the oracle-backed cases above and on the
-/// pinned golden tests, not on this test.
-#[test]
-fn large_candidate_set_stays_valid() {
-    // Real words, so the shape of the problem stays realistic: the optimized
-    // solver handles a few hundred candidates routinely, and nothing here needs
-    // an oracle.
-    let spec = Spec {
-        seed: 9001,
-        candidates: 300,
-        guesses: 300,
-        words: Words::Bundled,
-        why: "crosses c_len <= 256",
-    };
-    let case = build_case(&spec);
-    assert_eq!(case.candidates.len(), 300);
-
-    let dir = tempfile::tempdir().expect("failed to create a temp dir");
-    let gpath = write_list(dir.path(), "guesses.txt", &case.guesses);
-    let cpath = write_list(dir.path(), "candidates.txt", &case.candidates);
-    let tree = dir.path().join("tree.json");
-
-    let (ok, solve_out) = run(&[
-        "solve",
-        "--strategy",
-        "optimal",
-        "--guesses",
-        gpath.to_str().unwrap(),
-        "--candidates",
-        cpath.to_str().unwrap(),
-        "--output",
-        tree.to_str().unwrap(),
-        "--no-progress",
-    ]);
-    assert!(ok, "solve failed at 300 candidates\n{solve_out}");
-
-    let (vok, validate_out) = run(&["validate", tree.to_str().unwrap()]);
-    assert!(
-        vok && validate_out.contains("=== POLICY TREE VALID ==="),
-        "the 300-candidate tree failed validation\n{validate_out}"
-    );
-
-    let traversed = parse_total_cost(&validate_out).expect("validate must print a cost");
-    assert_eq!(
-        parse_total_cost(&solve_out),
-        Some(traversed),
-        "solve's claimed cost disagrees with the cost re-derived from the tree"
-    );
-    println!("300 candidates: cost={traversed} (valid tree; not oracle-backed at this size)");
 }

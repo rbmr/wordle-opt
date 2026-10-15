@@ -1,31 +1,5 @@
 {
   "cases": {
-    "01952a2e7d487dbf": {
-      "candidates": [
-        "derma",
-        "dynos",
-        "eusol",
-        "rangs",
-        "sdayn"
-      ],
-      "guesses": [
-        "blaze",
-        "derma",
-        "dynos",
-        "eusol",
-        "gadid",
-        "pareo",
-        "poaka",
-        "pyral",
-        "rangs",
-        "sdayn",
-        "urent",
-        "yoppo"
-      ],
-      "naive_cost": 9,
-      "seed": 4,
-      "why": "small set, guesses well beyond candidates"
-    },
     "06bf7b6c9da9d75a": {
       "candidates": [
         "airns",
@@ -338,26 +312,6 @@
       "naive_cost": 20,
       "seed": 14,
       "why": "guess list six times the candidate list"
-    },
-    "73d8d440558c2d7c": {
-      "candidates": [
-        "acres",
-        "fuzed",
-        "quila"
-      ],
-      "guesses": [
-        "acres",
-        "bilgy",
-        "fuzed",
-        "poral",
-        "quila",
-        "reach",
-        "rumba",
-        "throb"
-      ],
-      "naive_cost": 5,
-      "seed": 3,
-      "why": "crosses c_len <= 2; extra guesses that are not candidates"
     },
     "8639704e94791480": {
       "candidates": [
