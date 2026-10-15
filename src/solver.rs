@@ -616,32 +616,38 @@ impl<'a> Solver<'a> {
                     let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                     let mut mask = [0u64; 4];
-                    let mut num_distinct = 0;
                     let mut collisions = 0;
                     let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                    for (j, &cj) in bucket.iter().enumerate() {
-                        if i != j {
-                            let r = unsafe { (*g_ptr.add(cj)).0 as usize };
-                            let word_idx = r >> 6;
+                    macro_rules! check_cand {
+                        ($cj:expr) => {{
+                            let r = unsafe { (*g_ptr.add($cj)).0 as usize };
+                            let word = unsafe { mask.get_unchecked_mut(r >> 6) };
                             let bit = 1u64 << (r & 63);
-                            let word = unsafe { mask.get_unchecked_mut(word_idx) };
-                            if (*word & bit) == 0 {
-                                *word |= bit;
-                                num_distinct += 1;
-                            } else {
+                            if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions >= max_collisions {
                                     break;
                                 }
+                            } else {
+                                *word |= bit;
                             }
+                        }};
+                    }
+
+                    for &cj in unsafe { bucket.get_unchecked(..i) } {
+                        check_cand!(cj);
+                    }
+                    if collisions < max_collisions {
+                        for &cj in unsafe { bucket.get_unchecked(i + 1..) } {
+                            check_cand!(cj);
                         }
                     }
 
-                    if num_distinct == n - 1 {
+                    if collisions == 0 {
                         return ((2 * n - 1) as u32, true);
                     }
-                    if num_distinct == n - 2 {
+                    if collisions == 1 {
                         best_inside = target_exact;
                     }
                 }
