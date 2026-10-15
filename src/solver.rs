@@ -736,7 +736,8 @@ impl<'a> Solver<'a> {
             }
         }
 
-        let parent_lb = self.capacity_bounds_2d[parent_max_k][c_len];
+        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
+        let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         if parent_lb >= beta || self.current_cost_so_far + parent_lb >= current_global_beta {
             return parent_lb;
@@ -1003,7 +1004,7 @@ impl<'a> Solver<'a> {
                 }
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != 242 {
-                    lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                    lb_cost += unsafe { *parent_cap_bounds.get_unchecked(count as usize) };
                 }
             }
             if lb_cost < beta {
@@ -1095,7 +1096,7 @@ impl<'a> Solver<'a> {
                         }
                         expected_rem += (count as u32) * (count as u32);
                         if r_idx != 242 {
-                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                            lb_cost += unsafe { *parent_cap_bounds.get_unchecked(count as usize) };
                         }
                     }
                     if num_non_empty == 2
@@ -1122,7 +1123,12 @@ impl<'a> Solver<'a> {
             }
             self.scratch_is_in_set[depth] = is_in_set;
 
-            let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
+            let base_lb = unsafe {
+                *self
+                    .capacity_bounds_2d
+                    .get_unchecked(local_max_k)
+                    .get_unchecked(c_len)
+            };
             if base_lb > local_lb {
                 local_lb = base_lb;
             }
@@ -1216,6 +1222,7 @@ impl<'a> Solver<'a> {
             .guesses_evaluated
             .fetch_add(1, Ordering::Relaxed);
 
+        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
         let c_len = set.len();
         let g_offset = guess * self.matrix.num_candidates;
         let g_row = unsafe {
@@ -1260,7 +1267,7 @@ impl<'a> Solver<'a> {
                 if p_len > max_p_len {
                     max_p_len = p_len;
                 }
-                let lb = self.capacity_bounds_2d[parent_max_k][p_len];
+                let lb = unsafe { *parent_cap_bounds.get_unchecked(p_len) };
                 cost += lb;
                 p_lbs_local[i] = lb;
             }
@@ -1379,7 +1386,7 @@ impl<'a> Solver<'a> {
                 // construction and never changes across recursion, so this is always exactly
                 // the same value capacity_bound() would compute, just without redoing the
                 // O(log n) loop on every one of this hot function's calls.
-                let lb = self.capacity_bounds_2d[parent_max_k][p_len];
+                let lb = unsafe { *parent_cap_bounds.get_unchecked(p_len) };
                 cost += lb;
                 p_lbs[r_idx] = lb;
                 child_max_ks[r_idx] = p_len.min(parent_max_k);

@@ -254,6 +254,7 @@ fn active_guesses(
             .collect()
     };
 
+    let cap_bounds = &capacity_bounds_2d[max_k];
     let mut out: Vec<(usize, u32, u32)> = if candidates.len() >= 48 {
         surviving_guesses
             .into_par_iter()
@@ -283,7 +284,7 @@ fn active_guesses(
                     let v = counts[r] as usize;
                     expected_rem += (v as u32) * (v as u32);
                     if r != crate::core::Response::WIN.0 as usize {
-                        base_lb += capacity_bounds_2d[max_k][v];
+                        base_lb += unsafe { *cap_bounds.get_unchecked(v) };
                     }
                 }
                 Some((g, expected_rem, base_lb))
@@ -320,7 +321,7 @@ fn active_guesses(
                 let v = counts[r] as usize;
                 expected_rem += (v as u32) * (v as u32);
                 if r != crate::core::Response::WIN.0 as usize {
-                    base_lb += capacity_bounds_2d[max_k][v];
+                    base_lb += unsafe { *cap_bounds.get_unchecked(v) };
                 }
                 counts[r] = 0;
             }
@@ -584,6 +585,7 @@ impl<'a> OptimalPolicy<'a> {
         // across all cores via bucket parallelization quickly establishes an exact tight upper bound.
         // This tight bound lets us prune >90% of alternative root guesses before any deep search.
         if candidates.len() >= 48 && !active.is_empty() {
+            let cap_bounds = &self.capacity_bounds_2d[self.max_k];
             let first_g = active[0].0;
 
             let mut counts = [0u16; 243];
@@ -627,7 +629,7 @@ impl<'a> OptimalPolicy<'a> {
                     continue;
                 }
                 if p_len <= 2 {
-                    base_cost += self.capacity_bounds_2d[self.max_k][p_len];
+                    base_cost += unsafe { *cap_bounds.get_unchecked(p_len) };
                     continue;
                 }
                 let hash = bucket_hashes[r_idx];
@@ -756,7 +758,7 @@ impl<'a> OptimalPolicy<'a> {
                         let p_len = counts[r_idx] as usize;
                         let hash = bucket_hashes[r_idx];
                         if let Some((cached_val, _)) = self.cache.get(hash) {
-                            let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
+                            let cap_lb = unsafe { *cap_bounds.get_unchecked(p_len) };
                             let used_val = cached_val.max(cap_lb);
                             lb += used_val - cap_lb;
                             cached_mask[r_idx] = true;
@@ -801,7 +803,7 @@ impl<'a> OptimalPolicy<'a> {
                             let end = start + p_len;
                             let p = &sorted_set[start..end];
                             let hash = bucket_hashes[r_idx];
-                            let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
+                            let cap_lb = unsafe { *cap_bounds.get_unchecked(p_len) };
 
                             let (q_val, is_exact) =
                                 Solver::quick_bucket_eval(self.matrix, self.dict, p);
