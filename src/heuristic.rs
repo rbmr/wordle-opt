@@ -83,7 +83,7 @@ pub fn compute_max_branching_factor_seq(
         let mut mask = [0u64; 4];
         for &other in candidates {
             let r = unsafe { matrix.data.get_unchecked(g_offset + other).0 as usize };
-            mask[r / 64] |= 1u64 << (r % 64);
+            mask[r >> 6] |= 1u64 << (r & 63);
         }
         let k = (mask[0].count_ones()
             + mask[1].count_ones()
@@ -97,8 +97,10 @@ pub fn compute_max_branching_factor_seq(
         }
     }
 
+    let mid = candidates.len() / 2;
+
     // Main scan: skip words with zero overlap (which generate only 1 response)
-    // or <= 2 overlap on distinct-letter words when max_k is already high.
+    // or <= 2-3 overlap on distinct-letter words when max_k is already high.
     for g in 0..matrix.num_guesses {
         let g_mask = matrix.guess_masks[g];
         let overlap = g_mask & c_mask;
@@ -107,16 +109,32 @@ pub fn compute_max_branching_factor_seq(
         }
         if g_mask.count_ones() == 5 {
             let overlap_count = overlap.count_ones();
-            if (overlap_count <= 1 && max_k >= 3) || (overlap_count <= 2 && max_k >= 9) {
+            if (overlap_count <= 1 && max_k >= 3)
+                || (overlap_count <= 2 && max_k >= 9)
+                || (overlap_count <= 3 && max_k >= 27)
+            {
                 continue;
             }
+        } else if max_k >= 27 && overlap.count_ones() <= 1 {
+            continue;
         }
 
         let g_offset = g * matrix.num_candidates;
         let mut mask = [0u64; 4];
-        for &c in candidates {
+        for &c in &candidates[..mid] {
             let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
-            mask[r / 64] |= 1u64 << (r % 64);
+            mask[r >> 6] |= 1u64 << (r & 63);
+        }
+        let half_unique = (mask[0].count_ones()
+            + mask[1].count_ones()
+            + mask[2].count_ones()
+            + mask[3].count_ones()) as usize;
+        if half_unique + (candidates.len() - mid) <= max_k {
+            continue;
+        }
+        for &c in &candidates[mid..] {
+            let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+            mask[r >> 6] |= 1u64 << (r & 63);
         }
         let k = (mask[0].count_ones()
             + mask[1].count_ones()
