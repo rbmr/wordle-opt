@@ -1657,6 +1657,9 @@ fn build_into(
     // the arena matches the canonical layout regardless of DFS order.
     let mut pending_edges: Vec<(u32, u8, u32)> = Vec::new();
 
+    // Reusable buckets array across iterations (indexed by response, 0..243).
+    let mut buckets: [Vec<usize>; NUM_RESPONSES] = std::array::from_fn(|_| Vec::new());
+
     while let Some((node_idx, depth, _response, candidates)) = stack.pop() {
         if candidates.is_empty() {
             return Err(PolicyError::EmptyCandidateSet { depth });
@@ -1676,69 +1679,74 @@ fn build_into(
             return Err(PolicyError::GuessOutOfRange { guess });
         }
 
-        // Partition candidates by response (indexed by response, 0..243).
-        let mut buckets: Vec<Vec<usize>> = (0..NUM_RESPONSES).map(|_| Vec::new()).collect();
-        for &c in &candidates {
-            let r = matrix.get(guess, c).0 as usize;
-            buckets[r].push(c);
-        }
-
-        // Non-win buckets become edges, in ascending response order.
-        let mut child_specs: Vec<(u8, Vec<usize>)> = Vec::new();
-        for r in 0..NUM_RESPONSES {
-            if r == WIN_RESPONSE as usize || buckets[r].is_empty() {
-                continue;
+        if candidates.len() == 1 {
+            let node = &mut tree.nodes[node_idx as usize];
+            node.guess = guess as u16;
+            node.edge_count = 0;
+            stats.summary.leaves += 1;
+            stats.summary.wins += 1;
+            stats.summary.total_cost += depth as u64 + 1;
+        } else {
+            // Partition candidates by response (indexed by response, 0..243).
+            for &c in &candidates {
+                let r = matrix.get(guess, c).0 as usize;
+                buckets[r].push(c);
             }
-            // A non-win bucket equal to the whole set means the guess did not
-            // partition - the strategy would never terminate.
-            if buckets[r].len() == candidates.len() {
-                return Err(PolicyError::UselessGuess {
-                    guess,
-                    candidates: candidates.len(),
-                    depth,
+
+            // Non-win buckets become edges, in ascending response order.
+            let mut child_specs: Vec<(u8, Vec<usize>)> = Vec::new();
+            for r in 0..NUM_RESPONSES {
+                if r == WIN_RESPONSE as usize || buckets[r].is_empty() {
+                    continue;
+                }
+                // A non-win bucket equal to the whole set means the guess did not
+                // partition - the strategy would never terminate.
+                if buckets[r].len() == candidates.len() {
+                    return Err(PolicyError::UselessGuess {
+                        guess,
+                        candidates: candidates.len(),
+                        depth,
+                    });
+                }
+                child_specs.push((r as u8, std::mem::take(&mut buckets[r])));
+            }
+
+            let wins_here = buckets[WIN_RESPONSE as usize].len() as u64;
+            buckets[WIN_RESPONSE as usize].clear();
+            stats.summary.wins += wins_here;
+            stats.summary.total_cost += wins_here * (depth as u64 + 1);
+
+            if child_specs.is_empty() {
+                // A structural leaf must be exactly a win.
+                if candidates.len() != 1 || wins_here != 1 {
+                    return Err(PolicyError::Shape(format!(
+                        "node {node_idx} is a leaf but its guess does not win the {} remaining candidate(s)",
+                        candidates.len()
+                    )));
+                }
+                stats.summary.leaves += 1;
+            }
+
+            let mut child_ids = Vec::with_capacity(child_specs.len());
+            for _ in &child_specs {
+                child_ids.push(tree.nodes.len() as u32);
+                tree.nodes.push(PolicyNode {
+                    guess: 0,
+                    edge_start: 0,
+                    edge_count: 0,
                 });
             }
-            child_specs.push((r as u8, std::mem::take(&mut buckets[r])));
-        }
-
-        let mut child_ids = Vec::with_capacity(child_specs.len());
-        for _ in &child_specs {
-            child_ids.push(tree.nodes.len() as u32);
-            tree.nodes.push(PolicyNode {
-                guess: 0,
-                edge_start: 0,
-                edge_count: 0,
-            });
-        }
-        for (i, (r, _)) in child_specs.iter().enumerate() {
-            pending_edges.push((node_idx, *r, child_ids[i]));
-        }
-        let node = &mut tree.nodes[node_idx as usize];
-        node.guess = guess as u16;
-        node.edge_count = child_specs.len() as u16;
-
-        if child_specs.is_empty() {
-            // A structural leaf must be exactly a win.
-            if candidates.len() != 1 || buckets[WIN_RESPONSE as usize].len() != 1 {
-                return Err(PolicyError::Shape(format!(
-                    "node {node_idx} is a leaf but its guess does not win the {} remaining candidate(s)",
-                    candidates.len()
-                )));
+            for (i, (r, _)) in child_specs.iter().enumerate() {
+                pending_edges.push((node_idx, *r, child_ids[i]));
             }
-            stats.summary.leaves += 1;
-        }
+            let node = &mut tree.nodes[node_idx as usize];
+            node.guess = guess as u16;
+            node.edge_count = child_specs.len() as u16;
 
-        // A node wins the candidate equal to its guess, if that candidate is
-        // still in the set. This can happen at an internal node (the guess is
-        // one of several candidates), so it is counted independently of leaves.
-        let wins_here = buckets[WIN_RESPONSE as usize].len() as u64;
-        stats.summary.wins += wins_here;
-        // The root is guess #1, so a win at tree depth `d` costs `d + 1` guesses.
-        stats.summary.total_cost += wins_here * (depth as u64 + 1);
-
-        // Push children in reverse so ascending response order is processed first.
-        for (i, (r, bucket)) in child_specs.into_iter().enumerate().rev() {
-            stack.push((child_ids[i], depth + 1, r as i32, bucket));
+            // Push children in reverse so ascending response order is processed first.
+            for (i, (r, bucket)) in child_specs.into_iter().enumerate().rev() {
+                stack.push((child_ids[i], depth + 1, r as i32, bucket));
+            }
         }
 
         observer
