@@ -501,12 +501,15 @@ impl<'a> OptimalPolicy<'a> {
             let mut num_non_empty = 0;
 
             let g_offset = first_g * self.matrix.num_candidates;
+            let g_row = unsafe {
+                self.matrix
+                    .data
+                    .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
+            };
             for &c in candidates {
-                let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                if counts[r_idx] == 0 {
-                    non_empty_indices[num_non_empty] = r_idx as u8;
-                    num_non_empty += 1;
-                }
+                let r_idx = unsafe { g_row.get_unchecked(c).0 as usize };
+                non_empty_indices[num_non_empty] = r_idx as u8;
+                num_non_empty += (counts[r_idx] == 0) as usize;
                 counts[r_idx] += 1;
                 bucket_hashes[r_idx] ^= self.matrix.zobrist[c];
             }
@@ -518,7 +521,7 @@ impl<'a> OptimalPolicy<'a> {
             let mut sorted_set = vec![0usize; candidates.len()];
             let mut current_offsets = offsets;
             for &c in candidates {
-                let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                let r_idx = unsafe { g_row.get_unchecked(c).0 as usize };
                 let pos = current_offsets[r_idx];
                 sorted_set[pos] = c;
                 current_offsets[r_idx] += 1;
@@ -614,12 +617,17 @@ impl<'a> OptimalPolicy<'a> {
                 .filter_map(|(i, &(g, exp))| {
                     let orig_idx = i + 1;
                     let g_offset = g * self.matrix.num_candidates;
+                    let g_row = unsafe {
+                        self.matrix
+                            .data
+                            .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
+                    };
                     let mut counts = [0u16; 243];
                     let mut non_empty_indices = [0u8; 243];
                     let mut num_non_empty = 0;
 
                     for &c in candidates {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        let r = unsafe { g_row.get_unchecked(c).0 as usize };
                         non_empty_indices[num_non_empty] = r as u8;
                         num_non_empty += (counts[r] == 0) as usize;
                         counts[r] += 1;
@@ -640,7 +648,7 @@ impl<'a> OptimalPolicy<'a> {
 
                     let mut bucket_hashes = [0u64; 243];
                     for &c in candidates {
-                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        let r = unsafe { g_row.get_unchecked(c).0 as usize };
                         bucket_hashes[r] ^= self.matrix.zobrist[c];
                     }
 
@@ -690,12 +698,10 @@ impl<'a> OptimalPolicy<'a> {
 
                     SCRATCH_SORTED_SET.with(|cell| {
                         let mut sorted_set = cell.borrow_mut();
-                        sorted_set.clear();
                         sorted_set.resize(candidates.len(), 0);
                         let mut current_offsets = offsets;
                         for &c in candidates {
-                            let r =
-                                unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                            let r = unsafe { g_row.get_unchecked(c).0 as usize };
                             let pos = current_offsets[r];
                             sorted_set[pos] = c;
                             current_offsets[r] += 1;

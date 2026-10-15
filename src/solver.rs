@@ -1501,12 +1501,17 @@ impl<'a> Solver<'a> {
 
         let c_len = set.len();
         let g_offset = guess * self.matrix.num_candidates;
+        let g_row = unsafe {
+            self.matrix
+                .data
+                .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
+        };
 
         if c_len <= 8 {
             let mut local_counts = [(0u8, 0u8); 8];
             let mut num_non_empty = 0;
             for &c in set {
-                let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 };
+                let r = unsafe { g_row.get_unchecked(c).0 };
                 let mut found = false;
                 for i in 0..num_non_empty {
                     if local_counts[i].0 == r {
@@ -1567,7 +1572,7 @@ impl<'a> Solver<'a> {
                 let mut p = [0usize; 8];
                 let mut p_idx = 0;
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                    let r = unsafe { g_row.get_unchecked(c).0 as usize };
                     if r == r_idx {
                         p[p_idx] = c;
                         p_idx += 1;
@@ -1619,15 +1624,12 @@ impl<'a> Solver<'a> {
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
 
-            let g_offset = guess * self.matrix.num_candidates;
             for &c in set {
-                let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
                 unsafe {
                     let cnt = counts.get_unchecked_mut(r);
-                    if *cnt == 0 {
-                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                        num_non_empty += 1;
-                    }
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                    num_non_empty += (*cnt == 0) as usize;
                     *cnt += 1;
                     *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
                 }
@@ -1728,7 +1730,6 @@ impl<'a> Solver<'a> {
 
             // Fast slice partition using counting sort
             let mut sorted_set = std::mem::take(&mut self.scratch_sorted_sets[depth]);
-            sorted_set.clear();
             sorted_set.resize(set.len(), 0);
 
             let mut offsets = [0u16; 243];
@@ -1741,7 +1742,7 @@ impl<'a> Solver<'a> {
 
             let mut current_offsets = offsets;
             for &c in set {
-                let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                let r_idx = unsafe { g_row.get_unchecked(c).0 as usize };
                 let pos = current_offsets[r_idx] as usize;
                 sorted_set[pos] = c;
                 current_offsets[r_idx] += 1;
