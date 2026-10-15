@@ -257,6 +257,10 @@ the commit that actually ran.
 | 2026-10-15 | `1ceb066` | pc01 | 1600 | 1 | optimal | 21.895s | 5256 | 1681 | — | ~157MB | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 21.5s; validation OK |
 | 2026-10-15 | `1ceb066` | pc01 | 2000 | 1 | optimal | 44.035s | 6723 | 2119 | 8266 | ~174MB | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 43.7s; validation OK |
 | 2026-10-15 | `1ceb066` | pc01 | 2200 | 1 | optimal | 81.654s (1.36m) | 7477 | 2331 | 22602 | ~204MB | vectorize chunked projection accumulation and bounds checks in equivalence projections; pick time 81.0s; validation OK |
+| 2026-10-15 | `d596ab9` | pc01 | 1000 | 1 | optimal | 4.883s | 3124 | 1049 | — | — | cache table mask, unchecked indexing, and skip redundant atomic stores in GlobalCache; pick time 4.7s; validation OK |
+| 2026-10-15 | `d596ab9` | pc01 | 1600 | 1 | optimal | 21.919s | 5256 | 1681 | — | ~157MB | cache table mask, unchecked indexing, and skip redundant atomic stores in GlobalCache; pick time 21.6s; validation OK |
+| 2026-10-15 | `d596ab9` | pc01 | 2000 | 1 | optimal | 43.912s | 6723 | 2119 | 8246 | ~175MB | cache table mask, unchecked indexing, and skip redundant atomic stores in GlobalCache; pick time 43.5s; validation OK |
+| 2026-10-15 | `d596ab9` | pc01 | 2200 | 1 | optimal | 81.745s (1.36m) | 7477 | 2331 | 22632 | ~204MB | cache table mask, unchecked indexing, and skip redundant atomic stores in GlobalCache; pick time 81.1s; validation OK |
 
 
 
@@ -335,6 +339,7 @@ the commit that actually ran.
 - The `377569e` rows demonstrated that adding midpoint capacity pruning to `compute_candidate_branching_factor_with_target` introduced branch and popcount overhead on small candidate subsets (16-30 words) where a tight unrolled loop with target early exit is faster, regressing runtimes across all sizes (N=2200 from 81.004s to 82.608s). Midpoint check in candidate branching reverted.
 - The `bc30e14` rows confirmed that reverting the midpoint check in `compute_candidate_branching_factor_with_target` while keeping unchecked mask indexing stabilized candidate branching factor evaluation. All runs passed policy tree validation with invariant golden costs.
 - The `1ceb066` rows demonstrated that vectorizing chunked projection accumulation via `projs_chunk.iter_mut().zip(c_slice.iter())` and removing bounds checks in equivalence class projection logic improved performance across all benchmarks (N=1000 down to **4.857s**, N=1600 down to **21.895s**, N=2000 down to **44.035s**, and N=2200 down to **81.654s** with pick time down to **81.0s**). All runs passed policy tree validation with invariant golden costs.
+- The `d596ab9` rows demonstrated that caching `mask = size - 1` directly in `GlobalCache` to bypass vector length reads and division on every lookup, using unchecked indexing for atomic entry loads and stores, and skipping redundant atomic stores when `packed == old_slot` maintained top performance and slightly improved N=2000 build time to **43.912s** (pick time down to **43.5s**). All runs passed policy tree validation with invariant golden costs.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
