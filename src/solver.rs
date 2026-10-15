@@ -606,15 +606,11 @@ impl<'a> Solver<'a> {
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
+                let data_ptr = matrix.data.as_ptr();
                 for i in 0..n {
                     let ci = unsafe { *bucket.get_unchecked(i) };
                     let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
-                    let g_offset = gi * matrix.num_candidates;
-                    let g_row = unsafe {
-                        matrix
-                            .data
-                            .get_unchecked(g_offset..g_offset + matrix.num_candidates)
-                    };
+                    let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                     let mut mask = [0u64; 4];
                     let mut num_distinct = 0;
@@ -623,7 +619,7 @@ impl<'a> Solver<'a> {
 
                     for (j, &cj) in bucket.iter().enumerate() {
                         if i != j {
-                            let r = unsafe { g_row.get_unchecked(cj).0 as usize };
+                            let r = unsafe { (*g_ptr.add(cj)).0 as usize };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
                             let word = unsafe { mask.get_unchecked_mut(word_idx) };
@@ -1388,8 +1384,6 @@ impl<'a> Solver<'a> {
             }
 
             let mut cost = set.len() as u32;
-            let mut p_lbs = [0u32; 243];
-            let mut child_max_ks = [0u16; 243];
             let mut max_p_len = 0;
             let mut eval_indices = [0u8; 243];
             let mut num_eval = 0;
@@ -1412,10 +1406,7 @@ impl<'a> Solver<'a> {
                 // construction and never changes across recursion, so this is always exactly
                 // the same value capacity_bound() would compute, just without redoing the
                 // O(log n) loop on every one of this hot function's calls.
-                let lb = unsafe { *parent_cap_bounds.get_unchecked(p_len) };
-                cost += lb;
-                p_lbs[r_idx] = lb;
-                child_max_ks[r_idx] = (p_len.min(parent_max_k)) as u16;
+                cost += unsafe { *parent_cap_bounds.get_unchecked(p_len) };
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1437,6 +1428,15 @@ impl<'a> Solver<'a> {
             // Ties broken by response index for deterministic order.
             eval_indices[0..num_eval]
                 .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
+
+            let mut p_lbs = [0u32; 243];
+            let mut child_max_ks = [0u16; 243];
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
+                let p_len = counts[r_idx] as usize;
+                p_lbs[r_idx] = unsafe { *parent_cap_bounds.get_unchecked(p_len) };
+                child_max_ks[r_idx] = (p_len.min(parent_max_k)) as u16;
+            }
 
             let mut bucket_hashes = [0u64; 243];
             for &c in set {
