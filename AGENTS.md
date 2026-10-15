@@ -316,6 +316,15 @@ Operationally:
   touches solver, heuristic or cache logic. A golden test failure means "figure
   out why the new number is correct" or "this change is wrong" - never "update the
   constant to match."
+- `tests/property_cli.rs` is the CLI-level property test: it generates seeded
+  random guess and candidate lists, drives the real binary through `solve` and
+  `validate`, and requires the cost `solve` claims, the cost `validate`
+  re-derives from the written tree, and an independent brute-force optimum to
+  agree. Its brute-force oracle is cached in `tests/property_oracle.json` so the
+  suite stays fast; a missing cache entry fails the test on purpose. Regenerate
+  it with `WORDLE_OPT_ORACLE_UPDATE=1 cargo test --release --test property_cli`
+  when the generator changes, and never delete an entry to make a failure go
+  away.
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.
