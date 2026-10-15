@@ -66,8 +66,52 @@ pub fn compute_max_branching_factor_seq(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
 ) -> usize {
+    if candidates.len() <= 2 {
+        return candidates.len();
+    }
+    let mut c_mask = 0u32;
+    for &c in candidates {
+        c_mask |= matrix.candidate_masks[c];
+    }
+
     let mut max_k = 0;
+
+    // Fast pass: evaluate candidate words first. Candidates contain letter combinations
+    // specifically tailored to this subset, quickly raising max_k and triggering early exit.
+    for &c in candidates {
+        let g_offset = c * matrix.num_candidates;
+        let mut mask = [0u64; 4];
+        for &other in candidates {
+            let r = unsafe { matrix.data.get_unchecked(g_offset + other).0 as usize };
+            mask[r / 64] |= 1u64 << (r % 64);
+        }
+        let k = (mask[0].count_ones()
+            + mask[1].count_ones()
+            + mask[2].count_ones()
+            + mask[3].count_ones()) as usize;
+        if k > max_k {
+            max_k = k;
+            if max_k >= candidates.len() {
+                return max_k;
+            }
+        }
+    }
+
+    // Main scan: skip words with zero overlap (which generate only 1 response)
+    // or <= 2 overlap on distinct-letter words when max_k is already high.
     for g in 0..matrix.num_guesses {
+        let g_mask = matrix.guess_masks[g];
+        let overlap = g_mask & c_mask;
+        if overlap == 0 {
+            continue;
+        }
+        if g_mask.count_ones() == 5 {
+            let overlap_count = overlap.count_ones();
+            if (overlap_count <= 1 && max_k >= 3) || (overlap_count <= 2 && max_k >= 9) {
+                continue;
+            }
+        }
+
         let g_offset = g * matrix.num_candidates;
         let mut mask = [0u64; 4];
         for &c in candidates {
