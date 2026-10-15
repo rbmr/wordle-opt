@@ -98,15 +98,18 @@ def main():
     if not runs:
         sys.exit("no runs with progress data found in %s" % args.logs)
 
-    fig, ax = plt.subplots(figsize=(11, 6.5))
+    fig, ax = plt.subplots(figsize=(11.5, 6.8))
     series = []
     for commit, points, wall, name in runs:
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
         term = TERMS.get(commit[:8], "unlabelled")
         label = "%s - %s" % (commit[:8], term)
+        detail = []
         if wall is not None:
-            label += " (%s)" % human(wall)
+            detail.append(human(wall))
+        detail.append("%d root guesses" % ys[-1])
+        label += " (%s)" % ", ".join(detail)
         series.append((label, xs, ys))
         # A curve if there is one to draw, otherwise visible points.
         if len(points) >= 2:
@@ -117,10 +120,12 @@ def main():
 
     ax.set_xscale("log")
     ax.set_xlabel("elapsed seconds within the run (log scale)")
-    ax.set_ylabel("root guesses evaluated")
-    ax.set_title("Full N=2340 policy tree runs: search progress over elapsed time")
+    ax.set_ylabel("root guesses evaluated so far  (a cost, lower is better)")
+    ax.set_title("Full N=2340 policy tree runs: root guesses over elapsed time\n"
+                 "fewer is better: a low curve means each root guess is doing more work",
+                 fontsize=12)
     ax.grid(True, which="both", alpha=0.25)
-    ax.legend(loc="upper left", fontsize=9)
+    ax.legend(loc="upper left", fontsize=8.5)
 
     # The modern runs finish inside the first few minutes, where the main axes
     # squash them into the origin. Zoom that region so they can be compared.
