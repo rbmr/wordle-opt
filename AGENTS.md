@@ -264,10 +264,15 @@ the solve has finished: during the run keep everything in the efficient in-memor
 representation, and build the JSON once the solve completes, so serialization adds
 no meaningful overhead to the solve itself.
 
-**At most one per day.** A full run is the day's checkpoint. The point of that
-limit is not compute cost any more - a run now takes minutes - it is that a
-checkpoint means something only if it marks a real change, and running it after
-every commit turns it into noise.
+**One per performance-relevant change, not one per day.** The old cap of one a
+day was written when a run took hours; it now takes minutes, so the clock is not
+the constraint. What that cap was really protecting was signal - a full run is a
+checkpoint only if it marks a real change, and running one after every commit
+turns the trend into noise. So run one whenever a commit that changes solver
+performance has landed, as many times in a day as that happens, and skip it when
+nothing performance-relevant changed: a run whose commit differs only in docs or
+tests measures nothing new. Two runs cannot collide, because every artifact is
+stamped with the commit it ran as.
 
 When to run it is your judgment, not a schedule:
 

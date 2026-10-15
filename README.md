@@ -1,7 +1,7 @@
 <!--
   This file is for humans: people using the CLI, people using the visualizer,
   or people wanting to understand the project. Agent-facing process rules,
-  compute-host operations and the daily-run discipline live in AGENTS.md -
+  compute-host operations and the full-run discipline live in AGENTS.md -
   please add them there, not here.
 -->
 
