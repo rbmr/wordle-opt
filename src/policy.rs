@@ -266,9 +266,12 @@ fn active_guesses(
                 let mut num_non_empty = 0;
                 for &c in candidates {
                     let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                    non_empty_indices[num_non_empty] = r as u8;
-                    num_non_empty += (counts[r] == 0) as usize;
-                    counts[r] += 1;
+                    unsafe {
+                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                        let cnt = counts.get_unchecked_mut(r);
+                        num_non_empty += (*cnt == 0) as usize;
+                        *cnt += 1;
+                    }
                 }
                 if num_non_empty <= 1 {
                     return None;
@@ -276,8 +279,8 @@ fn active_guesses(
                 let mut expected_rem = 0u32;
                 let mut base_lb = candidates.len() as u32;
                 for i in 0..num_non_empty {
-                    let r = non_empty_indices[i] as usize;
-                    let v = counts[r] as usize;
+                    let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                    let v = unsafe { *counts.get_unchecked(r) as usize };
                     expected_rem += (v as u32) * (v as u32);
                     if r != crate::core::Response::WIN.0 as usize {
                         base_lb += unsafe { *cap_bounds_ptr.add(v) };
@@ -297,26 +300,34 @@ fn active_guesses(
             let mut num_non_empty = 0;
             for &c in candidates {
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                non_empty_indices[num_non_empty] = r as u8;
-                num_non_empty += (counts[r] == 0) as usize;
-                counts[r] += 1;
+                unsafe {
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                    let cnt = counts.get_unchecked_mut(r);
+                    num_non_empty += (*cnt == 0) as usize;
+                    *cnt += 1;
+                }
             }
             if num_non_empty <= 1 {
                 for i in 0..num_non_empty {
-                    counts[non_empty_indices[i] as usize] = 0;
+                    let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = 0;
+                    }
                 }
                 continue;
             }
             let mut expected_rem = 0u32;
             let mut base_lb = candidates.len() as u32;
             for i in 0..num_non_empty {
-                let r = non_empty_indices[i] as usize;
-                let v = counts[r] as usize;
+                let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                let v = unsafe { *counts.get_unchecked(r) as usize };
                 expected_rem += (v as u32) * (v as u32);
                 if r != crate::core::Response::WIN.0 as usize {
                     base_lb += unsafe { *cap_bounds_ptr.add(v) };
                 }
-                counts[r] = 0;
+                unsafe {
+                    *counts.get_unchecked_mut(r) = 0;
+                }
             }
             out.push((g, expected_rem, base_lb));
         }
@@ -765,7 +776,9 @@ impl<'a> OptimalPolicy<'a> {
                             let cap_lb = unsafe { *cap_bounds_ptr.add(p_len) };
                             let used_val = cached_val.max(cap_lb);
                             lb += used_val - cap_lb;
-                            cached_mask[r_idx >> 6] |= 1u64 << (r_idx & 63);
+                            unsafe {
+                                *cached_mask.get_unchecked_mut(r_idx >> 6) |= 1u64 << (r_idx & 63);
+                            }
                             if lb >= cost_to_beat {
                                 return None;
                             }
@@ -803,7 +816,10 @@ impl<'a> OptimalPolicy<'a> {
 
                         for j in split_idx..num_eval {
                             let r_idx = unsafe { *eval_indices.get_unchecked(j) as usize };
-                            if (cached_mask[r_idx >> 6] & (1u64 << (r_idx & 63))) != 0 {
+                            if (unsafe { *cached_mask.get_unchecked(r_idx >> 6) }
+                                & (1u64 << (r_idx & 63)))
+                                != 0
+                            {
                                 continue;
                             }
 
