@@ -60,6 +60,7 @@ the commit that actually ran.
 | 2026-10-14 | `67418f9` | pc01 | 1000 | 1 | optimal | 14.281s | 3124 | 1049 | — | — | evaluate largest buckets first in root filter; 14.4% faster (14.281s vs 16.679s); validation OK |
 | 2026-10-14 | `67418f9` | pc01 | 1300 | 1 | optimal | 27.240s | 4204 | 1370 | — | — | evaluate largest buckets first in root filter; 16.7% faster (27.240s vs 32.695s); validation OK |
 | 2026-10-15 | `67418f9` | pc01 | 1600 | 1 | optimal | 45.561s | 5256 | 1681 | 240 | ~276MB | evaluate largest buckets first in root filter; 14.1% faster (45.561s vs 53.026s); validation OK |
+| 2026-10-15 | `67418f9` | pc01 | 1800 | 1 | optimal | 60.116s (1.00m) | 5974 | 1900 | 235 | ~285MB | evaluate largest buckets first in root filter; 18.4% faster (60.116s vs 73.643s); validation OK |
 
 
 ## Notes
