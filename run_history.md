@@ -63,6 +63,7 @@ the commit that actually ran.
 | 2026-10-15 | `67418f9` | pc01 | 1800 | 1 | optimal | 60.116s (1.00m) | 5974 | 1900 | 235 | ~285MB | evaluate largest buckets first in root filter; 18.4% faster (60.116s vs 73.643s); validation OK |
 | 2026-10-15 | `67418f9` | pc01 | 2000 | 1 | optimal | 89.852s (1.50m) | 6723 | 2119 | 4636 | ~282MB | evaluate largest buckets first in root filter; 13.7% faster (89.852s vs 104.059s); validation OK |
 | 2026-10-15 | `67418f9` | pc01 | 2200 | 1 | optimal | 168.980s (2.82m) | 7477 | 2331 | 22053 | ~321MB | evaluate largest buckets first in root filter; 9.2% faster (168.980s vs 186.144s); validation OK |
+| 2026-10-15 | `0c58727` | pc01 | 2340 | — | optimal | 231.972s (3.87m) | 8001 | 2478 | 26641 | ~2.3GB | full N=2340 run; evaluate largest buckets first in root filter; 8.2% faster (231.972s vs 252.639s); 27.9x faster than a67dd02 baseline; validation OK |
 
 
 ## Notes
@@ -94,6 +95,7 @@ the commit that actually ran.
   via `./deploy_and_bench.sh solve --strategy optimal --max-candidates 1300 --sample-seed 1 --output /tmp/n1300.json`.
 - The `2058171` rows are taken from those runs' own outputs, captured via `./deploy_and_bench.sh` on seeded subsets (seed=1, sizes 1000, 1300, 1600, 1800, 2000). Tightened large-bucket capacity lower bounds via maximum branching factor calculation reduced root DFS states by orders of magnitude (e.g. 105k to 40 for N=1000, 3.0M to 240 for N=1600).
 - The full N=2340 `f9b82eb` row is taken from that run's own summary block (`Wall time: 252.639s (0.07h)`, `Total cost: 8001`, `Nodes: 2478`, `States evaluated: 26712`, peak `rss_mb=2315`, `Validation: OK`), captured via `./check_full.sh`. It solves the complete dictionary in 4.21 minutes (a 25.6x speedup over the 1.80h milestone from a67dd02, beating the 20-minute milestone), with states evaluated reduced by 5,231x (26,712 vs 139,753,702).
+- The full N=2340 `0c58727` row is taken from that run's own summary block (`Wall time: 231.972s (0.06h)`, `Total cost: 8001`, `Nodes: 2478`, `States evaluated: 26641`, peak `rss_mb=2308`, `Validation: OK`), captured via `./check_full.sh`. Evaluating largest candidate buckets first in root filter shaved another 20.7s off the full solve (3.87m vs 4.21m, an 8.2% speedup, 27.9x faster than the baseline a67dd02).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
