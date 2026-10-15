@@ -1251,7 +1251,7 @@ impl<'a> Solver<'a> {
         let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
 
         if c_len <= 8 {
-            let mut local_counts = [(0u8, 0u8); 8];
+            let mut local_counts = [(0u8, 0u8, 0u32); 8];
             let mut num_non_empty = 0;
             for &c in set {
                 let r = unsafe { (*g_ptr.add(c)).0 };
@@ -1266,7 +1266,7 @@ impl<'a> Solver<'a> {
                 }
                 if !found {
                     unsafe {
-                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1);
+                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
                     }
                     num_non_empty += 1;
                 }
@@ -1277,11 +1277,10 @@ impl<'a> Solver<'a> {
             }
 
             let mut cost = c_len as u32;
-            let mut p_lbs_local = [0u32; 8];
             let mut max_p_len = 0;
 
             for i in 0..num_non_empty {
-                let entry = unsafe { *local_counts.get_unchecked(i) };
+                let entry = unsafe { local_counts.get_unchecked_mut(i) };
                 let r_idx = entry.0 as usize;
                 if r_idx == Response::WIN.0 as usize {
                     continue;
@@ -1292,9 +1291,7 @@ impl<'a> Solver<'a> {
                 }
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 cost += lb;
-                unsafe {
-                    *p_lbs_local.get_unchecked_mut(i) = lb;
-                }
+                entry.2 = lb;
             }
 
             if cost >= beta {
@@ -1309,10 +1306,10 @@ impl<'a> Solver<'a> {
             }
 
             local_counts[0..num_non_empty]
-                .sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
+                .sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
 
             for i in 0..num_non_empty {
-                let entry = unsafe { *local_counts.get_unchecked(i) };
+                let entry = unsafe { local_counts.get_unchecked_mut(i) };
                 let p_len = entry.1 as usize;
                 let r_idx = entry.0 as usize;
                 if r_idx == Response::WIN.0 as usize || p_len <= 2 {
@@ -1335,12 +1332,10 @@ impl<'a> Solver<'a> {
                     Self::quick_bucket_eval(self.matrix, self.dict, unsafe {
                         p.get_unchecked(0..p_len)
                     });
-                let lb = unsafe { *p_lbs_local.get_unchecked(i) };
+                let lb = entry.2;
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
-                unsafe {
-                    *p_lbs_local.get_unchecked_mut(i) = used_val;
-                }
+                entry.2 = used_val;
 
                 if is_exact {
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -1349,7 +1344,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
 
-                let b = cost - p_lbs_local[i];
+                let b = cost - entry.2;
                 let new_beta = beta - b;
                 let effective_beta =
                     new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
@@ -1372,6 +1367,7 @@ impl<'a> Solver<'a> {
                     return b + val;
                 }
                 cost = b + val;
+                entry.2 = val;
             }
             cost
         } else {
