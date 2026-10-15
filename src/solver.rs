@@ -961,42 +961,15 @@ impl<'a> Solver<'a> {
 
         let active_guesses_slice = unsafe { &*slice_ptr };
 
-        // Fast set-membership check
-        let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
-        for &c in set {
-            let g = self.dict.candidate_to_guess[c];
-            is_in_set[g / 64] |= 1 << (g % 64);
-        }
-
-        for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-            if block == 0 {
-                continue;
-            }
-            let p1_block = block & is_in_set[block_idx];
-            let p2_block = block & !is_in_set[block_idx];
-
-            let mut b = p1_block;
-            while b != 0 {
-                let tz = b.trailing_zeros();
-                let g = block_idx * 64 + tz as usize;
-                phase1_guesses.push(g);
-                b &= b - 1;
-            }
-
-            let mut b = p2_block;
-            while b != 0 {
-                let tz = b.trailing_zeros();
-                let g = block_idx * 64 + tz as usize;
-                phase2_guesses.push(g);
-                b &= b - 1;
-            }
-        }
-        for &c in set {
-            let g = self.dict.candidate_to_guess[c];
-            is_in_set[g / 64] = 0;
-        }
-        self.scratch_is_in_set[depth] = is_in_set;
         self.scratch_active_bits[depth] = active_bits_scratch;
+
+        // Gather Phase 1 guesses: active candidate words in set
+        for &c in set {
+            let g = self.dict.candidate_to_guess[c];
+            if (active_guesses_slice[g / 64] & (1 << (g % 64))) != 0 {
+                phase1_guesses.push(g);
+            }
+        }
 
         let mut local_lb = parent_lb.max(cached_lower_bound);
         let mut counts = [0u16; 243];
@@ -1104,7 +1077,7 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-        phase1_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
+        phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
 
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1138,6 +1111,30 @@ impl<'a> Solver<'a> {
 
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         if best_val > local_lb && self.current_cost_so_far + local_lb < current_global_beta {
+            // Gather Phase 2 guesses: active guesses not in set
+            let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
+            for &c in set {
+                let g = self.dict.candidate_to_guess[c];
+                is_in_set[g / 64] |= 1 << (g % 64);
+            }
+            for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
+                if block == 0 {
+                    continue;
+                }
+                let mut b = block & !is_in_set[block_idx];
+                while b != 0 {
+                    let tz = b.trailing_zeros();
+                    let g = block_idx * 64 + tz as usize;
+                    phase2_guesses.push(g);
+                    b &= b - 1;
+                }
+            }
+            for &c in set {
+                let g = self.dict.candidate_to_guess[c];
+                is_in_set[g / 64] = 0;
+            }
+            self.scratch_is_in_set[depth] = is_in_set;
+
             if c_len <= 8 {
                 for &g in &phase2_guesses {
                     let mut expected_rem = 0u32;
@@ -1241,7 +1238,7 @@ impl<'a> Solver<'a> {
                     }
                 }
             }
-            phase2_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
+            phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
 
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
             if base_lb > local_lb {
