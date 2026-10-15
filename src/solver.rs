@@ -970,7 +970,7 @@ impl<'a> Solver<'a> {
         let mut min_val_found = u32::MAX;
 
         for &cand in set {
-            let g = self.dict.candidate_to_guess[cand];
+            let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(cand) };
             if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
                 continue;
             }
@@ -1062,8 +1062,10 @@ impl<'a> Solver<'a> {
             let mut valid_phase2_k = 0;
             let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
             for &c in set {
-                let g = self.dict.candidate_to_guess[c];
-                is_in_set[g / 64] |= 1 << (g % 64);
+                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
+                unsafe {
+                    *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
+                }
             }
             for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
                 if block == 0 {
@@ -1243,6 +1245,7 @@ impl<'a> Solver<'a> {
             .fetch_add(1, Ordering::Relaxed);
 
         let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
+        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
         let c_len = set.len();
         let g_offset = guess * self.matrix.num_candidates;
         let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
@@ -1254,14 +1257,17 @@ impl<'a> Solver<'a> {
                 let r = unsafe { (*g_ptr.add(c)).0 };
                 let mut found = false;
                 for i in 0..num_non_empty {
-                    if local_counts[i].0 == r {
-                        local_counts[i].1 += 1;
+                    let entry = unsafe { local_counts.get_unchecked_mut(i) };
+                    if entry.0 == r {
+                        entry.1 += 1;
                         found = true;
                         break;
                     }
                 }
                 if !found {
-                    local_counts[num_non_empty] = (r, 1);
+                    unsafe {
+                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1);
+                    }
                     num_non_empty += 1;
                 }
             }
@@ -1275,17 +1281,20 @@ impl<'a> Solver<'a> {
             let mut max_p_len = 0;
 
             for i in 0..num_non_empty {
-                let r_idx = local_counts[i].0 as usize;
+                let entry = unsafe { *local_counts.get_unchecked(i) };
+                let r_idx = entry.0 as usize;
                 if r_idx == Response::WIN.0 as usize {
                     continue;
                 }
-                let p_len = local_counts[i].1 as usize;
+                let p_len = entry.1 as usize;
                 if p_len > max_p_len {
                     max_p_len = p_len;
                 }
-                let lb = unsafe { *parent_cap_bounds.get_unchecked(p_len) };
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 cost += lb;
-                p_lbs_local[i] = lb;
+                unsafe {
+                    *p_lbs_local.get_unchecked_mut(i) = lb;
+                }
             }
 
             if cost >= beta {
@@ -1303,8 +1312,9 @@ impl<'a> Solver<'a> {
                 .sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
 
             for i in 0..num_non_empty {
-                let p_len = local_counts[i].1 as usize;
-                let r_idx = local_counts[i].0 as usize;
+                let entry = unsafe { *local_counts.get_unchecked(i) };
+                let p_len = entry.1 as usize;
+                let r_idx = entry.0 as usize;
                 if r_idx == Response::WIN.0 as usize || p_len <= 2 {
                     continue;
                 }
@@ -1314,17 +1324,23 @@ impl<'a> Solver<'a> {
                 for &c in set {
                     let r = unsafe { (*g_ptr.add(c)).0 as usize };
                     if r == r_idx {
-                        p[p_idx] = c;
+                        unsafe {
+                            *p.get_unchecked_mut(p_idx) = c;
+                        }
                         p_idx += 1;
                     }
                 }
 
                 let (quick_val, is_exact) =
-                    Self::quick_bucket_eval(self.matrix, self.dict, &p[0..p_len]);
-                let lb = p_lbs_local[i];
+                    Self::quick_bucket_eval(self.matrix, self.dict, unsafe {
+                        p.get_unchecked(0..p_len)
+                    });
+                let lb = unsafe { *p_lbs_local.get_unchecked(i) };
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
-                p_lbs_local[i] = used_val;
+                unsafe {
+                    *p_lbs_local.get_unchecked_mut(i) = used_val;
+                }
 
                 if is_exact {
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -1383,24 +1399,21 @@ impl<'a> Solver<'a> {
             let mut num_eval = 0;
 
             for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
+                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
                 if r_idx == Response::WIN.0 as usize {
                     continue;
                 }
-                let p_len = counts[r_idx] as usize;
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
                 if p_len > max_p_len {
                     max_p_len = p_len;
                 }
                 if p_len > 2 {
-                    eval_indices[num_eval] = r_idx as u8;
+                    unsafe {
+                        *eval_indices.get_unchecked_mut(num_eval) = r_idx as u8;
+                    }
                     num_eval += 1;
                 }
-                // self.capacity_bounds[n] == capacity_bound(n, self.max_k) for every n up to
-                // dict.candidates.len() (see solve()'s setup) - self.max_k is fixed at
-                // construction and never changes across recursion, so this is always exactly
-                // the same value capacity_bound() would compute, just without redoing the
-                // O(log n) loop on every one of this hot function's calls.
-                cost += unsafe { *parent_cap_bounds.get_unchecked(p_len) };
+                cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1428,10 +1441,12 @@ impl<'a> Solver<'a> {
             let mut p_lbs = [0u32; 243];
             let mut child_max_ks = [0u16; 243];
             for i in 0..num_eval {
-                let r_idx = eval_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
-                p_lbs[r_idx] = unsafe { *parent_cap_bounds.get_unchecked(p_len) };
-                child_max_ks[r_idx] = (p_len.min(parent_max_k)) as u16;
+                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                unsafe {
+                    *p_lbs.get_unchecked_mut(r_idx) = *parent_cap_bounds_ptr.add(p_len);
+                    *child_max_ks.get_unchecked_mut(r_idx) = (p_len.min(parent_max_k)) as u16;
+                }
             }
 
             let mut bucket_hashes = [0u64; 243];
@@ -1451,21 +1466,27 @@ impl<'a> Solver<'a> {
             let mut num_exact = 0;
 
             for i in 0..num_eval {
-                let r_idx = eval_indices[i] as usize;
-                let hash = bucket_hashes[r_idx];
+                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    let lb = p_lbs[r_idx];
+                    let lb = unsafe { *p_lbs.get_unchecked(r_idx) };
                     let used_val = cached_val.max(lb);
                     cost += used_val - lb;
-                    p_lbs[r_idx] = used_val;
+                    unsafe {
+                        *p_lbs.get_unchecked_mut(r_idx) = used_val;
+                    }
                     let word_idx = r_idx >> 6;
                     let bit = 1u64 << (r_idx & 63);
                     if is_exact {
-                        exact_mask[word_idx] |= bit;
+                        unsafe {
+                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                        }
                         num_exact += 1;
                     }
-                    cached_mask[word_idx] |= bit;
+                    unsafe {
+                        *cached_mask.get_unchecked_mut(word_idx) |= bit;
+                    }
 
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -1489,9 +1510,11 @@ impl<'a> Solver<'a> {
             let mut offsets = [0u16; 243];
             let mut curr = 0;
             for i in 0..num_non_empty {
-                let r = non_empty_indices[i] as usize;
-                offsets[r] = curr;
-                curr += counts[r];
+                let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                unsafe {
+                    *offsets.get_unchecked_mut(r) = curr;
+                    curr += *counts.get_unchecked(r);
+                }
             }
 
             let mut current_offsets = offsets;
@@ -1509,29 +1532,35 @@ impl<'a> Solver<'a> {
             // immediately, completely bypassing expensive full-dictionary branching factor searches
             // on any p_len > 15 buckets for this guess.
             for i in split_idx..num_eval {
-                let r_idx = eval_indices[i] as usize;
+                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
-                if (cached_mask[word_idx] & bit) != 0 {
+                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
-                let p_len = counts[r_idx] as usize;
-                let start = offsets[r_idx] as usize;
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
                 let end = start + p_len;
-                let p = &sorted_set[start..end];
-                let hash = bucket_hashes[r_idx];
+                let p = unsafe { sorted_set.get_unchecked(start..end) };
+                let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
 
                 let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
-                let lb = p_lbs[r_idx];
+                let lb = unsafe { *p_lbs.get_unchecked(r_idx) };
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
-                p_lbs[r_idx] = used_val;
+                unsafe {
+                    *p_lbs.get_unchecked_mut(r_idx) = used_val;
+                }
                 if is_exact {
-                    exact_mask[word_idx] |= bit;
+                    unsafe {
+                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                    }
                     num_exact += 1;
                 }
                 self.cache.insert(hash, used_val, is_exact);
-                child_max_ks[r_idx] = (p_len.min(parent_max_k)) as u16;
+                unsafe {
+                    *child_max_ks.get_unchecked_mut(r_idx) = (p_len.min(parent_max_k)) as u16;
+                }
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -1556,22 +1585,25 @@ impl<'a> Solver<'a> {
             // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
             // Only reached if small buckets alone did not exceed beta.
             for i in 0..split_idx {
-                let r_idx = eval_indices[i] as usize;
+                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
-                if (cached_mask[word_idx] & bit) != 0 {
+                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
-                let p_len = counts[r_idx] as usize;
-                let start = offsets[r_idx] as usize;
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
                 let end = start + p_len;
-                let p = &sorted_set[start..end];
-                let hash = bucket_hashes[r_idx];
+                let p = unsafe { sorted_set.get_unchecked(start..end) };
+                let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
 
-                let lb = p_lbs[r_idx];
+                let lb = unsafe { *p_lbs.get_unchecked(r_idx) };
                 let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
                 if target_k == 2 {
-                    child_max_ks[r_idx] = (p_len as u16).min(child_max_ks[r_idx]);
+                    unsafe {
+                        *child_max_ks.get_unchecked_mut(r_idx) =
+                            (p_len as u16).min(*child_max_ks.get_unchecked(r_idx));
+                    }
                     self.cache.insert(hash, lb, false);
                 } else {
                     let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
@@ -1580,7 +1612,10 @@ impl<'a> Solver<'a> {
                         target_k,
                     );
                     if k_cand >= target_k {
-                        child_max_ks[r_idx] = (p_len as u16).min(child_max_ks[r_idx]);
+                        unsafe {
+                            *child_max_ks.get_unchecked_mut(r_idx) =
+                                (p_len as u16).min(*child_max_ks.get_unchecked(r_idx));
+                        }
                         self.cache.insert(hash, lb, false);
                     } else {
                         let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
@@ -1590,15 +1625,23 @@ impl<'a> Solver<'a> {
                             target_k,
                         );
                         if k >= target_k {
-                            child_max_ks[r_idx] = (p_len as u16).min(child_max_ks[r_idx]);
+                            unsafe {
+                                *child_max_ks.get_unchecked_mut(r_idx) =
+                                    (p_len as u16).min(*child_max_ks.get_unchecked(r_idx));
+                            }
                             self.cache.insert(hash, lb, false);
                         } else {
-                            child_max_ks[r_idx] = (k as u16).min(child_max_ks[r_idx]);
+                            unsafe {
+                                *child_max_ks.get_unchecked_mut(r_idx) =
+                                    (k as u16).min(*child_max_ks.get_unchecked(r_idx));
+                            }
                             let tight_lb =
                                 crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                             let used_val = tight_lb.max(lb);
                             cost += used_val - lb;
-                            p_lbs[r_idx] = used_val;
+                            unsafe {
+                                *p_lbs.get_unchecked_mut(r_idx) = used_val;
+                            }
                             self.cache.insert(hash, used_val, false);
                         }
                     }
@@ -1620,13 +1663,13 @@ impl<'a> Solver<'a> {
             }
 
             for i in 0..num_eval {
-                let r_idx = eval_indices[i] as usize;
+                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
-                if (exact_mask[word_idx] & bit) != 0 {
+                if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
-                let p_len = counts[r_idx] as usize;
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if self.current_cost_so_far + cost >= current_global_beta {
@@ -1634,11 +1677,11 @@ impl<'a> Solver<'a> {
                     return cost;
                 }
 
-                let start = offsets[r_idx] as usize;
+                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
                 let end = start + p_len;
-                let p = &sorted_set[start..end];
+                let p = unsafe { sorted_set.get_unchecked(start..end) };
 
-                let b = cost - p_lbs[r_idx];
+                let b = cost - unsafe { *p_lbs.get_unchecked(r_idx) };
                 let new_beta = beta - b;
 
                 // Also respect the global beta from concurrent threads: if another thread
@@ -1657,7 +1700,7 @@ impl<'a> Solver<'a> {
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
-                    (child_max_ks[r_idx] as usize).max(2),
+                    (unsafe { *child_max_ks.get_unchecked(r_idx) } as usize).max(2),
                 );
                 self.current_cost_so_far -= b;
                 if b + val >= beta {
