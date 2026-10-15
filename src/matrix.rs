@@ -22,6 +22,8 @@ pub struct ResponseMatrix {
     pub data_c_g: Vec<Response>,
     pub candidate_to_guess: Vec<usize>,
     pub guess_chars: Vec<[u8; 5]>,
+    /// Guesses ordered by general branching power (5-letter isograms with high letter frequency first)
+    pub branching_guess_order: Vec<usize>,
 }
 
 impl ResponseMatrix {
@@ -82,6 +84,33 @@ impl ResponseMatrix {
         let candidate_to_guess = dict.candidate_to_guess.clone();
         let guess_chars = dict.guess_chars.clone();
 
+        let mut letter_freq = [0u32; 26];
+        for candidate in &dict.candidates {
+            let mut seen = 0u32;
+            for &b in &candidate.0 {
+                let bit = 1 << (b - b'a');
+                if seen & bit == 0 {
+                    seen |= bit;
+                    letter_freq[(b - b'a') as usize] += 1;
+                }
+            }
+        }
+
+        let mut scored: Vec<(u32, usize)> = (0..num_guesses)
+            .map(|g| {
+                let mask = guess_masks[g];
+                let num_distinct = mask.count_ones();
+                let mut score = 0u32;
+                for &l in &guess_chars[g] {
+                    score += letter_freq[l as usize];
+                }
+                let total_score = (num_distinct << 24) + score;
+                (total_score, g)
+            })
+            .collect();
+        scored.sort_unstable_by_key(|&(s, g)| (std::cmp::Reverse(s), g));
+        let branching_guess_order: Vec<usize> = scored.into_iter().map(|(_, g)| g).collect();
+
         Self {
             num_guesses,
             num_candidates,
@@ -92,6 +121,7 @@ impl ResponseMatrix {
             data_c_g,
             candidate_to_guess,
             guess_chars,
+            branching_guess_order,
         }
     }
 
@@ -185,5 +215,38 @@ mod extra_tests {
                 assert_eq!(r1, r2, "Mismatch at g={}, c={}", g, c);
             }
         }
+    }
+
+    #[test]
+    fn test_branching_guess_order() {
+        let guesses = vec![
+            Word::new("apple"), // 4 distinct letters
+            Word::new("slate"), // 5 distinct letters (isogram)
+            Word::new("eerie"), // 3 distinct letters
+        ];
+        let candidates = vec![Word::new("slate"), Word::new("stare")];
+        let dict = Dictionary {
+            guess_chars: guesses
+                .iter()
+                .map(|w| {
+                    [
+                        w.0[0] - b'a',
+                        w.0[1] - b'a',
+                        w.0[2] - b'a',
+                        w.0[3] - b'a',
+                        w.0[4] - b'a',
+                    ]
+                })
+                .collect(),
+            guesses,
+            candidates,
+            candidate_to_guess: vec![1, 1],
+        };
+        let matrix = ResponseMatrix::new(&dict);
+        assert_eq!(matrix.branching_guess_order.len(), 3);
+        // Isogram "slate" (guess 1) must be ranked first ahead of "apple" (4 distinct) and "eerie" (3 distinct)
+        assert_eq!(matrix.branching_guess_order[0], 1);
+        assert_eq!(matrix.branching_guess_order[1], 0);
+        assert_eq!(matrix.branching_guess_order[2], 2);
     }
 }
