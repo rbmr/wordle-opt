@@ -1022,24 +1022,26 @@ impl<'a> Solver<'a> {
         }
         phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
 
-        for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
+        for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
             if self.current_cost_so_far + local_lb >= current_global_beta {
                 break;
             }
             if self.current_cost_so_far + g_lb >= current_global_beta {
                 min_val_found = min_val_found.min(g_lb);
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                continue;
+                self.metrics.pruned_by_bounds.fetch_add(
+                    phase1_tuples.len() - idx,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                break;
             }
             if g_lb >= best_val {
                 min_val_found = min_val_found.min(g_lb);
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                continue;
+                self.metrics.pruned_by_bounds.fetch_add(
+                    phase1_tuples.len() - idx,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                break;
             }
             let val =
                 self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
@@ -1164,24 +1166,26 @@ impl<'a> Solver<'a> {
             if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
                 phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
 
-                for &(_g, _, g_lb, _non_empty) in &phase2_tuples {
+                for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if self.current_cost_so_far + local_lb >= current_global_beta {
                         break;
                     }
                     if self.current_cost_so_far + g_lb >= current_global_beta {
                         min_val_found = min_val_found.min(g_lb);
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        continue;
+                        self.metrics.pruned_by_bounds.fetch_add(
+                            phase2_tuples.len() - idx,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                        break;
                     }
                     if g_lb >= best_val {
                         min_val_found = min_val_found.min(g_lb);
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        continue;
+                        self.metrics.pruned_by_bounds.fetch_add(
+                            phase2_tuples.len() - idx,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                        break;
                     }
                     let val = self.min_guess_val(
                         set,
