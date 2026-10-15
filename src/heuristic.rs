@@ -83,9 +83,14 @@ pub fn compute_max_branching_factor_seq(
     for &c in candidates {
         let g = matrix.candidate_to_guess[c];
         let g_offset = g * matrix.num_candidates;
+        let g_row = unsafe {
+            matrix
+                .data
+                .get_unchecked(g_offset..g_offset + matrix.num_candidates)
+        };
         let mut mask = [0u64; 4];
         for &other in candidates {
-            let r = unsafe { matrix.data.get_unchecked(g_offset + other).0 as usize };
+            let r = unsafe { g_row.get_unchecked(other).0 as usize };
             mask[r >> 6] |= 1u64 << (r & 63);
         }
         let k = (mask[0].count_ones()
@@ -102,8 +107,10 @@ pub fn compute_max_branching_factor_seq(
 
     let mid = candidates.len() / 2;
 
-    // Main scan: skip words with zero overlap (which generate only 1 response)
-    // or <= 2-4 overlap on distinct-letter words when max_k is already high.
+    // Main scan: skip words with zero overlap (which generate only 1 response).
+    // For any word, each non-overlapping letter is guaranteed constant-black across all candidates,
+    // so at least non_overlap positions are constant-black. With 3 response states per varying position,
+    // the word can generate at most 3^(5 - non_overlap) distinct response patterns.
     for g in 0..matrix.num_guesses {
         let g_mask = matrix.guess_masks[g];
         let overlap = g_mask & c_mask;
@@ -112,24 +119,24 @@ pub fn compute_max_branching_factor_seq(
         }
         let g_ones = g_mask.count_ones();
         let overlap_count = overlap.count_ones();
-        if g_ones == 5 {
-            if (overlap_count <= 1 && max_k >= 3)
-                || (overlap_count <= 2 && max_k >= 9)
-                || (overlap_count <= 3 && max_k >= 27)
-                || (overlap_count <= 4 && max_k >= 81)
-            {
-                continue;
-            }
-        } else if (max_k >= 27 && overlap_count <= 1)
-            || (max_k >= 81 && overlap_count <= 2 && g_ones >= 3)
+        let non_overlap = g_ones - overlap_count;
+        if (non_overlap >= 1 && max_k >= 81)
+            || (non_overlap >= 2 && max_k >= 27)
+            || (non_overlap >= 3 && max_k >= 9)
+            || (non_overlap >= 4 && max_k >= 3)
         {
             continue;
         }
 
         let g_offset = g * matrix.num_candidates;
+        let g_row = unsafe {
+            matrix
+                .data
+                .get_unchecked(g_offset..g_offset + matrix.num_candidates)
+        };
         let mut mask = [0u64; 4];
         for &c in &candidates[..mid] {
-            let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+            let r = unsafe { g_row.get_unchecked(c).0 as usize };
             mask[r >> 6] |= 1u64 << (r & 63);
         }
         let half_unique = (mask[0].count_ones()
@@ -140,7 +147,7 @@ pub fn compute_max_branching_factor_seq(
             continue;
         }
         for &c in &candidates[mid..] {
-            let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
+            let r = unsafe { g_row.get_unchecked(c).0 as usize };
             mask[r >> 6] |= 1u64 << (r & 63);
         }
         let k = (mask[0].count_ones()
