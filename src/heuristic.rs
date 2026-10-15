@@ -72,17 +72,13 @@ pub fn compute_candidate_branching_factor_with_target(
     }
     let effective_target = target_k.min(candidates.len()).min(243);
     let mut max_k = 0;
+    let data_ptr = matrix.data.as_ptr();
     for &c in candidates {
-        let g = matrix.candidate_to_guess[c];
-        let g_offset = g * matrix.num_candidates;
-        let g_row = unsafe {
-            matrix
-                .data
-                .get_unchecked(g_offset..g_offset + matrix.num_candidates)
-        };
+        let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
+        let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
         let mut mask = [0u64; 4];
         for &other in candidates {
-            let r = unsafe { g_row.get_unchecked(other).0 as usize };
+            let r = unsafe { (*g_ptr.add(other)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
@@ -167,9 +163,11 @@ pub fn compute_max_branching_factor_seq_with_target(
     }
 
     let mid = candidates.len() / 2;
+    let (c_half1, c_half2) = candidates.split_at(mid);
+    let rem_len = c_half2.len();
+    let data_ptr = matrix.data.as_ptr();
 
-    for g in 0..matrix.num_guesses {
-        let g_mask = matrix.guess_masks[g];
+    for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
         let overlap = g_mask & c_mask;
         if overlap == 0 {
             continue;
@@ -179,6 +177,8 @@ pub fn compute_max_branching_factor_seq_with_target(
 
         let var_pos = if g_ones == 5 {
             overlap_count
+        } else if overlap_count == g_ones {
+            5
         } else {
             let [c0, c1, c2, c3, c4] = unsafe { *matrix.guess_chars.get_unchecked(g) };
             ((c_mask >> c0) & 1)
@@ -196,15 +196,10 @@ pub fn compute_max_branching_factor_seq_with_target(
             continue;
         }
 
-        let g_offset = g * matrix.num_candidates;
-        let g_row = unsafe {
-            matrix
-                .data
-                .get_unchecked(g_offset..g_offset + matrix.num_candidates)
-        };
+        let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
         let mut mask = [0u64; 4];
-        for &c in &candidates[..mid] {
-            let r = unsafe { g_row.get_unchecked(c).0 as usize };
+        for &c in c_half1 {
+            let r = unsafe { (*g_ptr.add(c)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
@@ -213,11 +208,11 @@ pub fn compute_max_branching_factor_seq_with_target(
             + mask[1].count_ones()
             + mask[2].count_ones()
             + mask[3].count_ones()) as usize;
-        if half_unique + (candidates.len() - mid) <= max_k {
+        if half_unique + rem_len <= max_k {
             continue;
         }
-        for &c in &candidates[mid..] {
-            let r = unsafe { g_row.get_unchecked(c).0 as usize };
+        for &c in c_half2 {
+            let r = unsafe { (*g_ptr.add(c)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
