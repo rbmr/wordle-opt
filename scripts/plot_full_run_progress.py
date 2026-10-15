@@ -68,9 +68,10 @@ def parse(path):
             m = WALL_RE.search(line)
             if m:
                 wall = float(m.group(1))
-    # A run that finished has its wall time; one that was capped does not.
-    if wall is not None:
-        points.append((int(wall), points[-1][1] if points else 0))
+    # Deliberately no synthetic point at the wall time. The sampler ticks every
+    # 60 s, so the last sample can be a minute before the run finished, and
+    # inventing a final point at the last known count draws a flat tail that is
+    # not real data. The wall time goes in the legend instead.
     return commit, points, wall
 
 
@@ -113,10 +114,16 @@ def main():
         series.append((label, xs, ys))
         # A curve if there is one to draw, otherwise visible points.
         if len(points) >= 2:
-            ax.plot(xs, ys, marker="o", markersize=4, linewidth=1.8, label=label)
+            line, = ax.plot(xs, ys, marker="o", markersize=4, linewidth=1.8,
+                            label=label)
         else:
-            ax.plot(xs, ys, marker="o", markersize=6, linestyle="none",
-                    label=label)
+            line, = ax.plot(xs, ys, marker="o", markersize=6, linestyle="none",
+                            label=label)
+        # Show when the run finished as a marker on the time axis only. The
+        # root-guess count at that instant is unknown, so it gets no y value.
+        if wall is not None:
+            ax.axvline(wall, color=line.get_color(), linestyle=":", linewidth=1.2,
+                       alpha=0.7)
 
     ax.set_xscale("log")
     ax.set_xlabel("elapsed seconds within the run (log scale)")
