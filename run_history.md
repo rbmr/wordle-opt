@@ -209,6 +209,10 @@ the commit that actually ran.
 | 2026-10-15 | `2fae855` | pc01 | 1600 | 1 | optimal | 21.992s | 5256 | 1681 | — | ~156MB | reuse buckets array and fast-path singletons in build_into; tied record 21.992s, pick time 21.6s; validation OK |
 | 2026-10-15 | `2fae855` | pc01 | 2000 | 1 | optimal | 44.243s | 6723 | 2119 | 8200 | ~174MB | reuse buckets array and fast-path singletons in build_into; pick time 43.8s; validation OK |
 | 2026-10-15 | `2fae855` | pc01 | 2200 | 1 | optimal | 84.841s (1.41m) | 7477 | 2331 | 24917 | ~208MB | reuse buckets array and fast-path singletons in build_into; pick time 84.1s; validation OK |
+| 2026-10-15 | `a59f7eb` | pc01 | 1000 | 1 | optimal | 4.856s | 3124 | 1049 | — | — | unify candidate counting in min_state_val; new all-time record N=1000 (4.856s vs 4.892s, pick 4.7s); validation OK |
+| 2026-10-15 | `a59f7eb` | pc01 | 1600 | 1 | optimal | 22.042s | 5256 | 1681 | — | ~157MB | unify candidate counting in min_state_val; pick time 21.7s; validation OK |
+| 2026-10-15 | `a59f7eb` | pc01 | 2000 | 1 | optimal | 44.372s | 6723 | 2119 | 8179 | ~174MB | unify candidate counting in min_state_val; pick time 44.0s; validation OK |
+| 2026-10-15 | `a59f7eb` | pc01 | 2200 | 1 | optimal | 84.570s (1.41m) | 7477 | 2331 | 24973 | ~208MB | unify candidate counting in min_state_val; pick time 83.8s; validation OK |
 
 ## Notes
 
@@ -273,6 +277,7 @@ the commit that actually ran.
 - The `11a91ee` rows demonstrated that pre-slicing `g_row`, hoisting the `max_collisions` cutoff calculation outside the inner candidate comparison loop, and using unchecked slice indexing in `quick_bucket_eval` established new all-time records for N=1000 (**4.892s**, breaking below 4.90s for the first time, pick 4.7s) and N=2000 (**44.134s**, pick 43.7s).
 - The `a1018db` rows demonstrated that fast-pathing in-set candidate guesses achieving the theoretical minimum cost $2n - 1$ (all-singleton partition) directly in `OptimalPolicy::guess_and_cost` for candidate sets $n \le 15$ preserved exact optimal tie-breaking and reduced N=2200 build time to **84.005s** (pick time down to **83.2s**).
 - The `2fae855` rows demonstrated that avoiding per-node 243-vector allocations in `build_into` (reusing an array across DFS iterations) and fast-pathing singleton candidates directly without partitioning overhead eliminated >560,000 vector allocations across tree construction, tying the N=1600 record at **21.992s** and delivering **44.243s** at N=2000 while preserving exact policy tree structure.
+- The `a59f7eb` rows demonstrated that unifying candidate counting across Phase 1 and Phase 2 in `min_state_val` (replacing the `c_len <= 8` linear search over `local_counts` with branchless direct indexing into `counts` and non-empty tracking) eliminated inner loop comparisons and branches across thousands of guess evaluations, setting a new all-time record for N=1000 at **4.856s** (pick 4.7s).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
