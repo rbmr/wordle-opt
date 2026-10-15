@@ -232,37 +232,93 @@ fn active_guesses(
     dict: &Dictionary,
     candidates: &[usize],
 ) -> Vec<(usize, u32)> {
+    use rayon::prelude::*;
+
     let mut c_mask = 0u32;
     for &c in candidates {
         c_mask |= matrix.candidate_masks[c];
     }
-    let mut seen = rustc_hash::FxHashSet::default();
-    let mut out = Vec::new();
-    let mut counts = [0u16; NUM_RESPONSES];
-    for g in 0..dict.guesses.len() {
-        if !seen.insert(guess_projection(dict, c_mask, g)) {
-            continue;
-        }
-        for v in counts.iter_mut() {
-            *v = 0;
-        }
-        let mut num_non_empty = 0;
-        for &c in candidates {
-            let r = matrix.get(g, c).0 as usize;
-            if counts[r] == 0 {
-                num_non_empty += 1;
+
+    let skip_projections = c_mask.count_ones() >= 26;
+    let surviving_guesses: Vec<usize> = if skip_projections {
+        (0..dict.guesses.len()).collect()
+    } else {
+        let mut seen = rustc_hash::FxHashSet::with_capacity_and_hasher(
+            dict.guesses.len().min(4096),
+            Default::default(),
+        );
+        (0..dict.guesses.len())
+            .filter(|&g| seen.insert(guess_projection(dict, c_mask, g)))
+            .collect()
+    };
+
+    let mut out: Vec<(usize, u32)> = if candidates.len() >= 48 {
+        surviving_guesses
+            .into_par_iter()
+            .filter_map(|g| {
+                let g_offset = g * matrix.num_candidates;
+                let g_row = unsafe {
+                    matrix
+                        .data
+                        .get_unchecked(g_offset..g_offset + matrix.num_candidates)
+                };
+                let mut counts = [0u16; NUM_RESPONSES];
+                let mut non_empty_indices = [0u8; NUM_RESPONSES];
+                let mut num_non_empty = 0;
+                for &c in candidates {
+                    let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                    non_empty_indices[num_non_empty] = r as u8;
+                    num_non_empty += (counts[r] == 0) as usize;
+                    counts[r] += 1;
+                }
+                if num_non_empty <= 1 {
+                    return None;
+                }
+                let mut expected_rem = 0u32;
+                for i in 0..num_non_empty {
+                    let r = non_empty_indices[i] as usize;
+                    let v = counts[r] as u32;
+                    expected_rem += v * v;
+                }
+                Some((g, expected_rem))
+            })
+            .collect()
+    } else {
+        let mut out = Vec::with_capacity(surviving_guesses.len());
+        let mut counts = [0u16; NUM_RESPONSES];
+        let mut non_empty_indices = [0u8; NUM_RESPONSES];
+        for g in surviving_guesses {
+            let g_offset = g * matrix.num_candidates;
+            let g_row = unsafe {
+                matrix
+                    .data
+                    .get_unchecked(g_offset..g_offset + matrix.num_candidates)
+            };
+            let mut num_non_empty = 0;
+            for &c in candidates {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                non_empty_indices[num_non_empty] = r as u8;
+                num_non_empty += (counts[r] == 0) as usize;
+                counts[r] += 1;
             }
-            counts[r] += 1;
+            if num_non_empty <= 1 {
+                for i in 0..num_non_empty {
+                    counts[non_empty_indices[i] as usize] = 0;
+                }
+                continue;
+            }
+            let mut expected_rem = 0u32;
+            for i in 0..num_non_empty {
+                let r = non_empty_indices[i] as usize;
+                let v = counts[r] as u32;
+                expected_rem += v * v;
+                counts[r] = 0;
+            }
+            out.push((g, expected_rem));
         }
-        if num_non_empty <= 1 {
-            continue; // useless: does not partition the candidate set
-        }
-        let mut expected_rem = 0u32;
-        for &v in counts.iter() {
-            expected_rem += (v as u32) * (v as u32);
-        }
-        out.push((g, expected_rem));
-    }
+        out
+    };
+
     out.sort_unstable_by_key(|&(g, e)| (e, g));
     out
 }
@@ -447,47 +503,7 @@ impl<'a> OptimalPolicy<'a> {
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
-        let initial_best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
-        // global_beta tracks best_val + 1 so we get exact values for ties!
-        let global_beta = AtomicU32::new(initial_best_val + 1);
-        // Pack (cost, index) into u64. We want to minimize cost, and tie-break by index.
-        let global_best = AtomicU64::new(((initial_best_val as u64) << 32) | (u32::MAX as u64));
         let active = active_guesses(self.matrix, self.dict, candidates);
-
-        // For very small candidate sets, avoid thread overhead
-        if candidates.len() <= 10 {
-            let mut solver = Solver::new(
-                self.matrix,
-                self.max_k,
-                self.dict,
-                self.metrics,
-                self.capacity_bounds_2d,
-                self.cache,
-                self.equiv_cache,
-            );
-            let mut best_val = initial_best_val;
-            let mut best_guess = usize::MAX;
-            for (g, _) in &active {
-                let v = solver.min_guess_val(
-                    candidates,
-                    self.all_guesses_bits,
-                    *g,
-                    best_val + 1,
-                    1,
-                    self.max_k,
-                );
-                self.metrics
-                    .root_guesses_done
-                    .fetch_add(1, Ordering::Relaxed);
-                if v < best_val {
-                    best_val = v;
-                    best_guess = *g;
-                } else if v == best_val && best_guess == usize::MAX {
-                    best_guess = *g;
-                }
-            }
-            return (best_guess, best_val);
-        }
 
         // For large candidate sets (especially root), evaluating the best-ranked guess
         // across all cores via bucket parallelization quickly establishes an exact tight upper bound.
@@ -595,21 +611,9 @@ impl<'a> OptimalPolicy<'a> {
                 .root_guesses_done
                 .fetch_add(1, Ordering::Relaxed);
 
-            let best_val = first_guess_cost.min(initial_best_val);
-            global_beta.store(best_val + 1, Ordering::Relaxed);
-            let initial_packed = if first_guess_cost <= initial_best_val {
-                (first_guess_cost as u64) << 32
-            } else {
-                ((initial_best_val as u64) << 32) | (u32::MAX as u64)
-            };
-            global_best.store(initial_packed, Ordering::Relaxed);
-
-            // Pre-filter remaining alternative guesses using tightened bounds.
-            let cost_to_beat = if first_guess_cost <= initial_best_val {
-                first_guess_cost
-            } else {
-                initial_best_val + 1
-            };
+            let global_beta = AtomicU32::new(first_guess_cost + 1);
+            let global_best = AtomicU64::new((first_guess_cost as u64) << 32);
+            let cost_to_beat = first_guess_cost;
 
             let mut filtered: Vec<(usize, usize, u32, u32)> = active[1..]
                 .par_iter()
@@ -833,6 +837,46 @@ impl<'a> OptimalPolicy<'a> {
 
             return (best_guess, best_val);
         }
+
+        let initial_best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
+
+        // For very small candidate sets, avoid thread overhead
+        if candidates.len() <= 10 {
+            let mut solver = Solver::new(
+                self.matrix,
+                self.max_k,
+                self.dict,
+                self.metrics,
+                self.capacity_bounds_2d,
+                self.cache,
+                self.equiv_cache,
+            );
+            let mut best_val = initial_best_val;
+            let mut best_guess = usize::MAX;
+            for (g, _) in &active {
+                let v = solver.min_guess_val(
+                    candidates,
+                    self.all_guesses_bits,
+                    *g,
+                    best_val + 1,
+                    1,
+                    self.max_k,
+                );
+                self.metrics
+                    .root_guesses_done
+                    .fetch_add(1, Ordering::Relaxed);
+                if v < best_val {
+                    best_val = v;
+                    best_guess = *g;
+                } else if v == best_val && best_guess == usize::MAX {
+                    best_guess = *g;
+                }
+            }
+            return (best_guess, best_val);
+        }
+
+        let global_beta = AtomicU32::new(initial_best_val + 1);
+        let global_best = AtomicU64::new(((initial_best_val as u64) << 32) | (u32::MAX as u64));
 
         // Dynamic, rank-ordered claiming: every worker repeatedly takes the
         // next-best-ranked unevaluated guess from a shared counter. The
