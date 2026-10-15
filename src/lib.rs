@@ -939,7 +939,13 @@ mod tests {
             Arc<Mutex<Vec<crate::policy::ProgressSample>>>,
         ) = spawn_build_progress(&observer, std::time::Duration::from_millis(1), start, &done);
 
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if !samples.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         done.store(true, Ordering::Relaxed);
         handle.join().expect("progress thread must not panic");
 
