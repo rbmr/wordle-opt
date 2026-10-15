@@ -174,11 +174,22 @@ pub fn compute_max_branching_factor_seq_with_target(
         }
         let g_ones = g_mask.count_ones();
         let overlap_count = overlap.count_ones();
-        let non_overlap = g_ones - overlap_count;
-        if (non_overlap >= 1 && max_k >= 81)
-            || (non_overlap >= 2 && max_k >= 27)
-            || (non_overlap >= 3 && max_k >= 9)
-            || (non_overlap >= 4 && max_k >= 3)
+
+        let var_pos = if g_ones == 5 {
+            overlap_count
+        } else {
+            let [c0, c1, c2, c3, c4] = unsafe { *matrix.guess_chars.get_unchecked(g) };
+            ((c_mask >> c0) & 1)
+                + ((c_mask >> c1) & 1)
+                + ((c_mask >> c2) & 1)
+                + ((c_mask >> c3) & 1)
+                + ((c_mask >> c4) & 1)
+        };
+
+        if (var_pos <= 1 && max_k >= 3)
+            || (var_pos <= 2 && (max_k >= 9 || (overlap_count == 1 && max_k >= 8)))
+            || (var_pos <= 3 && (max_k >= 27 || (overlap_count == 1 && max_k >= 12)))
+            || (var_pos <= 4 && max_k >= 81)
         {
             continue;
         }
@@ -518,6 +529,83 @@ mod target_bound_tests {
                             );
                         }
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_branching_factor_positional_varying_bound() {
+        use crate::dict::Dictionary;
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let mut rng = fastrand::Rng::with_seed(12345);
+        for size in [5, 15, 30, 50] {
+            let mut candidates: Vec<usize> = (0..matrix.num_candidates).collect();
+            rng.shuffle(&mut candidates);
+            let subset = &candidates[..size];
+
+            let mut c_mask = 0u32;
+            for &c in subset {
+                c_mask |= matrix.candidate_masks[c];
+            }
+
+            for g in (0..matrix.num_guesses).step_by(17) {
+                let g_mask = matrix.guess_masks[g];
+                let overlap = g_mask & c_mask;
+                let overlap_count = overlap.count_ones();
+                let g_ones = g_mask.count_ones();
+                let var_pos = if g_ones == 5 {
+                    overlap_count
+                } else {
+                    let [c0, c1, c2, c3, c4] = matrix.guess_chars[g];
+                    ((c_mask >> c0) & 1)
+                        + ((c_mask >> c1) & 1)
+                        + ((c_mask >> c2) & 1)
+                        + ((c_mask >> c3) & 1)
+                        + ((c_mask >> c4) & 1)
+                };
+
+                let mut mask = [0u64; 4];
+                let g_offset = g * matrix.num_candidates;
+                for &c in subset {
+                    let r = matrix.data[g_offset + c].0 as usize;
+                    mask[r >> 6] |= 1u64 << (r & 63);
+                }
+                let actual_k = (mask[0].count_ones()
+                    + mask[1].count_ones()
+                    + mask[2].count_ones()
+                    + mask[3].count_ones()) as usize;
+
+                if var_pos <= 1 {
+                    assert!(actual_k <= 3, "g={} var_pos=1 actual_k={}", g, actual_k);
+                }
+                if var_pos <= 2 {
+                    if overlap_count == 1 {
+                        assert!(
+                            actual_k <= 8,
+                            "g={} var_pos=2 overlap_count=1 actual_k={}",
+                            g,
+                            actual_k
+                        );
+                    } else {
+                        assert!(actual_k <= 9, "g={} var_pos=2 actual_k={}", g, actual_k);
+                    }
+                }
+                if var_pos <= 3 {
+                    if overlap_count == 1 {
+                        assert!(
+                            actual_k <= 12,
+                            "g={} var_pos=3 overlap_count=1 actual_k={}",
+                            g,
+                            actual_k
+                        );
+                    } else {
+                        assert!(actual_k <= 27, "g={} var_pos=3 actual_k={}", g, actual_k);
+                    }
+                }
+                if var_pos <= 4 {
+                    assert!(actual_k <= 81, "g={} var_pos=4 actual_k={}", g, actual_k);
                 }
             }
         }

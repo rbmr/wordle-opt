@@ -21,6 +21,7 @@ pub struct ResponseMatrix {
     /// candidates across all possible guesses.
     pub data_c_g: Vec<Response>,
     pub candidate_to_guess: Vec<usize>,
+    pub guess_chars: Vec<[u8; 5]>,
 }
 
 impl ResponseMatrix {
@@ -79,6 +80,7 @@ impl ResponseMatrix {
         }
 
         let candidate_to_guess = dict.candidate_to_guess.clone();
+        let guess_chars = dict.guess_chars.clone();
 
         Self {
             num_guesses,
@@ -89,6 +91,7 @@ impl ResponseMatrix {
             data,
             data_c_g,
             candidate_to_guess,
+            guess_chars,
         }
     }
 
