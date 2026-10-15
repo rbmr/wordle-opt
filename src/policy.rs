@@ -711,6 +711,13 @@ impl<'a> OptimalPolicy<'a> {
                             current_offsets[r] += 1;
                         }
 
+                        // Pre-compute candidate branching slack for all uncached buckets
+                        let mut cand_slacks = [0u16; 243];
+                        let mut cand_ks = [0u8; 243];
+                        let mut total_cand_slack = 0u32;
+                        let mut uncached_indices = [0u8; 243];
+                        let mut num_uncached = 0;
+
                         for j in 0..num_non_empty {
                             let r_idx = non_empty_indices[j] as usize;
                             if r_idx == crate::core::Response::WIN.0 as usize {
@@ -720,16 +727,49 @@ impl<'a> OptimalPolicy<'a> {
                             if p_len <= 2 || cached_mask[r_idx] {
                                 continue;
                             }
+                            uncached_indices[num_uncached] = r_idx as u8;
+                            num_uncached += 1;
 
+                            if p_len <= 15 {
+                                cand_slacks[r_idx] = 1;
+                                total_cand_slack += 1;
+                            } else {
+                                let start = offsets[r_idx];
+                                let end = start + p_len;
+                                let p = &sorted_set[start..end];
+                                let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
+                                let k_cand = crate::heuristic::compute_candidate_branching_factor(
+                                    self.matrix,
+                                    p,
+                                );
+                                cand_ks[r_idx] = k_cand.min(255) as u8;
+                                let cand_tight_lb = crate::heuristic::tight_capacity_bound(
+                                    p_len, k_cand, self.max_k,
+                                );
+                                let slack = cand_tight_lb.saturating_sub(cap_lb);
+                                cand_slacks[r_idx] = slack as u16;
+                                total_cand_slack += slack;
+                            }
+                        }
+
+                        // If even with the worst-case candidate branching slack across all uncached buckets
+                        // the lower bound cannot reach cost_to_beat, this guess is mathematically guaranteed
+                        // to survive Phase B! Completely bypass all 14,855-guess dictionary scans!
+                        if lb + total_cand_slack < cost_to_beat {
+                            return Some((g, orig_idx, lb, exp));
+                        }
+
+                        let mut remaining_slack = total_cand_slack;
+                        for j in 0..num_uncached {
+                            let r_idx = uncached_indices[j] as usize;
+                            let p_len = counts[r_idx] as usize;
                             let start = offsets[r_idx];
                             let end = start + p_len;
                             let p = &sorted_set[start..end];
                             let hash = bucket_hashes[r_idx];
                             let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
-
-                            let bucket_max_slack = if p_len <= 15 { 1 } else { (p_len - 2) as u32 };
-                            let remaining_slack =
-                                max_possible_slack.saturating_sub(bucket_max_slack);
+                            let this_slack = cand_slacks[r_idx] as u32;
+                            remaining_slack = remaining_slack.saturating_sub(this_slack);
 
                             if p_len <= 15 {
                                 let (q_val, is_exact) =
@@ -751,21 +791,18 @@ impl<'a> OptimalPolicy<'a> {
                                     p_len.min(243) + 1
                                 };
 
-                                let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
-                                    self.matrix,
-                                    p,
-                                    target_k,
-                                );
-                                if k_cand >= target_k {
+                                let initial_k = cand_ks[r_idx] as usize;
+                                if initial_k >= target_k {
                                     break;
                                 }
 
-                                let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
-                                    self.matrix,
-                                    p,
-                                    k_cand,
-                                    target_k,
-                                );
+                                let k =
+                                    crate::heuristic::compute_max_branching_factor_seq_with_target(
+                                        self.matrix,
+                                        p,
+                                        initial_k,
+                                        target_k,
+                                    );
                                 if k >= target_k {
                                     break;
                                 }
@@ -781,8 +818,7 @@ impl<'a> OptimalPolicy<'a> {
                                 return None;
                             }
 
-                            max_possible_slack = remaining_slack;
-                            if lb + max_possible_slack < cost_to_beat {
+                            if lb + remaining_slack < cost_to_beat {
                                 break;
                             }
                         }
