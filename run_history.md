@@ -305,6 +305,10 @@ the commit that actually ran.
 | 2026-10-15 | `d8bf6be` | pc01 | 1600 | 1 | optimal | 21.804s | 5256 | 1681 | 4208 | ~157MB | eliminate num_distinct and branchy index checks in quick_bucket_eval; pick time 21.5s; validation OK |
 | 2026-10-15 | `d8bf6be` | pc01 | 2000 | 1 | optimal | 44.330s | 6723 | 2119 | 8278 | ~176MB | eliminate num_distinct and branchy index checks in quick_bucket_eval; pick time 44.0s; validation OK |
 | 2026-10-15 | `d8bf6be` | pc01 | 2200 | 1 | optimal | 81.705s (1.36m) | 7477 | 2331 | 22641 | ~204MB | eliminate num_distinct and branchy index checks in quick_bucket_eval; pick time 81.0s; validation OK |
+| 2026-10-15 | `1de4a50` | pc01 | 1000 | 1 | optimal | 4.840s | 3124 | 1049 | 40 | ~150MB | integrate lower bounds into local_counts tuple in min_guess_val; pick time 4.6s; validation OK |
+| 2026-10-15 | `1de4a50` | pc01 | 1600 | 1 | optimal | 21.767s | 5256 | 1681 | 4210 | ~156MB | integrate lower bounds into local_counts tuple in min_guess_val; pick time 21.4s; validation OK |
+| 2026-10-15 | `1de4a50` | pc01 | 2000 | 1 | optimal | 43.799s | 6723 | 2119 | 8272 | ~174MB | integrate lower bounds into local_counts tuple in min_guess_val; pick time 43.4s; validation OK |
+| 2026-10-15 | `1de4a50` | pc01 | 2200 | 1 | optimal | 81.812s (1.36m) | 7477 | 2331 | 22695 | ~203MB | integrate lower bounds into local_counts tuple in min_guess_val; pick time 81.2s; validation OK |
 
 
 
@@ -395,6 +399,7 @@ the commit that actually ran.
 - The `a070f58` rows demonstrated that gating `var_pos` computation in `compute_max_branching_factor_seq_with_target` with a fast `overlap_count` capacity bound check (and immediate pruning when `overlap_count == 1 && g_ones == 5 && max_k >= 3`) maintained top performance across all sizes (N=1000 at 4.832s with pick time 4.6s, N=1600 at 21.769s with pick time 21.4s, N=2000 at 43.909s with pick time 43.5s, and N=2200 at 81.637s with pick time 81.0s). All runs passed policy tree validation with invariant golden costs.
 - The `7a5230f` rows confirmed that reverting the branchy `can_prune` check in `compute_max_branching_factor_seq_with_target` while retaining unchecked mask indexing in `compute_max_branching_factor` eliminated branch mispredictions, setting a new all-time best N=1600 build time of **21.712s** (pick time **21.4s**) and lowering N=2000 pick time to **43.4s** (build time **43.790s**). All runs passed policy tree validation with invariant golden costs.
 - The `d8bf6be` rows demonstrated that replacing the single linear slice iteration in `quick_bucket_eval` with dual sub-slices (`..i` and `i+1..`) and collision-based cutoff tracking added loop setup and branch overhead on small candidate subsets ($n \le 15$), regressing runtimes across all sizes (N=1000 from 4.839s to 4.872s, N=1600 from 21.712s to 21.804s, and N=2000 from 43.790s to 44.330s). Dual sub-slicing in `quick_bucket_eval` reverted.
+- The `1de4a50` rows demonstrated that integrating the bucket lower bound directly into the `local_counts` tuple `(r, count, lb)` in `min_guess_val` (for $c\_len \le 8$) eliminated the separate `p_lbs_local` stack array and guaranteed that bucket lower bounds remain properly aligned with each bucket after sorting by count descending. Performance remained at top levels across all sizes (N=1000 build 4.840s / pick 4.6s, N=1600 build 21.767s / pick 21.4s, N=2000 build 43.799s / pick 43.4s, and N=2200 build 81.812s / pick 81.2s) while reducing stack usage and ensuring robust correctness across arbitrary word lists and subtrees. All runs passed policy tree validation with invariant golden costs.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
