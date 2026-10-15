@@ -1034,11 +1034,7 @@ impl<'a> Solver<'a> {
                             if num_non_empty == 1 {
                                 continue;
                             }
-                            let lb_cost = lbs[i].max(heuristic::tight_capacity_bound(
-                                set.len(),
-                                num_non_empty,
-                                parent_max_k,
-                            ));
+                            let lb_cost = lbs[i];
                             let expected_rem = exps[i];
                             let g = phase1_guesses[i];
                             if num_non_empty > local_max_k {
@@ -1090,11 +1086,6 @@ impl<'a> Solver<'a> {
                             lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                         }
                     }
-                    lb_cost = lb_cost.max(heuristic::tight_capacity_bound(
-                        c_len,
-                        num_non_empty,
-                        parent_max_k,
-                    ));
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
@@ -1137,11 +1128,6 @@ impl<'a> Solver<'a> {
                     if num_non_empty == 1 {
                         continue;
                     }
-                    lb_cost = lb_cost.max(heuristic::tight_capacity_bound(
-                        c_len,
-                        num_non_empty,
-                        parent_max_k,
-                    ));
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
@@ -1158,54 +1144,34 @@ impl<'a> Solver<'a> {
         }
         phase1_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
 
-        let phase1_lb = if valid_max_k > 0 {
-            heuristic::tight_capacity_bound(c_len, valid_max_k, parent_max_k)
-        } else {
-            0
-        };
-        min_val_found = min_val_found.min(phase1_lb);
-
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if phase1_lb < best_val && self.current_cost_so_far + phase1_lb < current_global_beta {
-            for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + local_lb >= current_global_beta {
+        for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if self.current_cost_so_far + local_lb >= current_global_beta {
+                break;
+            }
+            if self.current_cost_so_far + g_lb >= current_global_beta {
+                min_val_found = min_val_found.min(g_lb);
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
+            if g_lb >= best_val {
+                min_val_found = min_val_found.min(g_lb);
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
+            let val =
+                self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
+            min_val_found = min_val_found.min(val);
+            if val < best_val {
+                best_val = val;
+                if best_val <= local_lb {
                     break;
                 }
-                if self.current_cost_so_far + g_lb >= current_global_beta {
-                    min_val_found = min_val_found.min(g_lb);
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    continue;
-                }
-                if g_lb >= best_val {
-                    min_val_found = min_val_found.min(g_lb);
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    continue;
-                }
-                let val = self.min_guess_val(
-                    set,
-                    active_guesses_slice,
-                    _g,
-                    best_val,
-                    depth,
-                    parent_max_k,
-                );
-                min_val_found = min_val_found.min(val);
-                if val < best_val {
-                    best_val = val;
-                    if best_val <= local_lb {
-                        break;
-                    }
-                }
             }
-        } else if !phase1_tuples.is_empty() {
-            self.metrics
-                .pruned_by_bounds
-                .fetch_add(phase1_tuples.len(), std::sync::atomic::Ordering::Relaxed);
         }
 
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1264,11 +1230,7 @@ impl<'a> Solver<'a> {
                                 if num_non_empty == 1 {
                                     continue;
                                 }
-                                let lb_cost = lbs[i].max(heuristic::phase2_capacity_bound(
-                                    set.len(),
-                                    num_non_empty,
-                                    parent_max_k,
-                                ));
+                                let lb_cost = lbs[i];
                                 let expected_rem = exps[i];
                                 if num_non_empty == 2
                                     && expected_rem
@@ -1326,11 +1288,6 @@ impl<'a> Solver<'a> {
                                 lb_cost += self.capacity_bounds_2d[parent_max_k][count];
                             }
                         }
-                        lb_cost = lb_cost.max(heuristic::phase2_capacity_bound(
-                            c_len,
-                            num_non_empty,
-                            parent_max_k,
-                        ));
                         if num_non_empty == 2
                             && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
                         {
@@ -1378,11 +1335,6 @@ impl<'a> Solver<'a> {
                         if num_non_empty == 1 {
                             continue;
                         }
-                        lb_cost = lb_cost.max(heuristic::phase2_capacity_bound(
-                            c_len,
-                            num_non_empty,
-                            parent_max_k,
-                        ));
                         if num_non_empty == 2
                             && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
                         {
