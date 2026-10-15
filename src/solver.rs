@@ -1530,9 +1530,6 @@ impl<'a> Solver<'a> {
                 return beta;
             }
 
-            local_counts[0..num_non_empty]
-                .sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
-
             let mut cost = c_len as u32;
             let mut p_lbs_local = [0u32; 8];
             let mut max_p_len = 0;
@@ -1561,6 +1558,9 @@ impl<'a> Solver<'a> {
             if max_p_len <= 2 {
                 return cost;
             }
+
+            local_counts[0..num_non_empty]
+                .sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
 
             for i in 0..num_non_empty {
                 let p_len = local_counts[i].1 as usize;
@@ -1620,7 +1620,6 @@ impl<'a> Solver<'a> {
             cost
         } else {
             let mut counts = [0u16; 243];
-            let mut bucket_hashes = [0u64; 243];
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
 
@@ -1631,21 +1630,12 @@ impl<'a> Solver<'a> {
                     *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
                     num_non_empty += (*cnt == 0) as usize;
                     *cnt += 1;
-                    *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
                 }
             }
 
             if num_non_empty == 1 {
                 return beta;
             }
-
-            // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
-            // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
-            // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
-            // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
-            // Ties broken by response index for deterministic order.
-            non_empty_indices[0..num_non_empty]
-                .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
 
             let mut cost = set.len() as u32;
             let mut p_lbs = [0u32; 243];
@@ -1665,6 +1655,7 @@ impl<'a> Solver<'a> {
                 let lb = self.capacity_bounds_2d[parent_max_k][p_len as usize];
                 cost += lb;
                 p_lbs[r_idx] = lb;
+                child_max_ks[r_idx] = (p_len as usize).min(parent_max_k);
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1673,6 +1664,22 @@ impl<'a> Solver<'a> {
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
                 return cost;
+            }
+
+            // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
+            // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
+            // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
+            // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
+            // Ties broken by response index for deterministic order.
+            non_empty_indices[0..num_non_empty]
+                .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
+
+            let mut bucket_hashes = [0u64; 243];
+            for &c in set {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                unsafe {
+                    *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
+                }
             }
 
             // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
@@ -1777,7 +1784,7 @@ impl<'a> Solver<'a> {
                     child_max_ks[r_idx] = p_len.min(parent_max_k);
                 } else {
                     let k = crate::heuristic::compute_max_branching_factor_seq(self.matrix, p);
-                    child_max_ks[r_idx] = k.min(parent_max_k);
+                    child_max_ks[r_idx] = k.min(child_max_ks[r_idx]);
                     let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                     let lb = p_lbs[r_idx];
                     let used_val = tight_lb.max(lb);
