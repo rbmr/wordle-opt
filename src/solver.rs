@@ -959,113 +959,57 @@ impl<'a> Solver<'a> {
         let mut valid_max_k = 0;
         let mut min_val_found = u32::MAX;
 
-        if c_len <= 8 {
-            for &cand in set {
-                let g = self.dict.candidate_to_guess[cand];
-                if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
-                    continue;
-                }
-                let mut expected_rem = 0u32;
-                let mut lb_cost = c_len as u32;
-                let mut num_non_empty = 0;
-                let mut local_counts = [(0u8, 0u8); 8];
-                let g_off = g * self.matrix.num_candidates;
-                let g_row = unsafe {
-                    self.matrix
-                        .data
-                        .get_unchecked(g_off..g_off + self.matrix.num_candidates)
-                };
-                for &c in set {
-                    let r = unsafe { g_row.get_unchecked(c).0 };
-                    let mut found = false;
-                    for i in 0..num_non_empty {
-                        if local_counts[i].0 == r {
-                            local_counts[i].1 += 1;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if !found {
-                        local_counts[num_non_empty] = (r, 1);
-                        num_non_empty += 1;
-                    }
-                }
-                if num_non_empty == 1 {
-                    continue;
-                }
-                for i in 0..num_non_empty {
-                    let r_idx = local_counts[i].0 as usize;
-                    let count = local_counts[i].1 as usize;
-                    expected_rem += (count as u32) * (count as u32);
-                    if r_idx != crate::core::Response::WIN.0 as usize {
-                        lb_cost += self.capacity_bounds_2d[parent_max_k][count];
-                    }
-                }
-                if num_non_empty > local_max_k {
-                    local_max_k = num_non_empty;
-                }
-                if num_non_empty > valid_max_k {
-                    valid_max_k = num_non_empty;
-                }
-                if lb_cost < beta {
-                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                } else {
-                    min_val_found = min_val_found.min(lb_cost);
+        for &cand in set {
+            let g = self.dict.candidate_to_guess[cand];
+            if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
+                continue;
+            }
+            let mut num_non_empty = 0;
+            let g_off = g * self.matrix.num_candidates;
+            let g_row = unsafe {
+                self.matrix
+                    .data
+                    .get_unchecked(g_off..g_off + self.matrix.num_candidates)
+            };
+            for &c in set {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                unsafe {
+                    let cnt = counts.get_unchecked_mut(r);
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                    num_non_empty += (*cnt == 0) as usize;
+                    *cnt += 1;
                 }
             }
-        } else {
-            for &cand in set {
-                let g = self.dict.candidate_to_guess[cand];
-                if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
-                    continue;
+            if num_non_empty == 1 {
+                unsafe {
+                    let r_idx = *non_empty_indices.get_unchecked(0) as usize;
+                    *counts.get_unchecked_mut(r_idx) = 0;
                 }
-                let mut num_non_empty = 0;
-                let g_off = g * self.matrix.num_candidates;
-                let g_row = unsafe {
-                    self.matrix
-                        .data
-                        .get_unchecked(g_off..g_off + self.matrix.num_candidates)
-                };
-                for &c in set {
-                    let r = unsafe { g_row.get_unchecked(c).0 as usize };
-                    unsafe {
-                        let cnt = counts.get_unchecked_mut(r);
-                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                        num_non_empty += (*cnt == 0) as usize;
-                        *cnt += 1;
-                    }
+                continue;
+            }
+            if num_non_empty > local_max_k {
+                local_max_k = num_non_empty;
+            }
+            if num_non_empty > valid_max_k {
+                valid_max_k = num_non_empty;
+            }
+            let mut expected_rem = 0u32;
+            let mut lb_cost = c_len as u32;
+            for i in 0..num_non_empty {
+                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                let count = unsafe { *counts.get_unchecked(r_idx) };
+                unsafe {
+                    *counts.get_unchecked_mut(r_idx) = 0;
                 }
-                if num_non_empty == 1 {
-                    unsafe {
-                        let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                        *counts.get_unchecked_mut(r_idx) = 0;
-                    }
-                    continue;
+                expected_rem += (count as u32) * (count as u32);
+                if r_idx != 242 {
+                    lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                 }
-                if num_non_empty > local_max_k {
-                    local_max_k = num_non_empty;
-                }
-                if num_non_empty > valid_max_k {
-                    valid_max_k = num_non_empty;
-                }
-                let mut expected_rem = 0u32;
-                let mut lb_cost = c_len as u32;
-                for i in 0..num_non_empty {
-                    let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                    let count = unsafe { *counts.get_unchecked(r_idx) };
-                    unsafe {
-                        *counts.get_unchecked_mut(r_idx) = 0;
-                    }
-                    expected_rem += (count as u32) * (count as u32);
-                    if r_idx != 242 {
-                        lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                    }
-                }
-                if lb_cost < beta {
-                    phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                } else {
-                    min_val_found = min_val_found.min(lb_cost);
-                }
+            }
+            if lb_cost < beta {
+                phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+            } else {
+                min_val_found = min_val_found.min(lb_cost);
             }
         }
         phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
@@ -1108,134 +1052,67 @@ impl<'a> Solver<'a> {
                 let g = self.dict.candidate_to_guess[c];
                 is_in_set[g / 64] |= 1 << (g % 64);
             }
-            if c_len <= 8 {
-                for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-                    if block == 0 {
-                        continue;
-                    }
-                    let mut b = block & !is_in_set[block_idx];
-                    while b != 0 {
-                        let tz = b.trailing_zeros();
-                        let g = block_idx * 64 + tz as usize;
-                        b &= b - 1;
-
-                        let mut expected_rem = 0u32;
-                        let mut lb_cost = c_len as u32;
-                        let mut num_non_empty = 0;
-                        let mut local_counts = [(0u8, 0u8); 8];
-                        let g_off = g * self.matrix.num_candidates;
-                        let g_row = unsafe {
-                            self.matrix
-                                .data
-                                .get_unchecked(g_off..g_off + self.matrix.num_candidates)
-                        };
-                        for &c in set {
-                            let r = unsafe { g_row.get_unchecked(c).0 };
-                            let mut found = false;
-                            for i in 0..num_non_empty {
-                                if local_counts[i].0 == r {
-                                    local_counts[i].1 += 1;
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if !found {
-                                local_counts[num_non_empty] = (r, 1);
-                                num_non_empty += 1;
-                            }
-                        }
-                        if num_non_empty == 1 {
-                            continue;
-                        }
-                        for i in 0..num_non_empty {
-                            let r_idx = local_counts[i].0 as usize;
-                            let count = local_counts[i].1 as usize;
-                            expected_rem += (count as u32) * (count as u32);
-                            if r_idx != crate::core::Response::WIN.0 as usize {
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count];
-                            }
-                        }
-                        if num_non_empty == 2
-                            && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                        {
-                            continue;
-                        }
-                        if num_non_empty > local_max_k {
-                            local_max_k = num_non_empty;
-                        }
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
-                        if lb_cost < best_val {
-                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
-                        }
-                    }
+            for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
+                if block == 0 {
+                    continue;
                 }
-            } else {
-                for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-                    if block == 0 {
+                let mut b = block & !is_in_set[block_idx];
+                while b != 0 {
+                    let tz = b.trailing_zeros();
+                    let g = block_idx * 64 + tz as usize;
+                    b &= b - 1;
+
+                    let mut num_non_empty = 0;
+                    let g_off = g * self.matrix.num_candidates;
+                    let g_row = unsafe {
+                        self.matrix
+                            .data
+                            .get_unchecked(g_off..g_off + self.matrix.num_candidates)
+                    };
+                    for &c in set {
+                        let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                        unsafe {
+                            let cnt = counts.get_unchecked_mut(r);
+                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                            num_non_empty += (*cnt == 0) as usize;
+                            *cnt += 1;
+                        }
+                    }
+                    if num_non_empty == 1 {
+                        unsafe {
+                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
+                            *counts.get_unchecked_mut(r_idx) = 0;
+                        }
                         continue;
                     }
-                    let mut b = block & !is_in_set[block_idx];
-                    while b != 0 {
-                        let tz = b.trailing_zeros();
-                        let g = block_idx * 64 + tz as usize;
-                        b &= b - 1;
-
-                        let mut num_non_empty = 0;
-                        let g_off = g * self.matrix.num_candidates;
-                        let g_row = unsafe {
-                            self.matrix
-                                .data
-                                .get_unchecked(g_off..g_off + self.matrix.num_candidates)
-                        };
-                        for &c in set {
-                            let r = unsafe { g_row.get_unchecked(c).0 as usize };
-                            unsafe {
-                                let cnt = counts.get_unchecked_mut(r);
-                                *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                                num_non_empty += (*cnt == 0) as usize;
-                                *cnt += 1;
-                            }
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    for i in 0..num_non_empty {
+                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                        let count = unsafe { *counts.get_unchecked(r_idx) };
+                        unsafe {
+                            *counts.get_unchecked_mut(r_idx) = 0;
                         }
-                        if num_non_empty == 1 {
-                            unsafe {
-                                let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                                *counts.get_unchecked_mut(r_idx) = 0;
-                            }
-                            continue;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != 242 {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
-                        let mut expected_rem = 0u32;
-                        let mut lb_cost = c_len as u32;
-                        for i in 0..num_non_empty {
-                            let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                            let count = unsafe { *counts.get_unchecked(r_idx) };
-                            unsafe {
-                                *counts.get_unchecked_mut(r_idx) = 0;
-                            }
-                            expected_rem += (count as u32) * (count as u32);
-                            if r_idx != 242 {
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                            }
-                        }
-                        if num_non_empty == 2
-                            && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                        {
-                            continue;
-                        }
-                        if num_non_empty > local_max_k {
-                            local_max_k = num_non_empty;
-                        }
-                        if num_non_empty > valid_max_k {
-                            valid_max_k = num_non_empty;
-                        }
-                        if lb_cost < best_val {
-                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
-                        }
+                    }
+                    if num_non_empty == 2
+                        && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
+                    {
+                        continue;
+                    }
+                    if num_non_empty > local_max_k {
+                        local_max_k = num_non_empty;
+                    }
+                    if num_non_empty > valid_max_k {
+                        valid_max_k = num_non_empty;
+                    }
+                    if lb_cost < best_val {
+                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
             }
