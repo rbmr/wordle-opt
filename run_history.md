@@ -113,6 +113,10 @@ the commit that actually ran.
 | 2026-10-15 | `eff1f18` | pc01 | 1600 | 1 | optimal | 41.307s | 5256 | 1681 | 240 | ~249MB | eliminate 242-iteration scans in min_state_val using non_empty_indices; pick time 40.2s; validation OK |
 | 2026-10-15 | `eff1f18` | pc01 | 2000 | 1 | optimal | 81.462s (1.36m) | 6723 | 2119 | 6902 | ~284MB | eliminate 242-iteration scans in min_state_val using non_empty_indices; pick time 80.6s; validation OK |
 | 2026-10-15 | `eff1f18` | pc01 | 2200 | 1 | optimal | 144.841s (2.41m) | 7477 | 2331 | 20538 | ~317MB | eliminate 242-iteration scans in min_state_val using non_empty_indices; new all-time best N=2200 build time 144.841s and pick time 142.3s; validation OK |
+| 2026-10-15 | `07f9b48` | pc01 | 1000 | 1 | optimal | 13.636s | 3124 | 1049 | — | — | propagate tightened branching factors to child subtrees; pick time 13.1s; validation OK |
+| 2026-10-15 | `07f9b48` | pc01 | 1600 | 1 | optimal | 40.908s | 5256 | 1681 | 240 | ~248MB | propagate tightened branching factors to child subtrees; pick time 39.8s; validation OK |
+| 2026-10-15 | `07f9b48` | pc01 | 2000 | 1 | optimal | 81.302s (1.36m) | 6723 | 2119 | 6932 | ~285MB | propagate tightened branching factors to child subtrees; pick time 80.4s; validation OK |
+| 2026-10-15 | `07f9b48` | pc01 | 2200 | 1 | optimal | 148.727s (2.48m) | 7477 | 2331 | 19989 | ~316MB | propagate tightened branching factors to child subtrees; states reduced to 19989; validation OK |
 
 
 ## Notes
@@ -150,6 +154,7 @@ the commit that actually ran.
 - The `aae4000` rows demonstrated that eliminating `active_tuples` heap vector allocations and full 14,855-element sorts in `greedy_solve`, along with single-pass counting sort candidate partitioning, produced a new all-time best N=2200 pick time of 142.6s (down to 145.283s overall build time).
 - The `3265bc4` rows demonstrated that avoiding full 486-byte memset of counts across all 14,855 guesses in `greedy_solve` by clearing only non-empty indices and bypassing candidate projections when `c_mask.count_ones() >= 26` achieved a new all-time best N=2000 build time of 80.020s (pick time 79.2s).
 - The `eff1f18` rows demonstrated that eliminating the fixed 242-iteration scans over `counts` in `min_state_val` (phase 1 and phase 2 CPU paths) using `non_empty_indices` to bound clearing and bound computation to `num_non_empty` entries produced a new all-time best N=2200 build time of 144.841s and pick time of 142.3s.
+- The `07f9b48` rows demonstrated that propagating tightened child branching factors down into child subtrees reduced explored states at N=2200 from 20.5k to 19.9k and improved N=1600 build time to 40.908s (pick time 39.8s), while sequential max_k computation on large root buckets in Phase A introduced minor parallel overhead.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
