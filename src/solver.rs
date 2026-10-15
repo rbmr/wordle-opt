@@ -570,38 +570,33 @@ impl<'a> Solver<'a> {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
                 let data_ptr = matrix.data.as_ptr();
-                for i in 0..n {
-                    let ci = unsafe { *bucket.get_unchecked(i) };
+                for &ci in bucket {
                     let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                     let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                     let mut mask = [0u64; 4];
-                    let mut num_distinct = 0;
                     let mut collisions = 0;
                     let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                    for (j, &cj) in bucket.iter().enumerate() {
-                        if i != j {
-                            let r = unsafe { (*g_ptr.add(cj)).0 as usize };
-                            let word_idx = r >> 6;
-                            let bit = 1u64 << (r & 63);
-                            let word = unsafe { mask.get_unchecked_mut(word_idx) };
-                            if (*word & bit) == 0 {
-                                *word |= bit;
-                                num_distinct += 1;
-                            } else {
-                                collisions += 1;
-                                if collisions >= max_collisions {
-                                    break;
-                                }
+                    for &c in bucket {
+                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                        let word_idx = r >> 6;
+                        let bit = 1u64 << (r & 63);
+                        let word = unsafe { mask.get_unchecked_mut(word_idx) };
+                        if (*word & bit) != 0 {
+                            collisions += 1;
+                            if collisions >= max_collisions {
+                                break;
                             }
+                        } else {
+                            *word |= bit;
                         }
                     }
 
-                    if num_distinct == n - 1 {
+                    if collisions == 0 {
                         return ((2 * n - 1) as u32, true);
                     }
-                    if num_distinct == n - 2 {
+                    if collisions == 1 && max_collisions == 2 {
                         best_inside = target_exact;
                     }
                 }

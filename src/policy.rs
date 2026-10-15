@@ -525,7 +525,6 @@ impl<'a> OptimalPolicy<'a> {
             let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
 
             let mut mask = [0u64; 4];
-            let mut num_distinct = 0;
             let mut has_collision = false;
 
             for &c in candidates {
@@ -533,16 +532,14 @@ impl<'a> OptimalPolicy<'a> {
                 let word_idx = r >> 6;
                 let bit = 1u64 << (r & 63);
                 let word = unsafe { mask.get_unchecked_mut(word_idx) };
-                if (*word & bit) == 0 {
-                    *word |= bit;
-                    num_distinct += 1;
-                } else {
+                if (*word & bit) != 0 {
                     has_collision = true;
                     break;
                 }
+                *word |= bit;
             }
 
-            if !has_collision && num_distinct == n {
+            if !has_collision {
                 return Some((g, (2 * n - 1) as u32));
             }
         }
@@ -642,7 +639,7 @@ impl<'a> OptimalPolicy<'a> {
                 let start = unsafe { *offsets.get_unchecked(r_idx) };
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
-                bucket_tasks.push((p.to_vec(), hash));
+                bucket_tasks.push((p, hash));
             }
 
             bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.0.len()));
@@ -655,7 +652,7 @@ impl<'a> OptimalPolicy<'a> {
                     }
                     if bucket.len() <= 15 {
                         let (q_val, is_exact) =
-                            Solver::quick_bucket_eval(self.matrix, self.dict, &bucket);
+                            Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
                         if is_exact {
                             self.cache.insert(hash, q_val, true);
                             return q_val;
@@ -670,10 +667,10 @@ impl<'a> OptimalPolicy<'a> {
                         self.cache,
                         self.equiv_cache,
                     );
-                    let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, &bucket);
+                    let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, bucket);
                     let bucket_k = bucket.len().min(self.max_k).max(2);
                     let val = solver.min_state_val(
-                        &bucket,
+                        bucket,
                         self.all_guesses_bits,
                         bucket_greedy,
                         2,
