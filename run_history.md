@@ -225,6 +225,10 @@ the commit that actually ran.
 | 2026-10-15 | `35eeb8f` | pc01 | 1600 | 1 | optimal | 21.705s | 5256 | 1681 | — | ~157MB | tighten root guess beta using tie-breaker index in scan; new all-time record N=1600 (21.705s vs 21.912s, pick 21.3s); validation OK |
 | 2026-10-15 | `35eeb8f` | pc01 | 2000 | 1 | optimal | 43.816s | 6723 | 2119 | 8204 | ~175MB | tighten root guess beta using tie-breaker index in scan; new all-time record N=2000 (43.816s vs 44.085s, pick 43.4s, breaks 44s barrier); validation OK |
 | 2026-10-15 | `35eeb8f` | pc01 | 2200 | 1 | optimal | 81.762s (1.36m) | 7477 | 2331 | 22592 | ~203MB | tighten root guess beta using tie-breaker index in scan; new all-time record N=2200 (81.762s vs 82.675s, pick 81.1s, -450 states); validation OK |
+| 2026-10-15 | `5d4d814` | pc01 | 1000 | 1 | optimal | 4.881s | 3124 | 1049 | — | — | hoist capacity_bounds slice and avoid double-indexing in hot paths; pick time 4.7s; validation OK |
+| 2026-10-15 | `5d4d814` | pc01 | 1600 | 1 | optimal | 21.837s | 5256 | 1681 | — | ~157MB | hoist capacity_bounds slice and avoid double-indexing in hot paths; pick time 21.5s; validation OK |
+| 2026-10-15 | `5d4d814` | pc01 | 2000 | 1 | optimal | 43.970s | 6723 | 2119 | 8203 | ~174MB | hoist capacity_bounds slice and avoid double-indexing in hot paths; pick time 43.6s; validation OK |
+| 2026-10-15 | `5d4d814` | pc01 | 2200 | 1 | optimal | 81.499s (1.36m) | 7477 | 2331 | 22639 | ~204MB | hoist capacity_bounds slice and avoid double-indexing in hot paths; new all-time record N=2200 build time 81.499s and pick time 80.8s (vs 81.762s / 81.1s at 35eeb8f); validation OK |
 
 ## Notes
 
