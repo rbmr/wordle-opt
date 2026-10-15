@@ -496,16 +496,19 @@ impl<'a> OptimalPolicy<'a> {
             let first_g = active[0].0;
 
             let mut counts = [0u16; 243];
+            let mut bucket_hashes = [0u64; 243];
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
 
+            let g_offset = first_g * self.matrix.num_candidates;
             for &c in candidates {
-                let r_idx = self.matrix.get(first_g, c).0 as usize;
+                let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
                 if counts[r_idx] == 0 {
                     non_empty_indices[num_non_empty] = r_idx as u8;
                     num_non_empty += 1;
                 }
                 counts[r_idx] += 1;
+                bucket_hashes[r_idx] ^= self.matrix.zobrist[c];
             }
 
             let mut offsets = [0usize; 244];
@@ -515,7 +518,7 @@ impl<'a> OptimalPolicy<'a> {
             let mut sorted_set = vec![0usize; candidates.len()];
             let mut current_offsets = offsets;
             for &c in candidates {
-                let r_idx = self.matrix.get(first_g, c).0 as usize;
+                let r_idx = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
                 let pos = current_offsets[r_idx];
                 sorted_set[pos] = c;
                 current_offsets[r_idx] += 1;
@@ -533,37 +536,22 @@ impl<'a> OptimalPolicy<'a> {
                     base_cost += self.capacity_bounds_2d[self.max_k][p_len];
                     continue;
                 }
-                let start = offsets[r_idx];
-                let end = start + p_len;
-                let p = &sorted_set[start..end];
-                let mut hash = 0u64;
-                for &c in p {
-                    hash ^= self.matrix.zobrist[c];
-                }
+                let hash = bucket_hashes[r_idx];
                 if let Some((cached_val, true)) = self.cache.get(hash) {
                     base_cost += cached_val;
                     continue;
                 }
-                if p_len <= 15 {
-                    let (q_val, is_exact) = Solver::quick_bucket_eval(self.matrix, self.dict, p);
-                    if is_exact {
-                        self.cache.insert(hash, q_val, true);
-                        base_cost += q_val;
-                        continue;
-                    }
-                }
-                bucket_tasks.push(p.to_vec());
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                let p = &sorted_set[start..end];
+                bucket_tasks.push((p.to_vec(), hash));
             }
 
-            bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.len()));
+            bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.0.len()));
 
             let bucket_costs: u32 = bucket_tasks
                 .into_par_iter()
-                .map(|bucket| {
-                    let mut hash = 0u64;
-                    for &c in &bucket {
-                        hash ^= self.matrix.zobrist[c];
-                    }
+                .map(|(bucket, hash)| {
                     if let Some((cached_val, true)) = self.cache.get(hash) {
                         return cached_val;
                     }
