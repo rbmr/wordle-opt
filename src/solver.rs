@@ -1247,17 +1247,13 @@ impl<'a> Solver<'a> {
         let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
         let c_len = set.len();
         let g_offset = guess * self.matrix.num_candidates;
-        let g_row = unsafe {
-            self.matrix
-                .data
-                .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
-        };
+        let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
 
         if c_len <= 8 {
             let mut local_counts = [(0u8, 0u8); 8];
             let mut num_non_empty = 0;
             for &c in set {
-                let r = unsafe { g_row.get_unchecked(c).0 };
+                let r = unsafe { (*g_ptr.add(c)).0 };
                 let mut found = false;
                 for i in 0..num_non_empty {
                     if local_counts[i].0 == r {
@@ -1318,7 +1314,7 @@ impl<'a> Solver<'a> {
                 let mut p = [0usize; 8];
                 let mut p_idx = 0;
                 for &c in set {
-                    let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
                     if r == r_idx {
                         p[p_idx] = c;
                         p_idx += 1;
@@ -1370,7 +1366,7 @@ impl<'a> Solver<'a> {
             let mut num_non_empty = 0;
 
             for &c in set {
-                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
                     let cnt = counts.get_unchecked_mut(r);
                     *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
@@ -1429,6 +1425,8 @@ impl<'a> Solver<'a> {
             eval_indices[0..num_eval]
                 .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
 
+            let split_idx = eval_indices[0..num_eval].partition_point(|&r| counts[r as usize] > 15);
+
             let mut p_lbs = [0u32; 243];
             let mut child_max_ks = [0u16; 243];
             for i in 0..num_eval {
@@ -1439,10 +1437,11 @@ impl<'a> Solver<'a> {
             }
 
             let mut bucket_hashes = [0u64; 243];
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             for &c in set {
-                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
-                    *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
+                    *bucket_hashes.get_unchecked_mut(r) ^= *zobrist_ptr.add(c);
                 }
             }
 
@@ -1499,17 +1498,19 @@ impl<'a> Solver<'a> {
 
             let mut current_offsets = offsets;
             for &c in set {
-                let r_idx = unsafe { g_row.get_unchecked(c).0 as usize };
-                let pos = current_offsets[r_idx] as usize;
-                sorted_set[pos] = c;
-                current_offsets[r_idx] += 1;
+                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
+                let pos = unsafe { *current_offsets.get_unchecked(r_idx) as usize };
+                unsafe {
+                    *sorted_set.get_unchecked_mut(pos) = c;
+                    *current_offsets.get_unchecked_mut(r_idx) += 1;
+                }
             }
 
             // Pass 2a: Cheap uncached buckets evaluation (quick_bucket_eval on p_len <= 15).
             // Evaluating small buckets first takes nanoseconds and often prunes cost >= beta
             // immediately, completely bypassing expensive full-dictionary branching factor searches
             // on any p_len > 15 buckets for this guess.
-            for i in 0..num_eval {
+            for i in split_idx..num_eval {
                 let r_idx = eval_indices[i] as usize;
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
@@ -1517,9 +1518,6 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 let p_len = counts[r_idx] as usize;
-                if p_len > 15 {
-                    continue;
-                }
                 let start = offsets[r_idx] as usize;
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
@@ -1559,7 +1557,7 @@ impl<'a> Solver<'a> {
 
             // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
             // Only reached if small buckets alone did not exceed beta.
-            for i in 0..num_eval {
+            for i in 0..split_idx {
                 let r_idx = eval_indices[i] as usize;
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
@@ -1567,9 +1565,6 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 let p_len = counts[r_idx] as usize;
-                if p_len <= 15 {
-                    continue;
-                }
                 let start = offsets[r_idx] as usize;
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
