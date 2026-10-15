@@ -1668,18 +1668,26 @@ impl<'a> Solver<'a> {
                     child_max_ks[r_idx] = p_len.min(child_max_ks[r_idx]);
                     self.cache.insert(hash, lb, false);
                 } else {
+                    let target_k =
+                        crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
                     let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
                         self.matrix,
                         p,
                         k_cand,
-                        p_len,
+                        target_k,
                     );
-                    child_max_ks[r_idx] = k.min(child_max_ks[r_idx]);
-                    let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
-                    let used_val = tight_lb.max(lb);
-                    cost += used_val - lb;
-                    p_lbs[r_idx] = used_val;
-                    self.cache.insert(hash, used_val, false);
+                    if k >= target_k {
+                        child_max_ks[r_idx] = p_len.min(child_max_ks[r_idx]);
+                        self.cache.insert(hash, lb, false);
+                    } else {
+                        child_max_ks[r_idx] = k.min(child_max_ks[r_idx]);
+                        let tight_lb =
+                            crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                        let used_val = tight_lb.max(lb);
+                        cost += used_val - lb;
+                        p_lbs[r_idx] = used_val;
+                        self.cache.insert(hash, used_val, false);
+                    }
                 }
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
