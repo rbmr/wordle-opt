@@ -245,6 +245,11 @@ the commit that actually ran.
 | 2026-10-15 | `daf2f0b` | pc01 | 1600 | 1 | optimal | 21.649s | 5256 | 1681 | — | ~157MB | compact stack allocations in min_guess_val and target candidate branching factor; pick time 21.3s; validation OK |
 | 2026-10-15 | `daf2f0b` | pc01 | 2000 | 1 | optimal | 43.486s | 6723 | 2119 | 8308 | ~175MB | compact stack allocations in min_guess_val and target candidate branching factor; pick time 43.1s; validation OK |
 | 2026-10-15 | `daf2f0b` | pc01 | 2200 | 1 | optimal | 81.004s (1.35m) | 7477 | 2331 | 22661 | ~204MB | compact stack allocations in min_guess_val and target candidate branching factor; pick time 80.3s; validation OK |
+| 2026-10-15 | `377569e` | pc01 | 1000 | 1 | optimal | 4.911s | 3124 | 1049 | — | — | add midpoint capacity pruning to candidate branching factor calculation; pick time 4.7s; validation OK |
+| 2026-10-15 | `377569e` | pc01 | 1600 | 1 | optimal | 21.937s | 5256 | 1681 | — | ~157MB | add midpoint capacity pruning to candidate branching factor calculation; pick time 21.6s; validation OK |
+| 2026-10-15 | `377569e` | pc01 | 2000 | 1 | optimal | 44.359s | 6723 | 2119 | 8316 | ~174MB | add midpoint capacity pruning to candidate branching factor calculation; pick time 44.0s; validation OK |
+| 2026-10-15 | `377569e` | pc01 | 2200 | 1 | optimal | 82.608s (1.38m) | 7477 | 2331 | 22637 | ~204MB | add midpoint capacity pruning to candidate branching factor calculation; pick time 81.9s; regressed; validation OK |
+
 
 
 
@@ -318,6 +323,7 @@ the commit that actually ran.
 - The `3357281` rows demonstrated that gating Phase 2 search in `Solver::min_state_val` with `phase2_capacity_bound` (skipping the gathering, bit unpacking, and evaluation of ~14,000 non-candidate guesses whenever `best_val <= phase2_min_lb` or `current_cost_so_far + phase2_min_lb >= current_global_beta`) pruned unpromising Phase 2 branch explorations early and tightened `min_val_found`. This achieved a clean sweep of new all-time records across all benchmark sizes: N=1000 down to **4.841s** (pick **4.6s**), N=1600 down to **21.578s** (pick **21.2s**), N=2000 down to **43.498s** (pick **43.1s**), and N=2200 down to **81.259s** (pick **80.6s**, with explored states dropping to **22,550**). All runs passed policy tree validation with invariant golden costs.
 - The `77e40a2` rows demonstrated that tracking valid Phase 1 and Phase 2 branching factors independently (`valid_phase1_k` and `valid_phase2_k`) restored tight capacity lower bounding without cross-phase dilution, establishing new all-time records for N=2000 (**43.376s**, pick **43.0s**) and N=2200 (**80.574s**, pick **79.9s**, breaking below the 80s barrier for the first time). All runs passed policy tree validation with invariant golden costs.
 - The `daf2f0b` rows demonstrated that replacing 972-byte `exact_vals` and 243-byte `cached_mask` arrays with compact 256-bit `[u64; 4]` bitmasks, shrinking `child_max_ks` from 8-byte `usize` to 2-byte `u16` (saving 2.6 KB stack frame footprint per DFS frame), and pre-computing `target_k` to early-exit candidate branching searches in Pass 2b maintained top performance (N=1000 at 4.847s, N=1600 at 21.649s with pick 21.3s, N=2000 at 43.486s, N=2200 at 81.004s with pick 80.3s). All runs passed policy tree validation with invariant golden costs.
+- The `377569e` rows demonstrated that adding midpoint capacity pruning to `compute_candidate_branching_factor_with_target` introduced branch and popcount overhead on small candidate subsets (16-30 words) where a tight unrolled loop with target early exit is faster, regressing runtimes across all sizes (N=2200 from 81.004s to 82.608s). Midpoint check in candidate branching reverted.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
