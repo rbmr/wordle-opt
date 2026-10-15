@@ -109,6 +109,10 @@ the commit that actually ran.
 | 2026-10-15 | `3265bc4` | pc01 | 1600 | 1 | optimal | 41.065s | 5256 | 1681 | 240 | ~247MB | avoid redundant memset and scans in greedy_solve; pick time 39.9s; validation OK |
 | 2026-10-15 | `3265bc4` | pc01 | 2000 | 1 | optimal | 80.020s (1.33m) | 6723 | 2119 | 7265 | ~284MB | avoid redundant memset and scans in greedy_solve; new all-time best N=2000 (80.020s vs 80.781s); pick time 79.2s; validation OK |
 | 2026-10-15 | `3265bc4` | pc01 | 2200 | 1 | optimal | 145.901s (2.43m) | 7477 | 2331 | 20378 | ~316MB | avoid redundant memset and scans in greedy_solve; pick time 143.3s; validation OK |
+| 2026-10-15 | `eff1f18` | pc01 | 1000 | 1 | optimal | 13.575s | 3124 | 1049 | — | — | eliminate 242-iteration scans in min_state_val using non_empty_indices; pick time 13.1s; validation OK |
+| 2026-10-15 | `eff1f18` | pc01 | 1600 | 1 | optimal | 41.307s | 5256 | 1681 | 240 | ~249MB | eliminate 242-iteration scans in min_state_val using non_empty_indices; pick time 40.2s; validation OK |
+| 2026-10-15 | `eff1f18` | pc01 | 2000 | 1 | optimal | 81.462s (1.36m) | 6723 | 2119 | 6902 | ~284MB | eliminate 242-iteration scans in min_state_val using non_empty_indices; pick time 80.6s; validation OK |
+| 2026-10-15 | `eff1f18` | pc01 | 2200 | 1 | optimal | 144.841s (2.41m) | 7477 | 2331 | 20538 | ~317MB | eliminate 242-iteration scans in min_state_val using non_empty_indices; new all-time best N=2200 build time 144.841s and pick time 142.3s; validation OK |
 
 
 ## Notes
@@ -145,6 +149,7 @@ the commit that actually ran.
 - The `1711125` rows confirm that reverting the guard in `min_guess_val` restored tight recursive child bounds (reducing N=2200 states from 46.8k back to 20.1k and runtime from 205.528s to 147.026s), while branchlessly counting responses and deferring Zobrist hash accumulation in root pre-filtering eliminated over 34 million unused XORs and lookups on discarded guesses.
 - The `aae4000` rows demonstrated that eliminating `active_tuples` heap vector allocations and full 14,855-element sorts in `greedy_solve`, along with single-pass counting sort candidate partitioning, produced a new all-time best N=2200 pick time of 142.6s (down to 145.283s overall build time).
 - The `3265bc4` rows demonstrated that avoiding full 486-byte memset of counts across all 14,855 guesses in `greedy_solve` by clearing only non-empty indices and bypassing candidate projections when `c_mask.count_ones() >= 26` achieved a new all-time best N=2000 build time of 80.020s (pick time 79.2s).
+- The `eff1f18` rows demonstrated that eliminating the fixed 242-iteration scans over `counts` in `min_state_val` (phase 1 and phase 2 CPU paths) using `non_empty_indices` to bound clearing and bound computation to `num_non_empty` entries produced a new all-time best N=2200 build time of 144.841s and pick time of 142.3s.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
