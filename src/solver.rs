@@ -966,8 +966,13 @@ impl<'a> Solver<'a> {
                 let mut num_non_empty = 0;
                 let mut local_counts = [(0u8, 0u8); 8];
                 let g_off = g * self.matrix.num_candidates;
+                let g_row = unsafe {
+                    self.matrix
+                        .data
+                        .get_unchecked(g_off..g_off + self.matrix.num_candidates)
+                };
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
+                    let r = unsafe { g_row.get_unchecked(c).0 };
                     let mut found = false;
                     for i in 0..num_non_empty {
                         if local_counts[i].0 == r {
@@ -1012,16 +1017,19 @@ impl<'a> Solver<'a> {
                 }
                 let mut num_non_empty = 0;
                 let g_off = g * self.matrix.num_candidates;
+                let g_row = unsafe {
+                    self.matrix
+                        .data
+                        .get_unchecked(g_off..g_off + self.matrix.num_candidates)
+                };
                 for &c in set {
-                    let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                    let cnt = unsafe { counts.get_unchecked_mut(r) };
-                    if *cnt == 0 {
-                        unsafe {
-                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                        }
-                        num_non_empty += 1;
+                    let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                    unsafe {
+                        let cnt = counts.get_unchecked_mut(r);
+                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                        num_non_empty += (*cnt == 0) as usize;
+                        *cnt += 1;
                     }
-                    *cnt += 1;
                 }
                 if num_non_empty == 1 {
                     unsafe {
@@ -1112,8 +1120,13 @@ impl<'a> Solver<'a> {
                         let mut num_non_empty = 0;
                         let mut local_counts = [(0u8, 0u8); 8];
                         let g_off = g * self.matrix.num_candidates;
+                        let g_row = unsafe {
+                            self.matrix
+                                .data
+                                .get_unchecked(g_off..g_off + self.matrix.num_candidates)
+                        };
                         for &c in set {
-                            let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 };
+                            let r = unsafe { g_row.get_unchecked(c).0 };
                             let mut found = false;
                             for i in 0..num_non_empty {
                                 if local_counts[i].0 == r {
@@ -1169,16 +1182,19 @@ impl<'a> Solver<'a> {
 
                         let mut num_non_empty = 0;
                         let g_off = g * self.matrix.num_candidates;
+                        let g_row = unsafe {
+                            self.matrix
+                                .data
+                                .get_unchecked(g_off..g_off + self.matrix.num_candidates)
+                        };
                         for &c in set {
-                            let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                            let cnt = unsafe { counts.get_unchecked_mut(r) };
-                            if *cnt == 0 {
-                                unsafe {
-                                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                                }
-                                num_non_empty += 1;
+                            let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                            unsafe {
+                                let cnt = counts.get_unchecked_mut(r);
+                                *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                                num_non_empty += (*cnt == 0) as usize;
+                                *cnt += 1;
                             }
-                            *cnt += 1;
                         }
                         if num_non_empty == 1 {
                             unsafe {
