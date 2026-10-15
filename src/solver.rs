@@ -605,30 +605,34 @@ impl<'a> Solver<'a> {
             2 => (3, true),
             _ => {
                 let mut best_inside = u32::MAX;
+                let target_exact = (2 * n) as u32;
                 for i in 0..n {
-                    let ci = bucket[i];
-                    let gi = dict.candidate_to_guess[ci];
+                    let ci = unsafe { *bucket.get_unchecked(i) };
+                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                     let g_offset = gi * matrix.num_candidates;
+                    let g_row = unsafe {
+                        matrix
+                            .data
+                            .get_unchecked(g_offset..g_offset + matrix.num_candidates)
+                    };
 
                     let mut mask = [0u64; 4];
                     let mut num_distinct = 0;
                     let mut collisions = 0;
+                    let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                    for j in 0..n {
+                    for (j, &cj) in bucket.iter().enumerate() {
                         if i != j {
-                            let cj = bucket[j];
-                            let r = unsafe { matrix.data.get_unchecked(g_offset + cj).0 as usize };
-                            let word_idx = r / 64;
-                            let bit = 1u64 << (r % 64);
-                            if (mask[word_idx] & bit) == 0 {
-                                mask[word_idx] |= bit;
+                            let r = unsafe { g_row.get_unchecked(cj).0 as usize };
+                            let word_idx = r >> 6;
+                            let bit = 1u64 << (r & 63);
+                            let word = unsafe { mask.get_unchecked_mut(word_idx) };
+                            if (*word & bit) == 0 {
+                                *word |= bit;
                                 num_distinct += 1;
                             } else {
                                 collisions += 1;
-                                if best_inside == (2 * n) as u32 {
-                                    break;
-                                }
-                                if collisions >= 2 {
+                                if collisions >= max_collisions {
                                     break;
                                 }
                             }
@@ -639,14 +643,14 @@ impl<'a> Solver<'a> {
                         return ((2 * n - 1) as u32, true);
                     }
                     if num_distinct == n - 2 {
-                        best_inside = (2 * n) as u32;
+                        best_inside = target_exact;
                     }
                 }
 
-                if best_inside == (2 * n) as u32 {
-                    ((2 * n) as u32, true)
+                if best_inside == target_exact {
+                    (target_exact, true)
                 } else {
-                    ((2 * n) as u32, false)
+                    (target_exact, false)
                 }
             }
         }
