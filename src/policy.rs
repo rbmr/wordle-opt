@@ -670,7 +670,11 @@ impl<'a> OptimalPolicy<'a> {
                     }
 
                     // Check if any uncached bucket with p_len > 2 remains.
+                    // Also calculate the maximum possible bound tightening that could theoretically occur.
+                    // If even the maximum possible bound tightening cannot reach cost_to_beat, the guess
+                    // is guaranteed to survive into `filtered`, so we skip partitioning and expensive bucket scans.
                     let mut has_uncached = false;
+                    let mut max_possible_slack = 0u32;
                     for j in 0..num_non_empty {
                         let r_idx = non_empty_indices[j] as usize;
                         if r_idx == crate::core::Response::WIN.0 as usize {
@@ -679,11 +683,11 @@ impl<'a> OptimalPolicy<'a> {
                         let p_len = counts[r_idx] as usize;
                         if p_len > 2 && !cached_mask[r_idx] {
                             has_uncached = true;
-                            break;
+                            max_possible_slack += if p_len <= 15 { 1 } else { (p_len - 2) as u32 };
                         }
                     }
 
-                    if !has_uncached {
+                    if !has_uncached || lb + max_possible_slack < cost_to_beat {
                         return Some((g, orig_idx, lb, exp));
                     }
 
@@ -722,6 +726,8 @@ impl<'a> OptimalPolicy<'a> {
                             let hash = bucket_hashes[r_idx];
                             let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
 
+                            let bucket_max_slack = if p_len <= 15 { 1 } else { (p_len - 2) as u32 };
+
                             if p_len <= 15 {
                                 let (q_val, is_exact) =
                                     Solver::quick_bucket_eval(self.matrix, self.dict, p);
@@ -742,6 +748,12 @@ impl<'a> OptimalPolicy<'a> {
 
                             if lb >= cost_to_beat {
                                 return None;
+                            }
+
+                            max_possible_slack =
+                                max_possible_slack.saturating_sub(bucket_max_slack);
+                            if lb + max_possible_slack < cost_to_beat {
+                                break;
                             }
                         }
 
