@@ -166,7 +166,7 @@ pub fn compute_max_branching_factor_seq_with_target(
 
     let mid = candidates.len() / 2;
 
-    for &g in &matrix.branching_guess_order {
+    for g in 0..matrix.num_guesses {
         let g_mask = matrix.guess_masks[g];
         let overlap = g_mask & c_mask;
         if overlap == 0 {

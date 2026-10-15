@@ -1444,7 +1444,6 @@ impl<'a> Solver<'a> {
             let mut counts = [0u16; 243];
             let mut non_empty_indices = [0u8; 243];
             let mut num_non_empty = 0;
-            let mut bucket_hashes = [0u64; 243];
 
             for &c in set {
                 let r = unsafe { g_row.get_unchecked(c).0 as usize };
@@ -1453,7 +1452,6 @@ impl<'a> Solver<'a> {
                     *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
                     num_non_empty += (*cnt == 0) as usize;
                     *cnt += 1;
-                    *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
                 }
             }
 
@@ -1511,6 +1509,14 @@ impl<'a> Solver<'a> {
             // Ties broken by response index for deterministic order.
             eval_indices[0..num_eval]
                 .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
+
+            let mut bucket_hashes = [0u64; 243];
+            for &c in set {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                unsafe {
+                    *bucket_hashes.get_unchecked_mut(r) ^= *self.matrix.zobrist.get_unchecked(c);
+                }
+            }
 
             // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
             // If cached bounds alone push cost >= beta or current_cost_so_far + cost >= current_global_beta,
