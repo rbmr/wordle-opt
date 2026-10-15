@@ -1045,8 +1045,12 @@ impl<'a> Solver<'a> {
             }
         }
 
+        let phase2_min_lb = heuristic::phase2_capacity_bound(c_len, parent_max_k, parent_max_k);
+        let phase2_effective_lb = local_lb.max(phase2_min_lb);
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if best_val > local_lb && self.current_cost_so_far + local_lb < current_global_beta {
+        if best_val > phase2_effective_lb
+            && self.current_cost_so_far + phase2_effective_lb < current_global_beta
+        {
             // Gather Phase 2 guesses: active guesses not in set
             let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
             for &c in set {
@@ -1180,6 +1184,8 @@ impl<'a> Solver<'a> {
                     }
                 }
             }
+        } else {
+            min_val_found = min_val_found.min(phase2_min_lb);
         }
 
         self.scratch_phase1_tuples[depth] = phase1_tuples;
