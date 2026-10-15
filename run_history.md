@@ -105,6 +105,10 @@ the commit that actually ran.
 | 2026-10-15 | `aae4000` | pc01 | 1600 | 1 | optimal | 40.992s | 5256 | 1681 | 240 | ~248MB | eliminate heap allocations and sorting in greedy_solve; pick time 39.8s; validation OK |
 | 2026-10-15 | `aae4000` | pc01 | 2000 | 1 | optimal | 81.116s (1.35m) | 6723 | 2119 | 6951 | ~285MB | eliminate heap allocations and sorting in greedy_solve; pick time 80.2s; validation OK |
 | 2026-10-15 | `aae4000` | pc01 | 2200 | 1 | optimal | 145.283s (2.42m) | 7477 | 2331 | 20452 | ~317MB | eliminate heap allocations and sorting in greedy_solve; new all-time best N=2200 pick time 142.6s; validation OK |
+| 2026-10-15 | `3265bc4` | pc01 | 1000 | 1 | optimal | 13.470s | 3124 | 1049 | — | — | avoid redundant memset and scans in greedy_solve; pick time 13.0s; validation OK |
+| 2026-10-15 | `3265bc4` | pc01 | 1600 | 1 | optimal | 41.065s | 5256 | 1681 | 240 | ~247MB | avoid redundant memset and scans in greedy_solve; pick time 39.9s; validation OK |
+| 2026-10-15 | `3265bc4` | pc01 | 2000 | 1 | optimal | 80.020s (1.33m) | 6723 | 2119 | 7265 | ~284MB | avoid redundant memset and scans in greedy_solve; new all-time best N=2000 (80.020s vs 80.781s); pick time 79.2s; validation OK |
+| 2026-10-15 | `3265bc4` | pc01 | 2200 | 1 | optimal | 145.901s (2.43m) | 7477 | 2331 | 20378 | ~316MB | avoid redundant memset and scans in greedy_solve; pick time 143.3s; validation OK |
 
 
 ## Notes
@@ -140,6 +144,7 @@ the commit that actually ran.
 - The `abb17ec` rows demonstrated that guarding branching factor computation in `min_guess_val` prevented tight capacity lower bounds from being inserted into `p_lbs` and cache, widening `child_beta` for sibling buckets in recursive Pass 3 and dramatically increasing explored states (e.g. 46.8k vs 22.2k at N=2200, regressing wall time from 146.181s to 205.528s). Guard reverted in subsequent commit.
 - The `1711125` rows confirm that reverting the guard in `min_guess_val` restored tight recursive child bounds (reducing N=2200 states from 46.8k back to 20.1k and runtime from 205.528s to 147.026s), while branchlessly counting responses and deferring Zobrist hash accumulation in root pre-filtering eliminated over 34 million unused XORs and lookups on discarded guesses.
 - The `aae4000` rows demonstrated that eliminating `active_tuples` heap vector allocations and full 14,855-element sorts in `greedy_solve`, along with single-pass counting sort candidate partitioning, produced a new all-time best N=2200 pick time of 142.6s (down to 145.283s overall build time).
+- The `3265bc4` rows demonstrated that avoiding full 486-byte memset of counts across all 14,855 guesses in `greedy_solve` by clearing only non-empty indices and bypassing candidate projections when `c_mask.count_ones() >= 26` achieved a new all-time best N=2000 build time of 80.020s (pick time 79.2s).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
