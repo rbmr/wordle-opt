@@ -89,6 +89,10 @@ the commit that actually ran.
 | 2026-10-15 | `f8575b3` | pc01 | 1600 | 1 | optimal | 40.431s | 5256 | 1681 | 240 | ~253MB | bypass equivalence projection for candidate sets >= 40; validation OK |
 | 2026-10-15 | `f8575b3` | pc01 | 2000 | 1 | optimal | 81.000s (1.35m) | 6723 | 2119 | 4636 | ~285MB | bypass equivalence projection for candidate sets >= 40; validation OK |
 | 2026-10-15 | `f8575b3` | pc01 | 2200 | 1 | optimal | 145.772s (2.43m) | 7477 | 2331 | 22224 | ~317MB | bypass equivalence projection for candidate sets >= 40; pick time 143.2s; validation OK |
+| 2026-10-15 | `25b2f10` | pc01 | 1000 | 1 | optimal | 13.491s | 3124 | 1049 | — | — | bypass redundant bucket partitioning and scans in root pre-filtering; validation OK |
+| 2026-10-15 | `25b2f10` | pc01 | 1600 | 1 | optimal | 40.775s | 5256 | 1681 | 240 | ~252MB | bypass redundant bucket partitioning and scans in root pre-filtering; pick time 39.6s; validation OK |
+| 2026-10-15 | `25b2f10` | pc01 | 2000 | 1 | optimal | 81.059s (1.35m) | 6723 | 2119 | 4636 | ~284MB | bypass redundant bucket partitioning and scans in root pre-filtering; pick time 80.1s; validation OK |
+| 2026-10-15 | `25b2f10` | pc01 | 2200 | 1 | optimal | 146.181s (2.44m) | 7477 | 2331 | 22224 | ~317MB | bypass redundant bucket partitioning and scans in root pre-filtering; pick time 143.5s; validation OK |
 
 
 ## Notes
