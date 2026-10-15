@@ -73,6 +73,10 @@ the commit that actually ran.
 | 2026-10-15 | `1643fe8` | pc01 | 1000 | 1 | optimal | 13.837s | 3124 | 1049 | — | — | cache-first root filter with thread-local scratch buffer; validation OK |
 | 2026-10-15 | `1643fe8` | pc01 | 1600 | 1 | optimal | 42.422s | 5256 | 1681 | 240 | ~254MB | cache-first root filter with thread-local scratch buffer; validation OK |
 | 2026-10-15 | `1643fe8` | pc01 | 2000 | 1 | optimal | 86.641s (1.44m) | 6723 | 2119 | 4636 | ~285MB | cache-first root filter with thread-local scratch buffer; validation OK |
+| 2026-10-15 | `70b2596` | pc01 | 1000 | 1 | optimal | 13.556s | 3124 | 1049 | — | — | dynamic global beta pruning in min_state_val; validation OK |
+| 2026-10-15 | `70b2596` | pc01 | 1600 | 1 | optimal | 42.253s | 5256 | 1681 | 240 | ~254MB | dynamic global beta pruning in min_state_val; validation OK |
+| 2026-10-15 | `70b2596` | pc01 | 2000 | 1 | optimal | 85.509s (1.43m) | 6723 | 2119 | 4636 | ~285MB | dynamic global beta pruning in min_state_val; validation OK |
+| 2026-10-15 | `70b2596` | pc01 | 2200 | 1 | optimal | 166.528s (2.78m) | 7477 | 2331 | 22224 | ~332MB | dynamic global beta pruning in min_state_val; 2.4s faster than 5d402a1 (166.528s vs 168.940s); validation OK |
 
 
 ## Notes
