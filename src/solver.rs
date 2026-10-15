@@ -781,7 +781,6 @@ impl<'a> Solver<'a> {
             let num_guesses = self.dict.guesses.len();
 
             let projs = &mut self.scratch_projs[depth];
-            projs.fill(0);
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
             let table_size = ((active_count + 243) * 2)
@@ -793,7 +792,21 @@ impl<'a> Solver<'a> {
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
+                let b_start = chunk_start / 64;
+                let b_end = chunk_end.div_ceil(64);
+                let mut has_active = false;
+                for b in b_start..b_end {
+                    if unsafe { *parent_active_guesses.get_unchecked(b) } != 0 {
+                        has_active = true;
+                        break;
+                    }
+                }
+                if !has_active {
+                    continue;
+                }
+
                 let projs_chunk = unsafe { projs.get_unchecked_mut(chunk_start..chunk_end) };
+                projs_chunk.fill(0);
                 for &c in set {
                     let c_off = c * num_guesses;
                     let z = unsafe { *self.matrix.zobrist.get_unchecked(c) };
