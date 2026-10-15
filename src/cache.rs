@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// merely forces a re-computation of a subtree rather than returning an invalid result.
 pub struct GlobalCache {
     entries: Vec<AtomicU64>,
+    mask: usize,
 }
 
 // Bit layout: [63..19] = hash45 (45 bits), [18] = is_exact, [17..0] = value (18 bits)
@@ -33,7 +34,8 @@ impl GlobalCache {
         );
         let mut entries = Vec::with_capacity(size * 2);
         entries.resize_with(size * 2, || AtomicU64::new(0));
-        Self { entries }
+        let mask = size - 1;
+        Self { entries, mask }
     }
 
     #[inline]
@@ -44,56 +46,60 @@ impl GlobalCache {
             value,
             VALUE_BITS
         );
-        let base_index = ((full_hash as usize) & ((self.entries.len() / 2) - 1)) * 2;
+        let base_index = (full_hash as usize & self.mask) << 1;
         let hash45 = full_hash >> HASH_SHIFT;
         let mut packed = (hash45 << HASH_SHIFT) | (value as u64 & VALUE_MASK);
         if is_exact {
             packed |= EXACT_BIT;
         }
 
-        let slot1_old = self.entries[base_index + 1].load(Ordering::Relaxed);
+        let slot1 = unsafe { self.entries.get_unchecked(base_index + 1) };
+        let slot1_old = slot1.load(Ordering::Relaxed);
 
         if slot1_old != 0 {
             let old_hash45 = slot1_old >> HASH_SHIFT;
             if old_hash45 == hash45 {
                 // Same state in slot 1: update if better (exact over lower bound, tighter lower bound)
+                if packed == slot1_old {
+                    return;
+                }
                 let old_exact = (slot1_old & EXACT_BIT) != 0;
                 let old_value = (slot1_old & VALUE_MASK) as u32;
                 if old_exact && !is_exact {
                     // Do nothing, old is exact and new is not
-                } else if !old_exact && !is_exact && value < old_value {
-                    // Do nothing, old lb is tighter
-                } else {
-                    self.entries[base_index + 1].store(packed, Ordering::Relaxed);
+                    return;
                 }
+                if !old_exact && !is_exact && value < old_value {
+                    // Do nothing, old lb is tighter
+                    return;
+                }
+                slot1.store(packed, Ordering::Relaxed);
                 return;
             } else {
                 // Different state in slot 1. Compare values to see if new one is deeper.
                 let old_value = (slot1_old & VALUE_MASK) as u32;
                 if value >= old_value {
                     // New one is harder/deeper, so it replaces slot 1.
-                    self.entries[base_index + 1].store(packed, Ordering::Relaxed);
-                    // The old slot 1 could theoretically be demoted to slot 0,
-                    // but it's simpler and thread-safer to just overwrite it and
-                    // let the new entry go to slot 1. The always-replace slot 0
-                    // is written below to keep latest.
-                    // Wait, we don't need to write to slot 0 if we replaced slot 1?
-                    // Let's just return.
+                    slot1.store(packed, Ordering::Relaxed);
                     return;
                 }
             }
         } else {
             // Slot 1 is empty, put it there
-            self.entries[base_index + 1].store(packed, Ordering::Relaxed);
+            slot1.store(packed, Ordering::Relaxed);
             return;
         }
 
         // If we reach here, slot 1 was occupied by a DIFFERENT state that is HARDER.
         // So we fallback to slot 0 (always-replace).
-        let slot0_old = self.entries[base_index].load(Ordering::Relaxed);
+        let slot0 = unsafe { self.entries.get_unchecked(base_index) };
+        let slot0_old = slot0.load(Ordering::Relaxed);
         if slot0_old != 0 {
             let old_hash45 = slot0_old >> HASH_SHIFT;
             if old_hash45 == hash45 {
+                if packed == slot0_old {
+                    return;
+                }
                 let old_exact = (slot0_old & EXACT_BIT) != 0;
                 let old_value = (slot0_old & VALUE_MASK) as u32;
                 if old_exact && !is_exact {
@@ -104,16 +110,16 @@ impl GlobalCache {
                 }
             }
         }
-        self.entries[base_index].store(packed, Ordering::Relaxed);
+        slot0.store(packed, Ordering::Relaxed);
     }
 
     #[inline]
     pub fn get(&self, full_hash: u64) -> Option<(u32, bool)> {
-        let base_index = ((full_hash as usize) & ((self.entries.len() / 2) - 1)) * 2;
+        let base_index = (full_hash as usize & self.mask) << 1;
         let hash45 = full_hash >> HASH_SHIFT;
 
         // Check slot 1 (depth-preferred) first, since harder subtrees are queried more often.
-        let packed1 = self.entries[base_index + 1].load(Ordering::Relaxed);
+        let packed1 = unsafe { self.entries.get_unchecked(base_index + 1) }.load(Ordering::Relaxed);
         if packed1 != 0 && (packed1 >> HASH_SHIFT) == hash45 {
             let is_exact = (packed1 & EXACT_BIT) != 0;
             let value = (packed1 & VALUE_MASK) as u32;
@@ -121,7 +127,7 @@ impl GlobalCache {
         }
 
         // Check slot 0 (always-replace)
-        let packed0 = self.entries[base_index].load(Ordering::Relaxed);
+        let packed0 = unsafe { self.entries.get_unchecked(base_index) }.load(Ordering::Relaxed);
         if packed0 != 0 && (packed0 >> HASH_SHIFT) == hash45 {
             let is_exact = (packed0 & EXACT_BIT) != 0;
             let value = (packed0 & VALUE_MASK) as u32;
