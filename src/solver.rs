@@ -1099,6 +1099,7 @@ impl<'a> Solver<'a> {
                     }
                 }
             } else {
+                let mut non_empty = [0u8; 243];
                 for &g in &phase1_guesses {
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
@@ -1107,26 +1108,28 @@ impl<'a> Solver<'a> {
                     for &c in set {
                         let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
                         unsafe {
-                            *counts.get_unchecked_mut(r) += 1;
+                            let cnt = counts.get_unchecked_mut(r);
+                            if *cnt == 0 {
+                                *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                                num_non_empty += 1;
+                            }
+                            *cnt += 1;
                         }
-                    }
-                    for r_idx in 0..242 {
-                        let count = counts[r_idx];
-                        if count > 0 {
-                            counts[r_idx] = 0;
-                            num_non_empty += 1;
-                            expected_rem += (count as u32) * (count as u32);
-                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                        }
-                    }
-                    if counts[242] > 0 {
-                        let count = counts[242];
-                        counts[242] = 0;
-                        num_non_empty += 1;
-                        expected_rem += (count as u32) * (count as u32);
                     }
                     if num_non_empty == 1 {
+                        unsafe {
+                            *counts.get_unchecked_mut(non_empty[0] as usize) = 0;
+                        }
                         continue;
+                    }
+                    for i in 0..num_non_empty {
+                        let r_idx = non_empty[i] as usize;
+                        let count = counts[r_idx];
+                        counts[r_idx] = 0;
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != crate::core::Response::WIN.0 as usize {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                        }
                     }
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
@@ -1306,6 +1309,7 @@ impl<'a> Solver<'a> {
                         }
                     }
                 } else {
+                    let mut non_empty = [0u8; 243];
                     for &g in &phase2_guesses {
                         let mut expected_rem = 0u32;
                         let mut lb_cost = c_len as u32;
@@ -1314,26 +1318,28 @@ impl<'a> Solver<'a> {
                         for &c in set {
                             let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
                             unsafe {
-                                *counts.get_unchecked_mut(r) += 1;
+                                let cnt = counts.get_unchecked_mut(r);
+                                if *cnt == 0 {
+                                    *non_empty.get_unchecked_mut(num_non_empty) = r as u8;
+                                    num_non_empty += 1;
+                                }
+                                *cnt += 1;
                             }
-                        }
-                        for r_idx in 0..242 {
-                            let count = counts[r_idx];
-                            if count > 0 {
-                                counts[r_idx] = 0;
-                                num_non_empty += 1;
-                                expected_rem += (count as u32) * (count as u32);
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
-                            }
-                        }
-                        if counts[242] > 0 {
-                            let count = counts[242];
-                            counts[242] = 0;
-                            num_non_empty += 1;
-                            expected_rem += (count as u32) * (count as u32);
                         }
                         if num_non_empty == 1 {
+                            unsafe {
+                                *counts.get_unchecked_mut(non_empty[0] as usize) = 0;
+                            }
                             continue;
+                        }
+                        for i in 0..num_non_empty {
+                            let r_idx = non_empty[i] as usize;
+                            let count = counts[r_idx];
+                            counts[r_idx] = 0;
+                            expected_rem += (count as u32) * (count as u32);
+                            if r_idx != crate::core::Response::WIN.0 as usize {
+                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                            }
                         }
                         if num_non_empty == 2
                             && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
