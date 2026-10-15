@@ -77,6 +77,10 @@ the commit that actually ran.
 | 2026-10-15 | `70b2596` | pc01 | 1600 | 1 | optimal | 42.253s | 5256 | 1681 | 240 | ~254MB | dynamic global beta pruning in min_state_val; validation OK |
 | 2026-10-15 | `70b2596` | pc01 | 2000 | 1 | optimal | 85.509s (1.43m) | 6723 | 2119 | 4636 | ~285MB | dynamic global beta pruning in min_state_val; validation OK |
 | 2026-10-15 | `70b2596` | pc01 | 2200 | 1 | optimal | 166.528s (2.78m) | 7477 | 2331 | 22224 | ~332MB | dynamic global beta pruning in min_state_val; 2.4s faster than 5d402a1 (166.528s vs 168.940s); validation OK |
+| 2026-10-15 | `a12d58f` | pc01 | 1000 | 1 | optimal | 13.875s | 3124 | 1049 | — | — | lazy bucket partitioning in min_guess_val; validation OK |
+| 2026-10-15 | `a12d58f` | pc01 | 1600 | 1 | optimal | 40.696s | 5256 | 1681 | 240 | ~253MB | lazy bucket partitioning in min_guess_val; 3.7% faster (40.696s vs 42.253s); validation OK |
+| 2026-10-15 | `a12d58f` | pc01 | 2000 | 1 | optimal | 81.437s (1.36m) | 6723 | 2119 | 4636 | ~285MB | lazy bucket partitioning in min_guess_val; 4.8% faster (81.437s vs 85.509s); validation OK |
+| 2026-10-15 | `a12d58f` | pc01 | 2200 | 1 | optimal | 145.709s (2.43m) | 7477 | 2331 | 22224 | ~320MB | lazy bucket partitioning in min_guess_val; 12.5% faster (145.709s vs 166.528s, 20.8s drop); validation OK |
 
 
 ## Notes
