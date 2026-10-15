@@ -1122,8 +1122,6 @@ impl<'a> Solver<'a> {
             }
             self.scratch_is_in_set[depth] = is_in_set;
 
-            phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
-
             let base_lb = self.capacity_bounds_2d[local_max_k][c_len];
             if base_lb > local_lb {
                 local_lb = base_lb;
@@ -1137,9 +1135,9 @@ impl<'a> Solver<'a> {
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if local_lb >= best_val || self.current_cost_so_far + local_lb >= current_global_beta {
-                // Done!
-            } else {
+            if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
+                phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+
                 for &(_g, _, g_lb, _non_empty) in &phase2_tuples {
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if self.current_cost_so_far + local_lb >= current_global_beta {
