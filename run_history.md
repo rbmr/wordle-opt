@@ -121,6 +121,10 @@ the commit that actually ran.
 | 2026-10-15 | `9f0c8eb` | pc01 | 1600 | 1 | optimal | 40.829s | 5256 | 1681 | 240 | ~248MB | instant O(1) bucket branching factor bound in Phase A; new all-time best N=1600 (40.829s vs 40.908s); pick time 39.7s; validation OK |
 | 2026-10-15 | `9f0c8eb` | pc01 | 2000 | 1 | optimal | 80.231s (1.34m) | 6723 | 2119 | 7187 | ~284MB | instant O(1) bucket branching factor bound in Phase A; pick time 79.4s; validation OK |
 | 2026-10-15 | `9f0c8eb` | pc01 | 2200 | 1 | optimal | 147.385s (2.46m) | 7477 | 2331 | 20098 | ~316MB | instant O(1) bucket branching factor bound in Phase A; pick time 144.8s; validation OK |
+| 2026-10-15 | `40bdff9` | pc01 | 1000 | 1 | optimal | 13.753s | 3124 | 1049 | — | — | optimize root pre-filter by tracking non-empty indices and fusing slack loop; pick time 13.3s; validation OK |
+| 2026-10-15 | `40bdff9` | pc01 | 1600 | 1 | optimal | 40.882s | 5256 | 1681 | 240 | ~247MB | optimize root pre-filter by tracking non-empty indices and fusing slack loop; pick time 39.7s; validation OK |
+| 2026-10-15 | `40bdff9` | pc01 | 2000 | 1 | optimal | 79.705s (1.33m) | 6723 | 2119 | 7416 | ~284MB | optimize root pre-filter by tracking non-empty indices and fusing slack loop; new all-time record N=2000 (79.705s vs 80.020s, pick time 78.8s); validation OK |
+| 2026-10-15 | `40bdff9` | pc01 | 2200 | 1 | optimal | 144.699s (2.41m) | 7477 | 2331 | 20540 | ~316MB | optimize root pre-filter by tracking non-empty indices and fusing slack loop; new all-time record N=2200 build time 144.699s and pick time 142.1s; validation OK |
 
 
 ## Notes
@@ -160,6 +164,7 @@ the commit that actually ran.
 - The `eff1f18` rows demonstrated that eliminating the fixed 242-iteration scans over `counts` in `min_state_val` (phase 1 and phase 2 CPU paths) using `non_empty_indices` to bound clearing and bound computation to `num_non_empty` entries produced a new all-time best N=2200 build time of 144.841s and pick time of 142.3s.
 - The `07f9b48` rows demonstrated that propagating tightened child branching factors down into child subtrees reduced explored states at N=2200 from 20.5k to 19.9k and improved N=1600 build time to 40.908s (pick time 39.8s), while sequential max_k computation on large root buckets in Phase A introduced minor parallel overhead.
 - The `9f0c8eb` rows demonstrated that using an instant O(1) `bucket_k` bound in Phase A eliminated the sequential branching factor computation overhead across large opener buckets, setting a new all-time best N=1600 build time of 40.829s (pick time 39.7s) and reducing N=2200 build time to 147.385s (pick time 144.8s).
+- The `40bdff9` rows demonstrated that tracking `non_empty_indices` branchlessly during candidate counting to evaluate initial capacity bounds strictly across non-empty buckets and fusing the uncached bucket slack check directly into the first cache pass set new all-time records for both N=2000 (79.705s build, 78.8s pick) and N=2200 (144.699s build, 142.1s pick).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
