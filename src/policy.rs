@@ -614,31 +614,35 @@ impl<'a> OptimalPolicy<'a> {
                     let orig_idx = i + 1;
                     let g_offset = g * self.matrix.num_candidates;
                     let mut counts = [0u16; 243];
-                    let mut bucket_hashes = [0u64; 243];
-                    let mut non_empty_indices = [0u8; 243];
-                    let mut num_non_empty = 0;
 
                     for &c in candidates {
                         let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
-                        if counts[r] == 0 {
-                            non_empty_indices[num_non_empty] = r as u8;
-                            num_non_empty += 1;
-                        }
                         counts[r] += 1;
-                        bucket_hashes[r] ^= self.matrix.zobrist[c];
                     }
 
                     // Fast capacity bound check first
                     let mut lb = candidates.len() as u32;
-                    for j in 0..num_non_empty {
-                        let r_idx = non_empty_indices[j] as usize;
-                        if r_idx != crate::core::Response::WIN.0 as usize {
-                            lb += self.capacity_bounds_2d[self.max_k][counts[r_idx] as usize];
+                    let mut non_empty_indices = [0u8; 243];
+                    let mut num_non_empty = 0;
+                    for r in 0..243 {
+                        let cnt = counts[r] as usize;
+                        if cnt > 0 {
+                            non_empty_indices[num_non_empty] = r as u8;
+                            num_non_empty += 1;
+                            if r != crate::core::Response::WIN.0 as usize {
+                                lb += self.capacity_bounds_2d[self.max_k][cnt];
+                            }
                         }
                     }
 
                     if lb >= cost_to_beat {
                         return None;
+                    }
+
+                    let mut bucket_hashes = [0u64; 243];
+                    for &c in candidates {
+                        let r = unsafe { self.matrix.data.get_unchecked(g_offset + c).0 as usize };
+                        bucket_hashes[r] ^= self.matrix.zobrist[c];
                     }
 
                     // Sort non-empty buckets descending by size so largest buckets are evaluated first.

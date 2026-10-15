@@ -1728,9 +1728,7 @@ impl<'a> Solver<'a> {
                         exact_vals[r_idx] = used_val;
                     }
                     self.cache.insert(hash, used_val, is_exact);
-                } else if cost + (p_len - 2) as u32 >= beta
-                    || self.current_cost_so_far + cost + (p_len - 2) as u32 >= current_global_beta
-                {
+                } else {
                     let k = crate::heuristic::compute_max_branching_factor_seq(self.matrix, p);
                     let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                     let lb = p_lbs[r_idx];
