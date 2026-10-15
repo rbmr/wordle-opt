@@ -833,17 +833,13 @@ impl<'a> Solver<'a> {
                 }
                 useless_projs[r] = p;
             }
-            let table_ptr = table.as_mut_ptr();
-            let projs_ptr = projs.as_ptr();
-
-            for &proj in useless_projs.iter() {
+            for r in 0..243 {
+                let proj = useless_projs[r];
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
-                    let slot = unsafe { *table_ptr.add(idx) };
+                    let slot = table[idx];
                     if slot == 0 {
-                        unsafe {
-                            *table_ptr.add(idx) = proj;
-                        }
+                        table[idx] = proj;
                         added_indices.push(idx);
                         break;
                     }
@@ -861,16 +857,16 @@ impl<'a> Solver<'a> {
                         if g >= num_guesses {
                             break;
                         }
-                        let mut proj = unsafe { *projs_ptr.add(g) };
+                        let mut proj = unsafe { *projs.get_unchecked(g) };
                         if proj == 0 {
                             proj = 1;
                         }
                         let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                         loop {
-                            let slot = unsafe { *table_ptr.add(idx) };
+                            let slot = table[idx];
                             if slot == 0 {
+                                table[idx] = proj;
                                 unsafe {
-                                    *table_ptr.add(idx) = proj;
                                     *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
                                 }
                                 added_indices.push(idx);
@@ -887,18 +883,16 @@ impl<'a> Solver<'a> {
                     while b != 0 {
                         let tz = b.trailing_zeros();
                         let g = block_idx * 64 + tz as usize;
-                        let mut proj = unsafe { *projs_ptr.add(g) };
+                        let mut proj = unsafe { *projs.get_unchecked(g) };
                         if proj == 0 {
                             proj = 1;
                         }
                         let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                         loop {
-                            let slot = unsafe { *table_ptr.add(idx) };
+                            let slot = table[idx];
                             if slot == 0 {
-                                unsafe {
-                                    *table_ptr.add(idx) = proj;
-                                    *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
-                                }
+                                table[idx] = proj;
+                                active_bits_scratch[block_idx] |= 1 << tz;
                                 added_indices.push(idx);
                                 break;
                             }
@@ -913,9 +907,7 @@ impl<'a> Solver<'a> {
             }
 
             for &idx in added_indices.iter() {
-                unsafe {
-                    *table_ptr.add(idx) = 0;
-                }
+                table[idx] = 0;
             }
 
             let rc_new = if should_cache_equiv {
@@ -992,7 +984,7 @@ impl<'a> Solver<'a> {
 
         for &cand in set {
             let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(cand) };
-            if (unsafe { *active_guesses_slice.get_unchecked(g / 64) } & (1 << (g % 64))) == 0 {
+            if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
                 continue;
             }
             let mut num_non_empty = 0;
@@ -1092,8 +1084,7 @@ impl<'a> Solver<'a> {
                 if block == 0 {
                     continue;
                 }
-                let in_set_bits = unsafe { *is_in_set.get_unchecked(block_idx) };
-                let mut b = block & !in_set_bits;
+                let mut b = block & !is_in_set[block_idx];
                 while b != 0 {
                     let tz = b.trailing_zeros();
                     let g = block_idx * 64 + tz as usize;
@@ -1150,10 +1141,8 @@ impl<'a> Solver<'a> {
                 }
             }
             for &c in set {
-                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
-                unsafe {
-                    *is_in_set.get_unchecked_mut(g / 64) = 0;
-                }
+                let g = self.dict.candidate_to_guess[c];
+                is_in_set[g / 64] = 0;
             }
             self.scratch_is_in_set[depth] = is_in_set;
 
