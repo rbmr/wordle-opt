@@ -602,7 +602,7 @@ impl<'a> OptimalPolicy<'a> {
                 non_empty_indices[num_non_empty] = r_idx as u8;
                 num_non_empty += (counts[r_idx] == 0) as usize;
                 counts[r_idx] += 1;
-                bucket_hashes[r_idx] ^= self.matrix.zobrist[c];
+                bucket_hashes[r_idx] ^= unsafe { *self.matrix.zobrist.get_unchecked(c) };
             }
 
             let mut offsets = [0usize; 244];
@@ -855,8 +855,16 @@ impl<'a> OptimalPolicy<'a> {
                             break;
                         };
 
-                        let current_best_val = global_beta.load(Ordering::Relaxed);
-                        if lb >= current_best_val {
+                        let best_packed = global_best.load(Ordering::Relaxed);
+                        let best_val = (best_packed >> 32) as u32;
+                        let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                        let guess_beta = if orig_idx < best_idx {
+                            best_val + 1
+                        } else {
+                            best_val
+                        };
+
+                        if lb >= guess_beta {
                             continue;
                         }
 
@@ -864,7 +872,7 @@ impl<'a> OptimalPolicy<'a> {
                             candidates,
                             self.all_guesses_bits,
                             g,
-                            current_best_val,
+                            guess_beta,
                             1,
                             self.max_k,
                         );
@@ -872,11 +880,13 @@ impl<'a> OptimalPolicy<'a> {
                             .root_guesses_done
                             .fetch_add(1, Ordering::Relaxed);
 
-                        let packed = ((v as u64) << 32) | (orig_idx as u64);
-                        let old = global_best.fetch_min(packed, Ordering::Relaxed);
-                        let old_val = (old >> 32) as u32;
-                        if v < old_val {
-                            global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                        if v < guess_beta {
+                            let packed = ((v as u64) << 32) | (orig_idx as u64);
+                            let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                            let old_val = (old >> 32) as u32;
+                            if v < old_val {
+                                global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                            }
                         }
                     }
                 });
@@ -970,13 +980,20 @@ impl<'a> OptimalPolicy<'a> {
                         break;
                     };
 
-                    let current_best_val = global_beta.load(Ordering::Relaxed);
+                    let best_packed = global_best.load(Ordering::Relaxed);
+                    let best_val = (best_packed >> 32) as u32;
+                    let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                    let guess_beta = if idx < best_idx {
+                        best_val + 1
+                    } else {
+                        best_val
+                    };
 
                     let v = solver.min_guess_val(
                         candidates,
                         self.all_guesses_bits,
                         g,
-                        current_best_val,
+                        guess_beta,
                         1,
                         self.max_k,
                     );
@@ -984,11 +1001,13 @@ impl<'a> OptimalPolicy<'a> {
                         .root_guesses_done
                         .fetch_add(1, Ordering::Relaxed);
 
-                    let packed = ((v as u64) << 32) | (idx as u64);
-                    let old = global_best.fetch_min(packed, Ordering::Relaxed);
-                    let old_val = (old >> 32) as u32;
-                    if v < old_val {
-                        global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                    if v < guess_beta {
+                        let packed = ((v as u64) << 32) | (idx as u64);
+                        let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                        let old_val = (old >> 32) as u32;
+                        if v < old_val {
+                            global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                        }
                     }
                 }
             });
