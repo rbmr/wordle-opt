@@ -588,15 +588,20 @@ impl<'a> OptimalPolicy<'a> {
             let g_ptr = unsafe { matrix_data_ptr.add(first_g * self.matrix.num_candidates) };
             for &c in candidates {
                 let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
-                non_empty_indices[num_non_empty] = r_idx as u8;
-                num_non_empty += (counts[r_idx] == 0) as usize;
-                counts[r_idx] += 1;
-                bucket_hashes[r_idx] ^= unsafe { *zobrist_ptr.add(c) };
+                unsafe {
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r_idx as u8;
+                    num_non_empty += (*counts.get_unchecked(r_idx) == 0) as usize;
+                    *counts.get_unchecked_mut(r_idx) += 1;
+                    *bucket_hashes.get_unchecked_mut(r_idx) ^= *zobrist_ptr.add(c);
+                }
             }
 
             let mut offsets = [0usize; 244];
             for r_idx in 0..243 {
-                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+                unsafe {
+                    *offsets.get_unchecked_mut(r_idx + 1) =
+                        *offsets.get_unchecked(r_idx) + *counts.get_unchecked(r_idx) as usize;
+                }
             }
             let mut sorted_set = vec![0usize; candidates.len()];
             let mut current_offsets = offsets;
@@ -612,8 +617,8 @@ impl<'a> OptimalPolicy<'a> {
             let mut bucket_tasks = Vec::new();
             let mut base_cost = candidates.len() as u32;
             for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
+                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
                 if r_idx == crate::core::Response::WIN.0 as usize {
                     continue;
                 }
@@ -621,12 +626,12 @@ impl<'a> OptimalPolicy<'a> {
                     base_cost += unsafe { *cap_bounds_ptr.add(p_len) };
                     continue;
                 }
-                let hash = bucket_hashes[r_idx];
+                let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
                 if let Some((cached_val, true)) = self.cache.get(hash) {
                     base_cost += cached_val;
                     continue;
                 }
-                let start = offsets[r_idx];
+                let start = unsafe { *offsets.get_unchecked(r_idx) };
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
                 bucket_tasks.push((p.to_vec(), hash));
@@ -704,10 +709,12 @@ impl<'a> OptimalPolicy<'a> {
 
                     for &c in candidates {
                         let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                        non_empty_indices[num_non_empty] = r as u8;
-                        num_non_empty += (counts[r] == 0) as usize;
-                        counts[r] += 1;
-                        bucket_hashes[r] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                            num_non_empty += (*counts.get_unchecked(r) == 0) as usize;
+                            *counts.get_unchecked_mut(r) += 1;
+                            *bucket_hashes.get_unchecked_mut(r) ^= *zobrist_ptr.add(c);
+                        }
                     }
 
                     let mut max_p_len = 0;
@@ -715,14 +722,16 @@ impl<'a> OptimalPolicy<'a> {
                     let mut num_eval = 0;
 
                     for j in 0..num_non_empty {
-                        let r = non_empty_indices[j] as usize;
+                        let r = unsafe { *non_empty_indices.get_unchecked(j) as usize };
                         if r != crate::core::Response::WIN.0 as usize {
-                            let p_len = counts[r] as usize;
+                            let p_len = unsafe { *counts.get_unchecked(r) as usize };
                             if p_len > max_p_len {
                                 max_p_len = p_len;
                             }
                             if p_len > 2 {
-                                eval_indices[num_eval] = r as u8;
+                                unsafe {
+                                    *eval_indices.get_unchecked_mut(num_eval) = r as u8;
+                                }
                                 num_eval += 1;
                             }
                         }
@@ -736,11 +745,12 @@ impl<'a> OptimalPolicy<'a> {
 
                     // Sort only non-trivial buckets (size > 2) descending by size so largest buckets are evaluated first.
                     // Large buckets contribute the largest bound tightening, triggering early cutoff.
-                    eval_indices[0..num_eval]
-                        .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
+                    eval_indices[0..num_eval].sort_unstable_by_key(|&r| {
+                        std::cmp::Reverse(unsafe { *counts.get_unchecked(r as usize) })
+                    });
 
-                    let split_idx =
-                        eval_indices[0..num_eval].partition_point(|&r| counts[r as usize] > 15);
+                    let split_idx = eval_indices[0..num_eval]
+                        .partition_point(|&r| unsafe { *counts.get_unchecked(r as usize) > 15 });
 
                     // First pass: check cached bounds descending by bucket size without partitioning.
                     // Fused with uncached slack calculation to eliminate a redundant second pass over non-empty indices.
@@ -772,8 +782,10 @@ impl<'a> OptimalPolicy<'a> {
                     // Second pass: only partition into thread-local scratch buffer if uncached buckets need evaluation.
                     let mut offsets = [0usize; 244];
                     for r_idx in 0..243 {
-                        offsets[r_idx + 1] =
-                            offsets[r_idx] + unsafe { *counts.get_unchecked(r_idx) as usize };
+                        unsafe {
+                            *offsets.get_unchecked_mut(r_idx + 1) = *offsets.get_unchecked(r_idx)
+                                + *counts.get_unchecked(r_idx) as usize;
+                        }
                     }
 
                     SCRATCH_SORTED_SET.with(|cell| {
