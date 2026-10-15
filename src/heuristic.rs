@@ -165,6 +165,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     }
 
     let mid = candidates.len() / 2;
+    let rem_after_mid = candidates.len() - mid;
 
     for g in 0..matrix.num_guesses {
         let g_mask = matrix.guess_masks[g];
@@ -201,20 +202,27 @@ pub fn compute_max_branching_factor_seq_with_target(
                 .get_unchecked(g_offset..g_offset + matrix.num_candidates)
         };
         let mut mask = [0u64; 4];
-        for &c in &candidates[..mid] {
-            let r = unsafe { g_row.get_unchecked(c).0 as usize };
-            mask[r >> 6] |= 1u64 << (r & 63);
-        }
-        let half_unique = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
-        if half_unique + (candidates.len() - mid) <= max_k {
-            continue;
-        }
-        for &c in &candidates[mid..] {
-            let r = unsafe { g_row.get_unchecked(c).0 as usize };
-            mask[r >> 6] |= 1u64 << (r & 63);
+        if max_k > rem_after_mid {
+            for &c in &candidates[..mid] {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                mask[r >> 6] |= 1u64 << (r & 63);
+            }
+            let half_unique = (mask[0].count_ones()
+                + mask[1].count_ones()
+                + mask[2].count_ones()
+                + mask[3].count_ones()) as usize;
+            if half_unique + rem_after_mid <= max_k {
+                continue;
+            }
+            for &c in &candidates[mid..] {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                mask[r >> 6] |= 1u64 << (r & 63);
+            }
+        } else {
+            for &c in candidates {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                mask[r >> 6] |= 1u64 << (r & 63);
+            }
         }
         let k = (mask[0].count_ones()
             + mask[1].count_ones()
