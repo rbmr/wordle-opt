@@ -693,6 +693,13 @@ impl<'a> OptimalPolicy<'a> {
             let global_beta = AtomicU32::new(first_guess_cost + 1);
             let global_best = AtomicU64::new((first_guess_cost as u64) << 32);
 
+            let filtered_active: Vec<(usize, usize, u32)> = active[1..]
+                .iter()
+                .enumerate()
+                .filter(|&(_, &(_, _, base_lb))| base_lb < first_guess_cost)
+                .map(|(i, &(g, _, base_lb))| (i + 1, g, base_lb))
+                .collect();
+
             let next = AtomicUsize::new(0);
             (0..rayon::current_num_threads())
                 .into_par_iter()
@@ -711,10 +718,9 @@ impl<'a> OptimalPolicy<'a> {
 
                     loop {
                         let i = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(&(g, _, base_lb)) = active[1..].get(i) else {
+                        let Some(&(orig_idx, g, base_lb)) = filtered_active.get(i) else {
                             break;
                         };
-                        let orig_idx = i + 1;
 
                         let best_packed = global_best.load(Ordering::Relaxed);
                         let best_val = (best_packed >> 32) as u32;
@@ -780,12 +786,20 @@ impl<'a> OptimalPolicy<'a> {
             );
             let mut best_val = initial_best_val;
             let mut best_guess = usize::MAX;
-            for &(g, _, _) in &active {
+            for &(g, _, base_lb) in &active {
+                let guess_beta = if best_guess == usize::MAX {
+                    best_val + 1
+                } else {
+                    best_val
+                };
+                if base_lb >= guess_beta {
+                    continue;
+                }
                 let v = solver.min_guess_val(
                     candidates,
                     self.all_guesses_bits,
                     g,
-                    best_val + 1,
+                    guess_beta,
                     1,
                     self.max_k,
                 );
@@ -837,7 +851,7 @@ impl<'a> OptimalPolicy<'a> {
 
                 loop {
                     let idx = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(g, _, _)) = active.get(idx) else {
+                    let Some(&(g, _, base_lb)) = active.get(idx) else {
                         break;
                     };
 
@@ -849,6 +863,10 @@ impl<'a> OptimalPolicy<'a> {
                     } else {
                         best_val
                     };
+
+                    if base_lb >= guess_beta {
+                        continue;
+                    }
 
                     let v = solver.min_guess_val(
                         candidates,
