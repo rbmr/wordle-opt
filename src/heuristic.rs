@@ -60,26 +60,18 @@ pub fn compute_max_branching_factor(
         .unwrap_or(0)
 }
 
-/// Sequential version of `compute_max_branching_factor` with early stopping,
-/// suitable for execution inside worker threads without thread contention.
-pub fn compute_max_branching_factor_seq(
+/// Computes the maximum branching factor achievable among candidate words only.
+/// Early exits if `target_k` is reached.
+pub fn compute_candidate_branching_factor_with_target(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
+    target_k: usize,
 ) -> usize {
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let mut c_mask = 0u32;
-    for &c in candidates {
-        c_mask |= matrix.candidate_masks[c];
-    }
-
+    let effective_target = target_k.min(candidates.len()).min(243);
     let mut max_k = 0;
-    let target_k = candidates.len().min(243);
-
-    // Fast pass: evaluate actual candidate words first via candidate_to_guess mapping.
-    // Candidates contain letter combinations specifically tailored to this subset,
-    // quickly raising max_k and triggering early exit.
     for &c in candidates {
         let g = matrix.candidate_to_guess[c];
         let g_offset = g * matrix.num_candidates;
@@ -99,18 +91,81 @@ pub fn compute_max_branching_factor_seq(
             + mask[3].count_ones()) as usize;
         if k > max_k {
             max_k = k;
-            if max_k >= target_k {
+            if max_k >= effective_target {
                 return max_k;
             }
         }
     }
+    max_k
+}
+
+/// Computes the maximum branching factor achievable among candidate words only.
+pub fn compute_candidate_branching_factor(
+    matrix: &crate::matrix::ResponseMatrix,
+    candidates: &[usize],
+) -> usize {
+    compute_candidate_branching_factor_with_target(matrix, candidates, candidates.len().min(243))
+}
+
+/// Finds the smallest branching factor `k` in 2..=n.min(243) such that
+/// `tight_capacity_bound(n, k, max_k) <= target_bound`.
+/// If no such `k` exists (even for k = n.min(243)), returns `n.min(243) + 1`.
+pub fn min_k_for_target_bound(n: usize, max_k: usize, target_bound: u32) -> usize {
+    let max_possible_k = n.min(max_k).min(243);
+    let cap_lb = capacity_bound(n, max_k);
+    if target_bound < cap_lb {
+        return max_possible_k + 1;
+    }
+    if tight_capacity_bound(n, 2, max_k) <= target_bound {
+        return 2;
+    }
+    if tight_capacity_bound(n, max_possible_k, max_k) > target_bound {
+        return max_possible_k + 1;
+    }
+    let mut low = 2;
+    let mut high = max_possible_k;
+    while low + 1 < high {
+        let mid = (low + high) / 2;
+        if tight_capacity_bound(n, mid, max_k) <= target_bound {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+    high
+}
+
+/// Sequential version of `compute_max_branching_factor` with early stopping and target_k.
+pub fn compute_max_branching_factor_seq_with_target(
+    matrix: &crate::matrix::ResponseMatrix,
+    candidates: &[usize],
+    initial_max_k: usize,
+    target_k: usize,
+) -> usize {
+    if candidates.len() <= 2 {
+        return candidates.len();
+    }
+    let effective_target = target_k.min(candidates.len()).min(243);
+    let mut max_k = initial_max_k;
+    if max_k >= effective_target {
+        return max_k;
+    }
+
+    if max_k == 0 {
+        max_k =
+            compute_candidate_branching_factor_with_target(matrix, candidates, effective_target);
+        if max_k >= effective_target {
+            return max_k;
+        }
+    }
+
+    let mut c_mask = 0u32;
+    for &c in candidates {
+        c_mask |= matrix.candidate_masks[c];
+    }
 
     let mid = candidates.len() / 2;
 
-    // Main scan: skip words with zero overlap (which generate only 1 response).
-    // For any word, each non-overlapping letter is guaranteed constant-black across all candidates,
-    // so at least non_overlap positions are constant-black. With 3 response states per varying position,
-    // the word can generate at most 3^(5 - non_overlap) distinct response patterns.
     for g in 0..matrix.num_guesses {
         let g_mask = matrix.guess_masks[g];
         let overlap = g_mask & c_mask;
@@ -156,12 +211,21 @@ pub fn compute_max_branching_factor_seq(
             + mask[3].count_ones()) as usize;
         if k > max_k {
             max_k = k;
-            if max_k >= target_k {
+            if max_k >= effective_target {
                 break;
             }
         }
     }
     max_k
+}
+
+/// Sequential version of `compute_max_branching_factor` with early stopping,
+/// suitable for execution inside worker threads without thread contention.
+pub fn compute_max_branching_factor_seq(
+    matrix: &crate::matrix::ResponseMatrix,
+    candidates: &[usize],
+) -> usize {
+    compute_max_branching_factor_seq_with_target(matrix, candidates, 0, candidates.len().min(243))
 }
 
 /// Computes the absolute minimum total cost to solve a subset of size `n`
@@ -386,5 +450,76 @@ mod phase2_capacity_bounds_tests {
     #[test]
     fn test_phase2_zero_candidates() {
         assert_eq!(phase2_capacity_bound(0, 3, 3), 0);
+    }
+}
+
+#[cfg(test)]
+mod target_bound_tests {
+    use super::*;
+
+    #[test]
+    fn test_tight_capacity_bound_monotonicity() {
+        for n in 3..50 {
+            for max_k in 5..50 {
+                let limit = n.min(243);
+                for k in 2..limit {
+                    let cost_k = tight_capacity_bound(n, k, max_k);
+                    let cost_k_plus_1 = tight_capacity_bound(n, k + 1, max_k);
+                    assert!(
+                        cost_k_plus_1 <= cost_k,
+                        "Monotonicity violated for n={}, max_k={}: k={} gives {}, k+1={} gives {}",
+                        n,
+                        max_k,
+                        k,
+                        cost_k,
+                        k + 1,
+                        cost_k_plus_1
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_min_k_for_target_bound_correctness() {
+        for n in 3..40 {
+            for max_k in 10..40 {
+                let cap_lb = capacity_bound(n, max_k);
+                let max_bound = tight_capacity_bound(n, 2, max_k) + 3;
+                for target_bound in cap_lb.saturating_sub(2)..max_bound {
+                    let min_k = min_k_for_target_bound(n, max_k, target_bound);
+                    let limit = n.min(max_k).min(243);
+                    if min_k <= limit {
+                        assert!(
+                            tight_capacity_bound(n, min_k, max_k) <= target_bound,
+                            "min_k={} should satisfy target_bound={} for n={}, max_k={}",
+                            min_k,
+                            target_bound,
+                            n,
+                            max_k
+                        );
+                        if min_k > 2 {
+                            assert!(
+                                tight_capacity_bound(n, min_k - 1, max_k) > target_bound,
+                                "min_k - 1 = {} should exceed target_bound={} for n={}, max_k={}",
+                                min_k - 1,
+                                target_bound,
+                                n,
+                                max_k
+                            );
+                        }
+                    } else {
+                        for k in 2..=limit {
+                            assert!(
+                                tight_capacity_bound(n, k, max_k) > target_bound,
+                                "If min_k > limit, no k should satisfy target_bound: k={} gave {}",
+                                k,
+                                tight_capacity_bound(n, k, max_k)
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }

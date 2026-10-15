@@ -728,6 +728,8 @@ impl<'a> OptimalPolicy<'a> {
                             let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
 
                             let bucket_max_slack = if p_len <= 15 { 1 } else { (p_len - 2) as u32 };
+                            let remaining_slack =
+                                max_possible_slack.saturating_sub(bucket_max_slack);
 
                             if p_len <= 15 {
                                 let (q_val, is_exact) =
@@ -736,10 +738,38 @@ impl<'a> OptimalPolicy<'a> {
                                 lb += used_val - cap_lb;
                                 self.cache.insert(hash, used_val, is_exact);
                             } else {
-                                let k = crate::heuristic::compute_max_branching_factor_seq(
+                                let required_slack =
+                                    cost_to_beat.saturating_sub(lb + remaining_slack);
+                                let target_k = if required_slack > 0 {
+                                    let target_bound = cap_lb.saturating_add(required_slack - 1);
+                                    crate::heuristic::min_k_for_target_bound(
+                                        p_len,
+                                        self.max_k,
+                                        target_bound,
+                                    )
+                                } else {
+                                    p_len.min(243) + 1
+                                };
+
+                                let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
                                     self.matrix,
                                     p,
+                                    target_k,
                                 );
+                                if k_cand >= target_k {
+                                    break;
+                                }
+
+                                let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
+                                    self.matrix,
+                                    p,
+                                    k_cand,
+                                    target_k,
+                                );
+                                if k >= target_k {
+                                    break;
+                                }
+
                                 let tight_lb =
                                     crate::heuristic::tight_capacity_bound(p_len, k, self.max_k);
                                 let used_val = tight_lb.max(cap_lb);
@@ -751,8 +781,7 @@ impl<'a> OptimalPolicy<'a> {
                                 return None;
                             }
 
-                            max_possible_slack =
-                                max_possible_slack.saturating_sub(bucket_max_slack);
+                            max_possible_slack = remaining_slack;
                             if lb + max_possible_slack < cost_to_beat {
                                 break;
                             }
