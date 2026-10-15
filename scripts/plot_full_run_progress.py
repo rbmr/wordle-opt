@@ -100,7 +100,6 @@ def main():
         sys.exit("no runs with progress data found in %s" % args.logs)
 
     fig, ax = plt.subplots(figsize=(11.5, 6.8))
-    series = []
     for commit, points, wall, name in runs:
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
@@ -111,7 +110,6 @@ def main():
             detail.append(human(wall))
         detail.append("%d root guesses" % ys[-1])
         label += " (%s)" % ", ".join(detail)
-        series.append((label, xs, ys))
         # A curve if there is one to draw, otherwise visible points.
         if len(points) >= 2:
             line, = ax.plot(xs, ys, marker="o", markersize=4, linewidth=1.8,
@@ -133,21 +131,6 @@ def main():
                  fontsize=12)
     ax.grid(True, which="both", alpha=0.25)
     ax.legend(loc="upper left", fontsize=8.5)
-
-    # The modern runs finish inside the first few minutes, where the main axes
-    # squash them into the origin. Zoom that region so they can be compared.
-    zoom = ax.inset_axes([0.55, 0.06, 0.42, 0.32])
-    for label, xs, ys in series:
-        keep = [(x, y) for x, y in zip(xs, ys) if x <= 320]
-        if keep:
-            zoom.plot([p[0] for p in keep], [p[1] for p in keep], marker="o",
-                      markersize=4, linewidth=1.6, label=label.split(" (")[0])
-    zoom.set_xlim(0, 320)
-    zoom.set_ylim(0, max(1, max((y for _, xs, ys in series
-                                 for x, y in zip(xs, ys) if x <= 320), default=1) * 1.15))
-    zoom.set_title("first 320 s", fontsize=8)
-    zoom.tick_params(labelsize=7)
-    zoom.grid(True, alpha=0.25)
 
     fig.tight_layout()
     fig.savefig(args.out, dpi=140)
