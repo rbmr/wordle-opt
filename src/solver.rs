@@ -206,42 +206,62 @@ impl<'a> Solver<'a> {
         let mut best_guess = usize::MAX;
         let mut min_expected_rem = u32::MAX;
 
-        let mut seen_projections = rustc_hash::FxHashSet::default();
+        let mut counts = [0u16; 243];
+        let mut non_empty_indices = [0u8; 243];
+
+        let skip_projections = c_mask.count_ones() >= 26;
+        let mut seen_projections = if skip_projections {
+            rustc_hash::FxHashSet::default()
+        } else {
+            rustc_hash::FxHashSet::with_capacity_and_hasher(
+                dict.guesses.len().min(4096),
+                Default::default(),
+            )
+        };
+
         for g in 0..dict.guesses.len() {
-            let chars = &dict.guess_chars[g];
-            let mut proj = 0u32;
-            let l0 = chars[0] as u32;
-            proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-            let l1 = chars[1] as u32;
-            proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-            let l2 = chars[2] as u32;
-            proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-            let l3 = chars[3] as u32;
-            proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-            let l4 = chars[4] as u32;
-            proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-            if !seen_projections.insert(proj) {
-                continue;
+            if !skip_projections {
+                let chars = &dict.guess_chars[g];
+                let mut proj = 0u32;
+                let l0 = chars[0] as u32;
+                proj |= (l0 + 1) * ((c_mask >> l0) & 1);
+                let l1 = chars[1] as u32;
+                proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
+                let l2 = chars[2] as u32;
+                proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
+                let l3 = chars[3] as u32;
+                proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
+                let l4 = chars[4] as u32;
+                proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
+                if !seen_projections.insert(proj) {
+                    continue;
+                }
             }
 
             let g_offset = g * matrix.num_candidates;
-            let mut counts = [0u16; 243];
             let mut num_non_empty = 0;
             for &c in set {
                 let r = unsafe { matrix.data.get_unchecked(g_offset + c).0 as usize };
                 if counts[r] == 0 {
+                    non_empty_indices[num_non_empty] = r as u8;
                     num_non_empty += 1;
                 }
                 counts[r] += 1;
             }
 
             if num_non_empty <= 1 {
+                for i in 0..num_non_empty {
+                    counts[non_empty_indices[i] as usize] = 0;
+                }
                 continue;
             }
 
             let mut expected_rem = 0u32;
-            for &count in &counts {
-                expected_rem += (count as u32) * (count as u32);
+            for i in 0..num_non_empty {
+                let r = non_empty_indices[i] as usize;
+                let count = counts[r] as u32;
+                expected_rem += count * count;
+                counts[r] = 0;
             }
             if expected_rem < min_expected_rem {
                 min_expected_rem = expected_rem;
