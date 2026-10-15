@@ -161,6 +161,10 @@ the commit that actually ran.
 | 2026-10-15 | `cf283ed` | pc01 | 1000 | 1 | optimal | 6.005s | 3124 | 1049 | — | ~163MB | Head-to-head CPU-only build (`WORDLE_OPT_DISABLE_CUDA=1`); CPU 2.3% faster, 40% less memory; pick time 5.8s; validation OK |
 | 2026-10-15 | `cf283ed` | pc01 | 1600 | 1 | optimal | 27.258s | 5256 | 1681 | 240 | ~269MB | Head-to-head CUDA-enabled build; pick time 26.6s; validation OK |
 | 2026-10-15 | `cf283ed` | pc01 | 1600 | 1 | optimal | 27.933s | 5256 | 1681 | 240 | ~163MB | Head-to-head CPU-only build (`WORDLE_OPT_DISABLE_CUDA=1`); difference negligible (2.4%, ~0.67s), 40% less memory; pick time 27.5s; validation OK |
+| 2026-10-15 | `2fbed58` | pc01 | 1000 | 1 | optimal | 5.878s | 3124 | 1049 | — | — | fast-path exact p_len <= 2 buckets and revert slack bypass; new all-time record N=1000 (<5.9s, pick 5.6s); validation OK |
+| 2026-10-15 | `2fbed58` | pc01 | 1600 | 1 | optimal | 26.606s | 5256 | 1681 | — | ~161MB | fast-path exact p_len <= 2 buckets and revert slack bypass; pick time 26.2s; validation OK |
+| 2026-10-15 | `2fbed58` | pc01 | 2000 | 1 | optimal | 55.944s | 6723 | 2119 | 8117 | ~177MB | fast-path exact p_len <= 2 buckets and revert slack bypass; pick time 55.5s; validation OK |
+| 2026-10-15 | `2fbed58` | pc01 | 2200 | 1 | optimal | 112.365s (1.87m) | 7477 | 2331 | 25185 | ~213MB | fast-path exact p_len <= 2 buckets and revert slack bypass; pick time 111.4s; validation OK |
 
 ## Notes
 
@@ -213,6 +217,7 @@ the commit that actually ran.
   - At N=1600: CUDA build ran in 27.258s (pick 26.6s, peak RSS 269MB); CPU build ran in 27.933s (pick 27.5s, peak RSS 163MB). Difference was only 0.675s (2.4%), well within run-to-run noise (+/-0.5s). Memory footprint was 40% lower on CPU (163MB vs 269MB).
   - *Mechanism*: The GPU kernel offload in `min_state_val` was guarded behind `(phase_guesses.len() * set.len()) > 50000`. In policy tree search, child sets partition quickly into small buckets ($\le 50$), while Phase 1 in-set guesses satisfy $|set|^2 \le 2500 \ll 50000$. Consequently, the GPU kernel was virtually never invoked during tree search, while incurring CUDA driver context initialization, VRAM matrix upload overhead, and `cudaDeviceScheduleSpin` thread contention.
   - *Decision*: Because the GPU provided zero measurable speedup while adding substantial complexity (~600 lines across `gpu.rs`, `gpu_kernel.cu`, `build.rs`, `cc` dependency, `nvcc` and `g++-13` toolchain requirements), the GPU path was removed completely in favor of pure CPU SIMD/Rayon.
+- The `2fbed58` rows demonstrated that fast-pathing exact `p_len <= 2` buckets (bypassing hashing and sorting) and restricting bucket loops to `eval_indices` established a new all-time record for N=1000 (**5.878s**, pick 5.6s). Identifying and reverting the slack bypass in Pass 2 of `min_guess_val` (which had previously widened child beta and increased recursive branch exploration) restored tight child bounds and brought N=2000 back down from 66.078s to 55.944s (states reduced from 14.4k to 8.1k).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
