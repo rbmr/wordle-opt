@@ -44,9 +44,8 @@ done
 
 The optimal tree's total cost (8001) is independently checked: the full run
 validates the written tree (edge iff possible at every node, every candidate
-terminates) before reporting success, and `solve --compare` cross-checks a
-tree's cost against a cost-only solve of the identical candidate set whenever
-one is built from a subset.
+terminates) before reporting success, and the property test suite cross-checks
+generated trees against an independent brute-force oracle.
 
 ## Other word lengths
 
@@ -75,8 +74,7 @@ node site/examples/generate_letter_examples.js
 
 `optimal.json` is the real thing: the exact optimal policy for all 2340
 candidates - 2478 nodes, maximum depth 5, total cost 8001 (mean 3.419 guesses).
-It was generated on the compute host by the `full` run in **4.28 hours**
-(15,413.7s), which also exported its progress series
-(`~/optimal-2340-progress.parquet`).
+It is generated on the compute host by the `full` run in under **37 seconds**,
+which also exports its progress series (`~/full-runs/<stamp>-progress.parquet`).
 
 The viewer handles trees of any size. The browser renderer expands lazily.
