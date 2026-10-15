@@ -85,6 +85,10 @@ the commit that actually ran.
 | 2026-10-15 | `a453caa` | pc01 | 1600 | 1 | optimal | 40.396s | 5256 | 1681 | 240 | ~253MB | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
 | 2026-10-15 | `a453caa` | pc01 | 2000 | 1 | optimal | 80.781s (1.35m) | 6723 | 2119 | 4636 | ~285MB | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
 | 2026-10-15 | `a453caa` | pc01 | 2200 | 1 | optimal | 146.589s (2.44m) | 7477 | 2331 | 22224 | ~320MB | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
+| 2026-10-15 | `f8575b3` | pc01 | 1000 | 1 | optimal | 13.725s | 3124 | 1049 | — | — | bypass equivalence projection for candidate sets >= 40; validation OK |
+| 2026-10-15 | `f8575b3` | pc01 | 1600 | 1 | optimal | 40.431s | 5256 | 1681 | 240 | ~253MB | bypass equivalence projection for candidate sets >= 40; validation OK |
+| 2026-10-15 | `f8575b3` | pc01 | 2000 | 1 | optimal | 81.000s (1.35m) | 6723 | 2119 | 4636 | ~285MB | bypass equivalence projection for candidate sets >= 40; validation OK |
+| 2026-10-15 | `f8575b3` | pc01 | 2200 | 1 | optimal | 145.772s (2.43m) | 7477 | 2331 | 22224 | ~317MB | bypass equivalence projection for candidate sets >= 40; pick time 143.2s; validation OK |
 
 
 ## Notes
