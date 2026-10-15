@@ -1006,6 +1006,7 @@ impl<'a> Solver<'a> {
 
         let mut local_lb = parent_lb.max(cached_lower_bound);
         let mut counts = [0u16; 243];
+        let mut non_empty_indices = [0u8; 243];
 
         let mut phase1_tuples = std::mem::take(&mut self.scratch_phase1_tuples[depth]);
         phase1_tuples.clear();
@@ -1136,32 +1137,24 @@ impl<'a> Solver<'a> {
                 }
             } else {
                 for &g in &phase1_guesses {
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
                     let mut num_non_empty = 0;
                     let g_off = g * self.matrix.num_candidates;
                     for &c in set {
                         let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                        unsafe {
-                            *counts.get_unchecked_mut(r) += 1;
-                        }
-                    }
-                    for r_idx in 0..242 {
-                        let count = counts[r_idx];
-                        if count > 0 {
-                            counts[r_idx] = 0;
+                        let cnt = unsafe { counts.get_unchecked_mut(r) };
+                        if *cnt == 0 {
+                            unsafe {
+                                *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                            }
                             num_non_empty += 1;
-                            expected_rem += (count as u32) * (count as u32);
-                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                         }
-                    }
-                    if counts[242] > 0 {
-                        let count = counts[242];
-                        counts[242] = 0;
-                        num_non_empty += 1;
-                        expected_rem += (count as u32) * (count as u32);
+                        *cnt += 1;
                     }
                     if num_non_empty == 1 {
+                        unsafe {
+                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
+                            *counts.get_unchecked_mut(r_idx) = 0;
+                        }
                         continue;
                     }
                     if num_non_empty > local_max_k {
@@ -1169,6 +1162,19 @@ impl<'a> Solver<'a> {
                     }
                     if num_non_empty > valid_max_k {
                         valid_max_k = num_non_empty;
+                    }
+                    let mut expected_rem = 0u32;
+                    let mut lb_cost = c_len as u32;
+                    for i in 0..num_non_empty {
+                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                        let count = unsafe { *counts.get_unchecked(r_idx) };
+                        unsafe {
+                            *counts.get_unchecked_mut(r_idx) = 0;
+                        }
+                        expected_rem += (count as u32) * (count as u32);
+                        if r_idx != 242 {
+                            lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                        }
                     }
                     if lb_cost < beta {
                         phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
@@ -1343,33 +1349,38 @@ impl<'a> Solver<'a> {
                     }
                 } else {
                     for &g in &phase2_guesses {
-                        let mut expected_rem = 0u32;
-                        let mut lb_cost = c_len as u32;
                         let mut num_non_empty = 0;
                         let g_off = g * self.matrix.num_candidates;
                         for &c in set {
                             let r = unsafe { self.matrix.data.get_unchecked(g_off + c).0 as usize };
-                            unsafe {
-                                *counts.get_unchecked_mut(r) += 1;
-                            }
-                        }
-                        for r_idx in 0..242 {
-                            let count = counts[r_idx];
-                            if count > 0 {
-                                counts[r_idx] = 0;
+                            let cnt = unsafe { counts.get_unchecked_mut(r) };
+                            if *cnt == 0 {
+                                unsafe {
+                                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                                }
                                 num_non_empty += 1;
-                                expected_rem += (count as u32) * (count as u32);
-                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
                             }
-                        }
-                        if counts[242] > 0 {
-                            let count = counts[242];
-                            counts[242] = 0;
-                            num_non_empty += 1;
-                            expected_rem += (count as u32) * (count as u32);
+                            *cnt += 1;
                         }
                         if num_non_empty == 1 {
+                            unsafe {
+                                let r_idx = *non_empty_indices.get_unchecked(0) as usize;
+                                *counts.get_unchecked_mut(r_idx) = 0;
+                            }
                             continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut lb_cost = c_len as u32;
+                        for i in 0..num_non_empty {
+                            let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                            let count = unsafe { *counts.get_unchecked(r_idx) };
+                            unsafe {
+                                *counts.get_unchecked_mut(r_idx) = 0;
+                            }
+                            expected_rem += (count as u32) * (count as u32);
+                            if r_idx != 242 {
+                                lb_cost += self.capacity_bounds_2d[parent_max_k][count as usize];
+                            }
                         }
                         if num_non_empty == 2
                             && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
