@@ -639,15 +639,31 @@ impl<'a> OptimalPolicy<'a> {
 
                     // Fast capacity bound check first
                     let mut lb = candidates.len() as u32;
+                    let mut max_p_len = 0;
+                    let mut eval_indices = [0u8; 243];
+                    let mut num_eval = 0;
+
                     for j in 0..num_non_empty {
                         let r = non_empty_indices[j] as usize;
                         if r != crate::core::Response::WIN.0 as usize {
-                            lb += self.capacity_bounds_2d[self.max_k][counts[r] as usize];
+                            let p_len = counts[r] as usize;
+                            if p_len > max_p_len {
+                                max_p_len = p_len;
+                            }
+                            if p_len > 2 {
+                                eval_indices[num_eval] = r as u8;
+                                num_eval += 1;
+                            }
+                            lb += self.capacity_bounds_2d[self.max_k][p_len];
                         }
                     }
 
                     if lb >= cost_to_beat {
                         return None;
+                    }
+
+                    if max_p_len <= 2 {
+                        return Some((g, orig_idx, lb, exp));
                     }
 
                     let mut bucket_hashes = [0u64; 243];
@@ -656,9 +672,9 @@ impl<'a> OptimalPolicy<'a> {
                         bucket_hashes[r] ^= self.matrix.zobrist[c];
                     }
 
-                    // Sort non-empty buckets descending by size so largest buckets are evaluated first.
+                    // Sort only non-trivial buckets (size > 2) descending by size so largest buckets are evaluated first.
                     // Large buckets contribute the largest bound tightening, triggering early cutoff.
-                    non_empty_indices[0..num_non_empty]
+                    eval_indices[0..num_eval]
                         .sort_unstable_by_key(|&r| std::cmp::Reverse(counts[r as usize]));
 
                     // First pass: check cached bounds descending by bucket size without partitioning.
@@ -666,15 +682,9 @@ impl<'a> OptimalPolicy<'a> {
                     let mut cached_mask = [false; 243];
                     let mut has_uncached = false;
                     let mut max_possible_slack = 0u32;
-                    for j in 0..num_non_empty {
-                        let r_idx = non_empty_indices[j] as usize;
-                        if r_idx == crate::core::Response::WIN.0 as usize {
-                            continue;
-                        }
+                    for j in 0..num_eval {
+                        let r_idx = eval_indices[j] as usize;
                         let p_len = counts[r_idx] as usize;
-                        if p_len <= 2 {
-                            continue;
-                        }
                         let hash = bucket_hashes[r_idx];
                         if let Some((cached_val, _)) = self.cache.get(hash) {
                             let cap_lb = self.capacity_bounds_2d[self.max_k][p_len];
@@ -711,13 +721,10 @@ impl<'a> OptimalPolicy<'a> {
                             current_offsets[r] += 1;
                         }
 
-                        for j in 0..num_non_empty {
-                            let r_idx = non_empty_indices[j] as usize;
-                            if r_idx == crate::core::Response::WIN.0 as usize {
-                                continue;
-                            }
+                        for j in 0..num_eval {
+                            let r_idx = eval_indices[j] as usize;
                             let p_len = counts[r_idx] as usize;
-                            if p_len <= 2 || p_len > 15 || cached_mask[r_idx] {
+                            if p_len > 15 || cached_mask[r_idx] {
                                 continue;
                             }
 

@@ -1480,22 +1480,32 @@ impl<'a> Solver<'a> {
             let mut cost = set.len() as u32;
             let mut p_lbs = [0u32; 243];
             let mut child_max_ks = [parent_max_k; 243];
+            let mut max_p_len = 0;
+            let mut eval_indices = [0u8; 243];
+            let mut num_eval = 0;
 
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 if r_idx == Response::WIN.0 as usize {
                     continue;
                 }
-                let p_len = counts[r_idx] as u32;
+                let p_len = counts[r_idx] as usize;
+                if p_len > max_p_len {
+                    max_p_len = p_len;
+                }
+                if p_len > 2 {
+                    eval_indices[num_eval] = r_idx as u8;
+                    num_eval += 1;
+                }
                 // self.capacity_bounds[n] == capacity_bound(n, self.max_k) for every n up to
                 // dict.candidates.len() (see solve()'s setup) - self.max_k is fixed at
                 // construction and never changes across recursion, so this is always exactly
                 // the same value capacity_bound() would compute, just without redoing the
                 // O(log n) loop on every one of this hot function's calls.
-                let lb = self.capacity_bounds_2d[parent_max_k][p_len as usize];
+                let lb = self.capacity_bounds_2d[parent_max_k][p_len];
                 cost += lb;
                 p_lbs[r_idx] = lb;
-                child_max_ks[r_idx] = (p_len as usize).min(parent_max_k);
+                child_max_ks[r_idx] = p_len.min(parent_max_k);
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1506,12 +1516,16 @@ impl<'a> Solver<'a> {
                 return cost;
             }
 
+            if max_p_len <= 2 {
+                return cost;
+            }
+
             // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
             // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
             // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
             // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
             // Ties broken by response index for deterministic order.
-            non_empty_indices[0..num_non_empty]
+            eval_indices[0..num_eval]
                 .sort_unstable_by_key(|&r| (std::cmp::Reverse(counts[r as usize]), r));
 
             let mut bucket_hashes = [0u64; 243];
@@ -1528,13 +1542,8 @@ impl<'a> Solver<'a> {
             let mut exact_vals = [0u32; 243];
             let mut cached_mask = [false; 243];
 
-            for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
-                    continue;
-                }
-
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
                 let hash = bucket_hashes[r_idx];
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -1559,12 +1568,8 @@ impl<'a> Solver<'a> {
 
             // If all buckets with p_len > 2 were exact in cache, no partitioning or evaluation is needed.
             let mut needs_partition = false;
-            for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
-                    continue;
-                }
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
                 if exact_vals[r_idx] == 0 {
                     needs_partition = true;
                     break;
@@ -1598,15 +1603,12 @@ impl<'a> Solver<'a> {
             // Pass 2: Uncached buckets evaluation (quick_bucket_eval or tight capacity bound)
             let mut uncached_max_slacks = [0u32; 243];
             let mut total_max_slack = 0u32;
-            for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize
-                    || p_len <= 2
-                    || cached_mask[r_idx]
-                {
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
+                if cached_mask[r_idx] {
                     continue;
                 }
+                let p_len = counts[r_idx] as usize;
                 if p_len <= 15 {
                     uncached_max_slacks[r_idx] = 1;
                     total_max_slack += 1;
@@ -1626,16 +1628,12 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize || p_len <= 2 {
-                    continue;
-                }
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
                 if cached_mask[r_idx] {
                     continue;
                 }
-
+                let p_len = counts[r_idx] as usize;
                 let start = offsets[r_idx] as usize;
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
@@ -1690,18 +1688,12 @@ impl<'a> Solver<'a> {
                 return cost;
             }
 
-            for i in 0..num_non_empty {
-                let r_idx = non_empty_indices[i] as usize;
-                let p_len = counts[r_idx] as usize;
-                if r_idx == Response::WIN.0 as usize {
-                    continue;
-                }
-                if p_len <= 2 {
-                    continue;
-                }
+            for i in 0..num_eval {
+                let r_idx = eval_indices[i] as usize;
                 if exact_vals[r_idx] > 0 {
                     continue;
                 }
+                let p_len = counts[r_idx] as usize;
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if self.current_cost_so_far + cost >= current_global_beta {
