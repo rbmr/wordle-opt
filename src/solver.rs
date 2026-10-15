@@ -1451,6 +1451,7 @@ impl<'a> Solver<'a> {
             // we prune immediately without spending time on counting sort or scratch buffer partitioning.
             let mut exact_mask = [0u64; 4];
             let mut cached_mask = [0u64; 4];
+            let mut num_exact = 0;
 
             for i in 0..num_eval {
                 let r_idx = eval_indices[i] as usize;
@@ -1465,6 +1466,7 @@ impl<'a> Solver<'a> {
                     let bit = 1u64 << (r_idx & 63);
                     if is_exact {
                         exact_mask[word_idx] |= bit;
+                        num_exact += 1;
                     }
                     cached_mask[word_idx] |= bit;
 
@@ -1479,16 +1481,7 @@ impl<'a> Solver<'a> {
             }
 
             // If all buckets with p_len > 2 were exact in cache, no partitioning or evaluation is needed.
-            let mut needs_partition = false;
-            for i in 0..num_eval {
-                let r_idx = eval_indices[i] as usize;
-                if (exact_mask[r_idx >> 6] & (1u64 << (r_idx & 63))) == 0 {
-                    needs_partition = true;
-                    break;
-                }
-            }
-
-            if !needs_partition {
+            if num_exact == num_eval {
                 return cost;
             }
 
@@ -1539,6 +1532,7 @@ impl<'a> Solver<'a> {
                 p_lbs[r_idx] = used_val;
                 if is_exact {
                     exact_mask[word_idx] |= bit;
+                    num_exact += 1;
                 }
                 self.cache.insert(hash, used_val, is_exact);
                 child_max_ks[r_idx] = (p_len.min(parent_max_k)) as u16;
@@ -1554,6 +1548,11 @@ impl<'a> Solver<'a> {
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
+                self.scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+
+            if num_exact == num_eval {
                 self.scratch_sorted_sets[depth] = sorted_set;
                 return cost;
             }
