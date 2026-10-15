@@ -249,6 +249,11 @@ the commit that actually ran.
 | 2026-10-15 | `377569e` | pc01 | 1600 | 1 | optimal | 21.937s | 5256 | 1681 | — | ~157MB | add midpoint capacity pruning to candidate branching factor calculation; pick time 21.6s; validation OK |
 | 2026-10-15 | `377569e` | pc01 | 2000 | 1 | optimal | 44.359s | 6723 | 2119 | 8316 | ~174MB | add midpoint capacity pruning to candidate branching factor calculation; pick time 44.0s; validation OK |
 | 2026-10-15 | `377569e` | pc01 | 2200 | 1 | optimal | 82.608s (1.38m) | 7477 | 2331 | 22637 | ~204MB | add midpoint capacity pruning to candidate branching factor calculation; pick time 81.9s; regressed; validation OK |
+| 2026-10-15 | `bc30e14` | pc01 | 1000 | 1 | optimal | 4.892s | 3124 | 1049 | — | — | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 4.7s; validation OK |
+| 2026-10-15 | `bc30e14` | pc01 | 1600 | 1 | optimal | 22.008s | 5256 | 1681 | — | ~157MB | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 21.7s; validation OK |
+| 2026-10-15 | `bc30e14` | pc01 | 2000 | 1 | optimal | 44.188s | 6723 | 2119 | 8252 | ~174MB | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 43.8s; validation OK |
+| 2026-10-15 | `bc30e14` | pc01 | 2200 | 1 | optimal | 82.437s (1.37m) | 7477 | 2331 | 22659 | ~205MB | revert midpoint check in candidate branching while keeping unchecked indexing; pick time 81.8s; validation OK |
+
 
 
 
@@ -324,6 +329,7 @@ the commit that actually ran.
 - The `77e40a2` rows demonstrated that tracking valid Phase 1 and Phase 2 branching factors independently (`valid_phase1_k` and `valid_phase2_k`) restored tight capacity lower bounding without cross-phase dilution, establishing new all-time records for N=2000 (**43.376s**, pick **43.0s**) and N=2200 (**80.574s**, pick **79.9s**, breaking below the 80s barrier for the first time). All runs passed policy tree validation with invariant golden costs.
 - The `daf2f0b` rows demonstrated that replacing 972-byte `exact_vals` and 243-byte `cached_mask` arrays with compact 256-bit `[u64; 4]` bitmasks, shrinking `child_max_ks` from 8-byte `usize` to 2-byte `u16` (saving 2.6 KB stack frame footprint per DFS frame), and pre-computing `target_k` to early-exit candidate branching searches in Pass 2b maintained top performance (N=1000 at 4.847s, N=1600 at 21.649s with pick 21.3s, N=2000 at 43.486s, N=2200 at 81.004s with pick 80.3s). All runs passed policy tree validation with invariant golden costs.
 - The `377569e` rows demonstrated that adding midpoint capacity pruning to `compute_candidate_branching_factor_with_target` introduced branch and popcount overhead on small candidate subsets (16-30 words) where a tight unrolled loop with target early exit is faster, regressing runtimes across all sizes (N=2200 from 81.004s to 82.608s). Midpoint check in candidate branching reverted.
+- The `bc30e14` rows confirmed that reverting the midpoint check in `compute_candidate_branching_factor_with_target` while keeping unchecked mask indexing stabilized candidate branching factor evaluation. All runs passed policy tree validation with invariant golden costs.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
