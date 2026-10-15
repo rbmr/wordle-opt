@@ -1280,9 +1280,9 @@ impl<'a> Solver<'a> {
         let g_offset = guess * self.matrix.num_candidates;
         let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
 
-        if c_len <= 8 {
-            let mut local_counts = [(0u8, 0u8, 0u32); 8];
-            let mut c_responses = [0u8; 8];
+        if c_len <= 16 {
+            let mut local_counts = [(0u8, 0u8, 0u32); 16];
+            let mut c_responses = [0u8; 16];
             let mut num_non_empty = 0;
             for (cand_idx, &c) in set.iter().enumerate() {
                 let r = unsafe { (*g_ptr.add(c)).0 };
@@ -1328,7 +1328,7 @@ impl<'a> Solver<'a> {
                 entry.2 = lb;
             }
 
-            if cost >= beta {
+            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
@@ -1350,7 +1350,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
 
-                let mut p = [0usize; 8];
+                let mut p = [0usize; 16];
                 let mut p_idx = 0;
                 for (cand_idx, &c) in set.iter().enumerate() {
                     let r = unsafe { *c_responses.get_unchecked(cand_idx) as usize };
