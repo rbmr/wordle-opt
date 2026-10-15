@@ -681,7 +681,10 @@ impl<'a> Solver<'a> {
             if is_exact {
                 return cached_val;
             } else {
-                if cached_val >= beta {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                if cached_val >= beta
+                    || self.current_cost_so_far + cached_val >= current_global_beta
+                {
                     return cached_val;
                 }
                 cached_lower_bound = cached_val;
@@ -709,14 +712,18 @@ impl<'a> Solver<'a> {
                 return val;
             }
             cached_lower_bound = cached_lower_bound.max(val);
-            if cached_lower_bound >= beta {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if cached_lower_bound >= beta
+                || self.current_cost_so_far + cached_lower_bound >= current_global_beta
+            {
                 self.cache.insert(hash, cached_lower_bound, false);
                 return cached_lower_bound;
             }
         }
 
         let parent_lb = self.capacity_bounds_2d[parent_max_k][c_len];
-        if parent_lb >= beta {
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        if parent_lb >= beta || self.current_cost_so_far + parent_lb >= current_global_beta {
             return parent_lb;
         }
 
@@ -1138,6 +1145,17 @@ impl<'a> Solver<'a> {
         phase1_tuples.sort_unstable_by_key(|&(_, exp, lb, _)| (lb, exp));
 
         for &(_g, _, g_lb, _non_empty) in &phase1_tuples {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if self.current_cost_so_far + local_lb >= current_global_beta {
+                break;
+            }
+            if self.current_cost_so_far + g_lb >= current_global_beta {
+                min_val_found = min_val_found.min(g_lb);
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
             if g_lb >= best_val {
                 min_val_found = min_val_found.min(g_lb);
                 self.metrics
@@ -1156,7 +1174,8 @@ impl<'a> Solver<'a> {
             }
         }
 
-        if best_val > local_lb {
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        if best_val > local_lb && self.current_cost_so_far + local_lb < current_global_beta {
             #[cfg(cuda_enabled)]
             let use_gpu2 = self.matrix.num_guesses <= 14855
                 && set.len() <= 2340
@@ -1349,10 +1368,22 @@ impl<'a> Solver<'a> {
                 local_lb = tight_lb;
             }
 
-            if local_lb >= best_val {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if local_lb >= best_val || self.current_cost_so_far + local_lb >= current_global_beta {
                 // Done!
             } else {
                 for &(_g, _, g_lb, _non_empty) in &phase2_tuples {
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    if self.current_cost_so_far + local_lb >= current_global_beta {
+                        break;
+                    }
+                    if self.current_cost_so_far + g_lb >= current_global_beta {
+                        min_val_found = min_val_found.min(g_lb);
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        continue;
+                    }
                     if g_lb >= best_val {
                         min_val_found = min_val_found.min(g_lb);
                         self.metrics
