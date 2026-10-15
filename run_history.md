@@ -117,6 +117,10 @@ the commit that actually ran.
 | 2026-10-15 | `07f9b48` | pc01 | 1600 | 1 | optimal | 40.908s | 5256 | 1681 | 240 | ~248MB | propagate tightened branching factors to child subtrees; pick time 39.8s; validation OK |
 | 2026-10-15 | `07f9b48` | pc01 | 2000 | 1 | optimal | 81.302s (1.36m) | 6723 | 2119 | 6932 | ~285MB | propagate tightened branching factors to child subtrees; pick time 80.4s; validation OK |
 | 2026-10-15 | `07f9b48` | pc01 | 2200 | 1 | optimal | 148.727s (2.48m) | 7477 | 2331 | 19989 | ~316MB | propagate tightened branching factors to child subtrees; states reduced to 19989; validation OK |
+| 2026-10-15 | `9f0c8eb` | pc01 | 1000 | 1 | optimal | 13.582s | 3124 | 1049 | — | — | instant O(1) bucket branching factor bound in Phase A; pick time 13.1s; validation OK |
+| 2026-10-15 | `9f0c8eb` | pc01 | 1600 | 1 | optimal | 40.829s | 5256 | 1681 | 240 | ~248MB | instant O(1) bucket branching factor bound in Phase A; new all-time best N=1600 (40.829s vs 40.908s); pick time 39.7s; validation OK |
+| 2026-10-15 | `9f0c8eb` | pc01 | 2000 | 1 | optimal | 80.231s (1.34m) | 6723 | 2119 | 7187 | ~284MB | instant O(1) bucket branching factor bound in Phase A; pick time 79.4s; validation OK |
+| 2026-10-15 | `9f0c8eb` | pc01 | 2200 | 1 | optimal | 147.385s (2.46m) | 7477 | 2331 | 20098 | ~316MB | instant O(1) bucket branching factor bound in Phase A; pick time 144.8s; validation OK |
 
 
 ## Notes
@@ -155,6 +159,8 @@ the commit that actually ran.
 - The `3265bc4` rows demonstrated that avoiding full 486-byte memset of counts across all 14,855 guesses in `greedy_solve` by clearing only non-empty indices and bypassing candidate projections when `c_mask.count_ones() >= 26` achieved a new all-time best N=2000 build time of 80.020s (pick time 79.2s).
 - The `eff1f18` rows demonstrated that eliminating the fixed 242-iteration scans over `counts` in `min_state_val` (phase 1 and phase 2 CPU paths) using `non_empty_indices` to bound clearing and bound computation to `num_non_empty` entries produced a new all-time best N=2200 build time of 144.841s and pick time of 142.3s.
 - The `07f9b48` rows demonstrated that propagating tightened child branching factors down into child subtrees reduced explored states at N=2200 from 20.5k to 19.9k and improved N=1600 build time to 40.908s (pick time 39.8s), while sequential max_k computation on large root buckets in Phase A introduced minor parallel overhead.
+- The `9f0c8eb` rows demonstrated that using an instant O(1) `bucket_k` bound in Phase A eliminated the sequential branching factor computation overhead across large opener buckets, setting a new all-time best N=1600 build time of 40.829s (pick time 39.7s) and reducing N=2200 build time to 147.385s (pick time 144.8s).
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
+
 
