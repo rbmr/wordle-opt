@@ -498,6 +498,60 @@ impl<'a> OptimalPolicy<'a> {
         }
     }
 
+    /// Fast-path for small candidate sets (n <= 15) that can be solved in 2n - 1 total cost
+    /// (the absolute theoretical minimum possible cost) by an in-set guess that isolates
+    /// all other n - 1 candidates into distinct responses.
+    ///
+    /// Tie-breaking in scan sorts active guesses by (expected_rem, g). Since any guess that
+    /// partitions into singletons has the absolute minimum possible expected_rem (n), scan
+    /// deterministically selects the in-set guess achieving 2n - 1 with the smallest guess index g.
+    /// Testing candidate guesses in ascending order of g preserves exact tie-breaking.
+    fn quick_exact_guess(&self, candidates: &[usize]) -> Option<(usize, u32)> {
+        let n = candidates.len();
+        if n > 15 {
+            return None;
+        }
+
+        let mut cand_guesses = [0usize; 16];
+        for i in 0..n {
+            cand_guesses[i] = self.dict.candidate_to_guess[candidates[i]];
+        }
+        cand_guesses[0..n].sort_unstable();
+
+        for &g in &cand_guesses[0..n] {
+            let g_offset = g * self.matrix.num_candidates;
+            let g_row = unsafe {
+                self.matrix
+                    .data
+                    .get_unchecked(g_offset..g_offset + self.matrix.num_candidates)
+            };
+
+            let mut mask = [0u64; 4];
+            let mut num_distinct = 0;
+            let mut has_collision = false;
+
+            for &c in candidates {
+                let r = unsafe { g_row.get_unchecked(c).0 as usize };
+                let word_idx = r >> 6;
+                let bit = 1u64 << (r & 63);
+                let word = unsafe { mask.get_unchecked_mut(word_idx) };
+                if (*word & bit) == 0 {
+                    *word |= bit;
+                    num_distinct += 1;
+                } else {
+                    has_collision = true;
+                    break;
+                }
+            }
+
+            if !has_collision && num_distinct == n {
+                return Some((g, (2 * n - 1) as u32));
+            }
+        }
+
+        None
+    }
+
     /// The exact optimal guess and its total cost for `candidates`.
     pub fn guess_and_cost(&self, candidates: &[usize]) -> (usize, u32) {
         match candidates.len() {
@@ -505,7 +559,12 @@ impl<'a> OptimalPolicy<'a> {
             1 => (self.dict.candidate_to_guess[candidates[0]], 1),
             // Any in-set guess is optimal for two candidates (1 + 2 = 3).
             2 => (self.dict.candidate_to_guess[candidates[0]], 3),
-            _ => self.scan(candidates),
+            _ => {
+                if let Some(res) = self.quick_exact_guess(candidates) {
+                    return res;
+                }
+                self.scan(candidates)
+            }
         }
     }
 
