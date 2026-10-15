@@ -59,34 +59,56 @@ hours to build, and is what the viewer renders by default.
 The optimal strategy is fixed; the remaining work is speed, i.e. reaching the
 same exact result in less wall-clock time.
 
-## Usage
+## Installation and Usage
+
+Build the release binary or install it to your `PATH`:
 
 ```bash
-# Build a policy tree (see "Policy trees" below)
-cargo run --release -- solve --strategy optimal --output tree.json
+cargo build --release
+# The binary is located at target/release/wordle-opt
+
+# Or install directly to ~/.cargo/bin:
+cargo install --path .
+```
+
+The binary is fully standalone with the default Wordle dictionary embedded directly inside it; it can be run from any working directory without needing the repository files on disk.
+
+```bash
+# Build an optimal policy tree (see "Policy trees" below)
+wordle-opt solve --strategy optimal --output tree.json
+
+# Solve for your own custom word lists (one word per line)
+wordle-opt solve --strategy optimal \
+  --candidates my_candidates.txt \
+  --guesses my_guesses.txt \
+  --output custom_tree.json
 
 # A smaller tree for a quick look: the first 250 candidates
-cargo run --release -- solve --strategy optimal --max-candidates 250 \
+wordle-opt solve --strategy optimal --max-candidates 250 \
   --output tree-250.json
 
-# Cheaper strategies: min-remaining | max-freq
-cargo run --release -- solve --strategy min-remaining --output heuristic.json
+# Cheaper heuristic strategies: min-remaining | max-freq
+wordle-opt solve --strategy min-remaining --output heuristic.json
 
 # Validate any policy tree file
-cargo run --release -- validate tree.json
+wordle-opt validate tree.json
 
 # Differential correctness fuzzer: compares the optimized solver against an
 # unoptimized naive reference (src/naive.rs) on random subsets
-cargo run --release -- verify
+wordle-opt verify
 ```
 
 Building an `optimal` tree for the full candidate set takes hours, so start
-with `--max-candidates`. Other subcommands exist for full-scale tree builds
+with `--max-candidates` or a custom list. Other subcommands exist for full-scale tree builds
 and verification (`full`, `verify`); AGENTS.md describes what they do and the
 dedicated machine they are meant to run on.
 
 ### `solve` flags
 
+- `--candidates <path>` - Secret candidate words file (one word per line). Defaults
+  to the bundled 2,340 official Wordle words.
+- `--guesses <path>` - Valid allowed guess words file (one word per line). Defaults
+  to the bundled 14,855 words.
 - `--max-candidates N` - build for the first `N` candidates only (the same
   deterministic convention the golden tests use). Add `--sample-seed S` to
   instead draw a reproducible, representative `N`-candidate spread.
@@ -144,8 +166,15 @@ applied to the wrong dictionary.
 ## Interactive viewer
 
 `site/` is a dependency-free static viewer, published to GitHub Pages at
-**https://rbmr.github.io/wordle-opt/**. It loads a readable policy tree (a
-bundled example, or one of your own) and **validates it in the browser**
+**https://rbmr.github.io/wordle-opt/** (or accessible locally by opening
+`site/index.html` directly in any web browser).
+
+To view a policy you generated with `wordle-opt solve`:
+1. Open the viewer (online or `site/index.html`).
+2. Click **Load tree** in the top toolbar and select your policy `.json` file.
+3. The viewer immediately validates the tree and displays it.
+
+It loads a readable policy tree (a bundled example, or one of your own) and **validates it in the browser**
 against the same edge-iff-possible rule, so anything that loads can be assumed
 valid. The viewer's pure logic - response computation, candidate filtering,
 validation, per-node stats and the win rule - lives in `site/policy-core.js`,

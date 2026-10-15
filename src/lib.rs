@@ -363,9 +363,34 @@ impl Flags {
 ///   reproducible stream `subset_rng(S, N)` - a representative spread rather
 ///   than one alphabetically-adjacent slice.
 fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> (Dictionary, String) {
-    let guesses = flags.get_or("guesses", "words/guesses.txt");
-    let candidates = flags.get_or("candidates", "words/candidates.txt");
-    let full = Dictionary::load(guesses, candidates);
+    let has_custom_guesses = flags.get("guesses").is_some();
+    let has_custom_candidates = flags.get("candidates").is_some();
+
+    let full = if has_custom_guesses || has_custom_candidates {
+        let guesses = if let Some(p) = flags.get("guesses") {
+            Dictionary::read_words(p)
+        } else if std::path::Path::new("words/guesses.txt").exists() {
+            Dictionary::read_words("words/guesses.txt")
+        } else {
+            Ok(Dictionary::load_default().guesses)
+        };
+        let candidates = if let Some(p) = flags.get("candidates") {
+            Dictionary::read_words(p)
+        } else if std::path::Path::new("words/candidates.txt").exists() {
+            Dictionary::read_words("words/candidates.txt")
+        } else {
+            Ok(Dictionary::load_default().candidates)
+        };
+        match (guesses, candidates) {
+            (Ok(g), Ok(c)) => Dictionary::from_words(g, c),
+            (Err(e), _) | (_, Err(e)) => {
+                eprintln!("solve: {e}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        Dictionary::load("words/guesses.txt", "words/candidates.txt")
+    };
     let total = full.candidates.len();
     // The candidate selection is part of a run's identity - (commit, seed, size)
     // is what makes a timing reproducible - so it is described in the returned
@@ -558,19 +583,26 @@ fn merge_progress_samples(
 fn run_solve_cli(args: &[String]) {
     let flags = Flags::parse(args);
 
+    if flags.get("help").is_some() || flags.get("h").is_some() {
+        print_solve_usage();
+        return;
+    }
+
     let Some(output) = flags.get("output") else {
-        eprintln!("solve: --output <path> is required");
+        eprintln!("solve: --output <path> is required\n");
+        print_solve_usage();
         std::process::exit(2);
     };
     let Some(strategy) = flags.get("strategy").and_then(Strategy::parse) else {
         eprintln!(
-            "solve: --strategy must be one of: {}",
+            "solve: --strategy must be one of: {}\n",
             Strategy::all()
                 .iter()
                 .map(|s| s.name())
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+        print_solve_usage();
         std::process::exit(2);
     };
     let max_candidates: usize = flags
@@ -749,8 +781,13 @@ fn validate_bytes(
 /// `wordle-opt validate <tree.json>` - validates a serialized policy tree.
 fn run_validate_cli(args: &[String]) {
     let flags = Flags::parse(args);
+    if flags.get("help").is_some() || flags.get("h").is_some() {
+        print_validate_usage();
+        return;
+    }
     let Some(path) = flags.positional.first() else {
-        eprintln!("validate: usage: wordle-opt validate <tree.json>");
+        eprintln!("validate: <tree.json> argument is required\n");
+        print_validate_usage();
         std::process::exit(2);
     };
     let bytes = match std::fs::read_to_string(path) {
@@ -796,51 +833,82 @@ fn run_validate_cli(args: &[String]) {
     }
 }
 
-// Agent integrating IDA*
+fn print_cli_usage() {
+    println!(
+        "wordle-opt: Exact Wordle solver and decision-policy generator\n\n\
+USAGE:\n    \
+wordle-opt solve --output <path> --strategy <optimal|min-remaining|max-freq> [OPTIONS]\n    \
+wordle-opt validate <tree.json>\n    \
+wordle-opt full\n    \
+wordle-opt verify\n\n\
+SUBCOMMANDS:\n    \
+solve       Generate a decision-policy tree and write it as readable JSON\n    \
+validate    Validate a policy tree against the edge-iff-possible invariant\n    \
+full        Run the full 2340-word optimal tree build on compute\n    \
+verify      Run differential fuzzing against naive solver reference\n\n\
+Use 'wordle-opt solve --help' for options on solving word lists."
+    );
+}
+
+fn print_solve_usage() {
+    println!(
+        "wordle-opt solve: generate a policy tree for a word list\n\n\
+USAGE:\n    \
+wordle-opt solve --output <path> --strategy <optimal|min-remaining|max-freq> [OPTIONS]\n\n\
+OPTIONS:\n    \
+--output <path>                 Path to write the policy tree JSON (required)\n    \
+--strategy <strategy>           Policy strategy: optimal | min-remaining | max-freq (required)\n    \
+--guesses <path>                Valid guesses file (one word per line) [default: bundled 14,855 words]\n    \
+--candidates <path>             Secret candidates file (one word per line) [default: bundled 2,340 words]\n    \
+--max-candidates <N>            Solve for the first N candidates only\n    \
+--sample-seed <seed>            Draw a reproducible, representative N-candidate subset with this seed\n    \
+--cache-entries <N>             Transposition table size (power of two) [default: 4194304]\n    \
+--stats <path>                  Export build progress series (Parquet or NDJSON)\n    \
+--stats-format <fmt>            Progress series format: parquet | ndjson [default: parquet]\n    \
+--no-progress                   Silence periodic stderr progress lines\n    \
+-h, --help                      Show this help message"
+    );
+}
+
+fn print_validate_usage() {
+    println!(
+        "wordle-opt validate: validate a readable policy tree JSON file\n\n\
+USAGE:\n    \
+wordle-opt validate <tree.json>\n\n\
+Verifies the defining invariant: at every node, an edge exists if and only if that\n\
+response is possible for some remaining candidate, leaves are wins, and every\n\
+candidate terminates. The dictionary is embedded in the tree file."
+    );
+}
+
 /// Command line interface entrypoint for solving, benchmarking, and verifying the optimal strategy.
 pub fn run_cli() {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("solve") => return run_solve_cli(&args[2..]),
-        Some("validate") => return run_validate_cli(&args[2..]),
-        _ => {}
-    }
-
-    println!("Loading dictionary...");
-    let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
-    println!(
-        "Loaded {} guesses and {} candidates.",
-        dict.guesses.len(),
-        dict.candidates.len()
-    );
-
-    println!("Computing response matrix...");
-    let num_u64s = dict.guesses.len().div_ceil(64);
-    let mut all_guesses_bits = vec![u64::MAX; num_u64s];
-    let rem = dict.guesses.len() % 64;
-    if rem != 0 {
-        all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
-    }
-    let start = Instant::now();
-    let matrix = ResponseMatrix::new(&dict);
-    let duration = start.elapsed();
-    println!(
-        "Computed matrix of size {}x{} in {:?}",
-        matrix.num_guesses, matrix.num_candidates, duration
-    );
-
-    if args.len() > 1 && args[1] == "full" {
-        run_full(&matrix, &dict);
-    } else if args.len() > 1 && args[1] == "verify" {
-        let fuzz_ok = verify::run_verification(&dict, &matrix, 50, 4);
-        let stress_ok = verify::run_stress_test(&dict, &matrix);
-        if !fuzz_ok || !stress_ok {
-            std::process::exit(1);
+        Some("solve") => run_solve_cli(&args[2..]),
+        Some("validate") => run_validate_cli(&args[2..]),
+        Some("full") => {
+            let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+            let matrix = ResponseMatrix::new(&dict);
+            run_full(&matrix, &dict);
         }
-    } else {
-        println!(
-            "Usage: wordle-opt <solve --output <path> --strategy <optimal|min-remaining|max-freq> [--guesses P] [--candidates P] [--max-candidates N] [--sample-seed S] [--stats <path>] [--stats-format parquet|ndjson] [--no-progress] | full | validate <tree.json> | verify>"
-        );
+        Some("verify") => {
+            let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+            let matrix = ResponseMatrix::new(&dict);
+            let fuzz_ok = verify::run_verification(&dict, &matrix, 50, 4);
+            let stress_ok = verify::run_stress_test(&dict, &matrix);
+            if !fuzz_ok || !stress_ok {
+                std::process::exit(1);
+            }
+        }
+        Some("--help" | "-h" | "help") | None => {
+            print_cli_usage();
+        }
+        Some(other) => {
+            eprintln!("unknown subcommand: {other}\n");
+            print_cli_usage();
+            std::process::exit(2);
+        }
     }
 }
 pub mod cache;

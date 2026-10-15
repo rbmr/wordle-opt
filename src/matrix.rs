@@ -40,7 +40,12 @@ impl ResponseMatrix {
         for guess in &dict.guesses {
             let mut mask = 0u32;
             for &b in &guess.0 {
-                mask |= 1 << (b - b'a');
+                let bit = if b.is_ascii_lowercase() {
+                    b - b'a'
+                } else {
+                    b % 26
+                };
+                mask |= 1 << bit;
             }
             guess_masks.push(mask);
         }
@@ -48,7 +53,12 @@ impl ResponseMatrix {
         for candidate in &dict.candidates {
             let mut mask = 0u32;
             for &b in &candidate.0 {
-                mask |= 1 << (b - b'a');
+                let bit = if b.is_ascii_lowercase() {
+                    b - b'a'
+                } else {
+                    b % 26
+                };
+                mask |= 1 << bit;
             }
             candidate_masks.push(mask);
         }
