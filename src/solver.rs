@@ -957,7 +957,7 @@ impl<'a> Solver<'a> {
         phase2_tuples.clear();
 
         let mut local_max_k = 0;
-        let mut valid_max_k = 0;
+        let mut valid_phase1_k = 0;
         let mut min_val_found = u32::MAX;
 
         for &cand in set {
@@ -991,9 +991,6 @@ impl<'a> Solver<'a> {
             if num_non_empty > local_max_k {
                 local_max_k = num_non_empty;
             }
-            if num_non_empty > valid_max_k {
-                valid_max_k = num_non_empty;
-            }
             let mut expected_rem = 0u32;
             let mut lb_cost = c_len as u32;
             for i in 0..num_non_empty {
@@ -1008,6 +1005,9 @@ impl<'a> Solver<'a> {
                 }
             }
             if lb_cost < beta {
+                if num_non_empty > valid_phase1_k {
+                    valid_phase1_k = num_non_empty;
+                }
                 phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
             } else {
                 min_val_found = min_val_found.min(lb_cost);
@@ -1052,6 +1052,7 @@ impl<'a> Solver<'a> {
             && self.current_cost_so_far + phase2_effective_lb < current_global_beta
         {
             // Gather Phase 2 guesses: active guesses not in set
+            let mut valid_phase2_k = 0;
             let mut is_in_set = std::mem::take(&mut self.scratch_is_in_set[depth]);
             for &c in set {
                 let g = self.dict.candidate_to_guess[c];
@@ -1111,10 +1112,10 @@ impl<'a> Solver<'a> {
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
                     }
-                    if num_non_empty > valid_max_k {
-                        valid_max_k = num_non_empty;
-                    }
                     if lb_cost < best_val {
+                        if num_non_empty > valid_phase2_k {
+                            valid_phase2_k = num_non_empty;
+                        }
                         phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                     } else {
                         min_val_found = min_val_found.min(lb_cost);
@@ -1137,10 +1138,18 @@ impl<'a> Solver<'a> {
                 local_lb = base_lb;
             }
 
-            let phase1_lb = heuristic::tight_capacity_bound(c_len, valid_max_k, local_max_k);
-            let phase2_lb = heuristic::phase2_capacity_bound(c_len, local_max_k, local_max_k);
+            let phase1_lb = if valid_phase1_k > 0 {
+                heuristic::tight_capacity_bound(c_len, valid_phase1_k, local_max_k)
+            } else {
+                u32::MAX
+            };
+            let phase2_lb = if valid_phase2_k > 0 {
+                heuristic::phase2_capacity_bound(c_len, valid_phase2_k, local_max_k)
+            } else {
+                u32::MAX
+            };
             let tight_lb = phase1_lb.min(phase2_lb);
-            if tight_lb > local_lb {
+            if tight_lb != u32::MAX && tight_lb > local_lb {
                 local_lb = tight_lb;
             }
 
