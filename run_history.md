@@ -81,6 +81,10 @@ the commit that actually ran.
 | 2026-10-15 | `a12d58f` | pc01 | 1600 | 1 | optimal | 40.696s | 5256 | 1681 | 240 | ~253MB | lazy bucket partitioning in min_guess_val; 3.7% faster (40.696s vs 42.253s); validation OK |
 | 2026-10-15 | `a12d58f` | pc01 | 2000 | 1 | optimal | 81.437s (1.36m) | 6723 | 2119 | 4636 | ~285MB | lazy bucket partitioning in min_guess_val; 4.8% faster (81.437s vs 85.509s); validation OK |
 | 2026-10-15 | `a12d58f` | pc01 | 2200 | 1 | optimal | 145.709s (2.43m) | 7477 | 2331 | 22224 | ~320MB | lazy bucket partitioning in min_guess_val; 12.5% faster (145.709s vs 166.528s, 20.8s drop); validation OK |
+| 2026-10-15 | `a453caa` | pc01 | 1000 | 1 | optimal | 13.473s | 3124 | 1049 | — | — | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
+| 2026-10-15 | `a453caa` | pc01 | 1600 | 1 | optimal | 40.396s | 5256 | 1681 | 240 | ~253MB | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
+| 2026-10-15 | `a453caa` | pc01 | 2000 | 1 | optimal | 80.781s (1.35m) | 6723 | 2119 | 4636 | ~285MB | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
+| 2026-10-15 | `a453caa` | pc01 | 2200 | 1 | optimal | 146.589s (2.44m) | 7477 | 2331 | 22224 | ~320MB | parallelize bucket evaluations and avoid redundant checks in root opener scan; validation OK |
 
 
 ## Notes
