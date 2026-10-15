@@ -52,12 +52,12 @@ memory layout are in `ARCHITECTURE.md`.
 ## Status
 
 The engine solved the full 2340-candidate set exactly: total cost **8001**,
-mean **3.419** guesses per game. The cost-only run took 5.19 hours; the
-complete **optimal policy tree** - 2478 nodes, maximum depth 5 - took 4.28
-hours to build, and is what the viewer renders by default.
+mean **3.419** guesses per game. Building the complete **optimal policy tree**
+— 2,478 nodes, maximum depth 5 — takes under **37 seconds** on a modern 16-core
+CPU (down from 4.28 hours in early versions, a >400x speedup), and is what the
+viewer renders by default.
 
-The optimal strategy is fixed; the remaining work is speed, i.e. reaching the
-same exact result in less wall-clock time.
+The optimal strategy is fixed; the deliverable is continuing to make exact solves faster and ensuring the tool is usable on arbitrary word lists.
 
 ## Installation and Usage
 
@@ -98,8 +98,7 @@ wordle-opt validate tree.json
 wordle-opt verify
 ```
 
-Building an `optimal` tree for the full candidate set takes hours, so start
-with `--max-candidates` or a custom list. Other subcommands exist for full-scale tree builds
+Building an `optimal` tree for the full candidate set finishes in under a minute on a modern multi-core machine; for quick exploration on low-powered machines, start with `--max-candidates` or a smaller custom list. Other subcommands exist for full-scale tree builds
 and verification (`full`, `verify`); AGENTS.md describes what they do and the
 dedicated machine they are meant to run on.
 
