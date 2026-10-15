@@ -229,6 +229,10 @@ the commit that actually ran.
 | 2026-10-15 | `5d4d814` | pc01 | 1600 | 1 | optimal | 21.837s | 5256 | 1681 | — | ~157MB | hoist capacity_bounds slice and avoid double-indexing in hot paths; pick time 21.5s; validation OK |
 | 2026-10-15 | `5d4d814` | pc01 | 2000 | 1 | optimal | 43.970s | 6723 | 2119 | 8203 | ~174MB | hoist capacity_bounds slice and avoid double-indexing in hot paths; pick time 43.6s; validation OK |
 | 2026-10-15 | `5d4d814` | pc01 | 2200 | 1 | optimal | 81.499s (1.36m) | 7477 | 2331 | 22639 | ~204MB | hoist capacity_bounds slice and avoid double-indexing in hot paths; new all-time record N=2200 build time 81.499s and pick time 80.8s (vs 81.762s / 81.1s at 35eeb8f); validation OK |
+| 2026-10-15 | `391646c` | pc01 | 1000 | 1 | optimal | 4.870s | 3124 | 1049 | — | — | replace hardcoded response 242 check with Response::WIN in min_state_val; pick time 4.7s; validation OK |
+| 2026-10-15 | `391646c` | pc01 | 1600 | 1 | optimal | 21.816s | 5256 | 1681 | — | ~156MB | replace hardcoded response 242 check with Response::WIN in min_state_val; pick time 21.5s; validation OK |
+| 2026-10-15 | `391646c` | pc01 | 2000 | 1 | optimal | 43.910s | 6723 | 2119 | 8273 | ~174MB | replace hardcoded response 242 check with Response::WIN in min_state_val; pick time 43.5s; validation OK |
+| 2026-10-15 | `391646c` | pc01 | 2200 | 1 | optimal | 81.982s (1.37m) | 7477 | 2331 | 22566 | ~204MB | replace hardcoded response 242 check with Response::WIN in min_state_val; explored states fell to 22566; validation OK |
 
 ## Notes
 
