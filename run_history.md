@@ -205,6 +205,10 @@ the commit that actually ran.
 | 2026-10-15 | `a1018db` | pc01 | 1600 | 1 | optimal | 22.046s | 5256 | 1681 | — | ~156MB | fast-path exact 2n - 1 singleton partitions in guess_and_cost; pick time 21.7s; validation OK |
 | 2026-10-15 | `a1018db` | pc01 | 2000 | 1 | optimal | 44.464s | 6723 | 2119 | 8186 | ~174MB | fast-path exact 2n - 1 singleton partitions in guess_and_cost; pick time 44.1s; validation OK |
 | 2026-10-15 | `a1018db` | pc01 | 2200 | 1 | optimal | 84.005s (1.40m) | 7477 | 2331 | 24995 | ~208MB | fast-path exact 2n - 1 singleton partitions in guess_and_cost; pick time 83.2s; validation OK |
+| 2026-10-15 | `2fae855` | pc01 | 1000 | 1 | optimal | 4.901s | 3124 | 1049 | — | — | reuse buckets array and fast-path singletons in build_into; pick time 4.7s; validation OK |
+| 2026-10-15 | `2fae855` | pc01 | 1600 | 1 | optimal | 21.992s | 5256 | 1681 | — | ~156MB | reuse buckets array and fast-path singletons in build_into; tied record 21.992s, pick time 21.6s; validation OK |
+| 2026-10-15 | `2fae855` | pc01 | 2000 | 1 | optimal | 44.243s | 6723 | 2119 | 8200 | ~174MB | reuse buckets array and fast-path singletons in build_into; pick time 43.8s; validation OK |
+| 2026-10-15 | `2fae855` | pc01 | 2200 | 1 | optimal | 84.841s (1.41m) | 7477 | 2331 | 24917 | ~208MB | reuse buckets array and fast-path singletons in build_into; pick time 84.1s; validation OK |
 
 ## Notes
 
@@ -268,6 +272,7 @@ the commit that actually ran.
 - The `2b1108b` rows demonstrated that eliminating intermediate `phase1_guesses` and `phase2_guesses` heap vectors from `SolverScratch` and evaluating active candidates and non-candidate guesses directly in-place during `min_state_val` (Phase 1 scanning `set` directly and Phase 2 scanning bit-unpacked slices directly) eliminated recurring memory allocation and copy churn across DFS branches, achieving a clean sweep of new all-time records across all benchmark sizes: N=1000 down to **4.932s** (pick 4.7s), N=1600 breaking the 22-second barrier (**21.956s**, pick 21.5s), N=2000 down to **44.253s** (pick 43.7s, -0.52s), and N=2200 down to **83.408s** (pick 82.5s, -1.35s). All runs passed policy tree validation with identical golden costs.
 - The `11a91ee` rows demonstrated that pre-slicing `g_row`, hoisting the `max_collisions` cutoff calculation outside the inner candidate comparison loop, and using unchecked slice indexing in `quick_bucket_eval` established new all-time records for N=1000 (**4.892s**, breaking below 4.90s for the first time, pick 4.7s) and N=2000 (**44.134s**, pick 43.7s).
 - The `a1018db` rows demonstrated that fast-pathing in-set candidate guesses achieving the theoretical minimum cost $2n - 1$ (all-singleton partition) directly in `OptimalPolicy::guess_and_cost` for candidate sets $n \le 15$ preserved exact optimal tie-breaking and reduced N=2200 build time to **84.005s** (pick time down to **83.2s**).
+- The `2fae855` rows demonstrated that avoiding per-node 243-vector allocations in `build_into` (reusing an array across DFS iterations) and fast-pathing singleton candidates directly without partitioning overhead eliminated >560,000 vector allocations across tree construction, tying the N=1600 record at **21.992s** and delivering **44.243s** at N=2000 while preserving exact policy tree structure.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
