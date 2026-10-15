@@ -1,21 +1,38 @@
 #!/usr/bin/env python3
-"""Plot every recorded full N=2340 run's progress against elapsed time.
+"""Plot every recorded full N=2340 run's progress, in a form that compares speed.
 
-One line per full run, x is elapsed seconds (log scale, because the runs span
-1.8 hours down to under 4 minutes) and y is root guesses evaluated. The point is
-to see *how* the search spends its time, not just how long it took: the baseline
-chews through thousands of root guesses, while the later runs settle the same
-tree after a few hundred, because they prune far harder.
+A raw work counter is a poor progress axis. The optimised runs evaluate far less
+of everything, so against a shared y-axis they sit *below* the baseline at every
+timestamp and read as "behind" when they are in fact doing thousands of times
+less work. Two panels fix that, and together they separate the two reasons a run
+got faster:
 
-Data comes from each run's own log, which is the authoritative record and is
-kept on the compute host:
+  1. Progress, as a percentage of that run's own total states evaluated. Every
+     curve runs 0 to 100, so the comparison is purely horizontal: the distance
+     to the right-hand end is the wall-time speedup. The shape also shows where
+     each run spends its effort.
+  2. Total states evaluated per run, on a log axis. This is the other half: how
+     much less work the optimised runs need at all.
+
+Data comes from each run's own log, which is the authoritative record and is kept
+on the compute host:
 
     scp user@pc01:'~/full-runs/*.log' ./full-run-logs/
 
     ./scripts/plot_full_run_progress.py --logs ./full-run-logs --out progress.png
 
-Every axis label is an explicit string, and a run with too few samples to draw a
-curve is still plotted as points rather than silently dropped.
+Honesty notes, because this plot has been wrong in these two ways before:
+
+  * The sampler ticks every 60 s, so the last `[progress]` line can be a minute
+    before the run finished. The denominator is therefore the run's own final
+    total from its summary (`States evaluated:`), not the last sample, and the
+    bar chart uses the same number. An earlier version instead appended a point
+    at the wall time carrying the last *sampled* count, which drew a flat tail
+    asserting the counter had stalled. It had not.
+  * One appended point remains, and it is not invented: at the run's wall time
+    it had finished all of its work, so (wall, 100%) is known exactly. The
+    segment leading to it is a straight interpolation between the last real
+    sample and that certain endpoint, and nothing in between is claimed.
 """
 
 import argparse
@@ -38,12 +55,13 @@ TERMS = {
 }
 
 PROGRESS_RE = re.compile(
-    r"^\[progress\]\s+elapsed=(\d+)s.*?root_guesses=(\d+)")
+    r"^\[progress\]\s+elapsed=(\d+)s.*?states=(\d+)")
 COMMIT_RE = re.compile(r"commit=([0-9a-f]+)")
 WALL_RE = re.compile(r"Wall time:\s*([0-9.]+)s")
+TOTAL_RE = re.compile(r"^States evaluated:\s*(\d+)")
 
 
-def human(seconds):
+def human_time(seconds):
     if seconds >= 3600:
         return "%.2f h" % (seconds / 3600.0)
     if seconds >= 60:
@@ -51,11 +69,20 @@ def human(seconds):
     return "%.1f s" % seconds
 
 
+def human_count(n):
+    if n >= 1_000_000:
+        return "%.1fM" % (n / 1_000_000.0)
+    if n >= 1_000:
+        return "%.1fk" % (n / 1_000.0)
+    return "%d" % n
+
+
 def parse(path):
-    """Pull the commit, the progress series and the wall time out of one log."""
+    """Pull the commit, the cumulative states series and the totals from a log."""
     commit = "unknown"
     points = []
     wall = None
+    total = None
     with open(path, "r", errors="replace") as fh:
         for line in fh:
             if commit == "unknown":
@@ -68,11 +95,10 @@ def parse(path):
             m = WALL_RE.search(line)
             if m:
                 wall = float(m.group(1))
-    # Deliberately no synthetic point at the wall time. The sampler ticks every
-    # 60 s, so the last sample can be a minute before the run finished, and
-    # inventing a final point at the last known count draws a flat tail that is
-    # not real data. The wall time goes in the legend instead.
-    return commit, points, wall
+            m = TOTAL_RE.match(line)
+            if m:
+                total = int(m.group(1))
+    return commit, points, wall, total
 
 
 def main():
@@ -90,58 +116,82 @@ def main():
     for name in sorted(os.listdir(args.logs)):
         if not name.endswith(".log"):
             continue
-        commit, points, wall = parse(os.path.join(args.logs, name))
+        commit, points, wall, total = parse(os.path.join(args.logs, name))
         if not points:
             print("  skipping %s: no [progress] lines" % name)
             continue
-        runs.append((commit, points, wall, name))
-
+        if total is None:
+            # Without the summary total the curve cannot be normalised, and
+            # guessing one is what produced the bad plot this replaces.
+            print("  skipping %s: no 'States evaluated:' summary line" % name)
+            continue
+        if total < points[-1][1]:
+            print("  skipping %s: summary total %d is below the last sample %d"
+                  % (name, total, points[-1][1]))
+            continue
+        runs.append((commit, points, wall, total, name))
     if not runs:
-        sys.exit("no runs with progress data found in %s" % args.logs)
+        sys.exit("no usable runs found in %s" % args.logs)
 
-    fig, ax = plt.subplots(figsize=(11.5, 6.8))
-    for commit, points, wall, name in runs:
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
+    # The slowest run anchors the speedup ratios.
+    slowest = max(r[2] for r in runs if r[2] is not None)
+
+    fig, (ax, axw) = plt.subplots(
+        1, 2, figsize=(14.0, 6.4), gridspec_kw={"width_ratios": [2.4, 1.0]})
+
+    order = sorted(runs, key=lambda r: r[2] if r[2] is not None else float("inf"))
+    for commit, points, wall, total, name in order:
         term = TERMS.get(commit[:8], "unlabelled")
-        label = "%s - %s" % (commit[:8], term)
-        detail = []
+        xs = [p[0] for p in points]
+        pct = [100.0 * p[1] / total for p in points]
         if wall is not None:
-            detail.append(human(wall))
-        detail.append("%d root guesses" % ys[-1])
-        label += " (%s)" % ", ".join(detail)
-        # A curve if there is one to draw, otherwise visible points.
-        if len(points) >= 2:
-            line, = ax.plot(xs, ys, marker="o", markersize=4, linewidth=1.8,
-                            label=label)
-        else:
-            line, = ax.plot(xs, ys, marker="o", markersize=6, linestyle="none",
-                            label=label)
-        # Show when the run finished as a marker on the time axis only. The
-        # root-guess count at that instant is unknown, so it gets no y value.
+            # Certain endpoint: the run had done all of its work by its wall
+            # time, whatever the sampler last saw.
+            xs.append(wall)
+            pct.append(100.0)
+        bits = []
         if wall is not None:
-            ax.axvline(wall, color=line.get_color(), linestyle=":", linewidth=1.2,
-                       alpha=0.7)
+            bits.append(human_time(wall))
+            if slowest > 0:
+                bits.append("%.1fx" % (slowest / wall))
+        bits.append("%s states" % human_count(total))
+        label = "%s - %s  (%s)" % (commit[:8], term, ", ".join(bits))
+        line, = ax.plot(xs, pct, marker="o", markersize=4, linewidth=1.9,
+                        label=label)
+        axw.barh("%s - %s" % (commit[:8], term), total,
+                 color=line.get_color(), height=0.55)
 
     ax.set_xscale("log")
     ax.set_xlabel("elapsed seconds within the run (log scale)")
-    ax.set_ylabel("root guesses evaluated so far  (a cost, lower is better)")
-    ax.set_title("Full N=2340 policy tree runs: root guesses over elapsed time\n"
-                 "fewer is better: a low curve means each root guess is doing more work",
-                 fontsize=12)
+    ax.set_ylabel("work done, as a percentage of that run's own total states")
+    ax.set_title("Full N=2340 runs: progress against elapsed time\n"
+                 "every curve ends at 100 percent, so the gap to the right is "
+                 "the speedup", fontsize=12)
+    ax.set_ylim(0, 105)
+    ax.set_axisbelow(True)
     ax.grid(True, which="both", alpha=0.25)
-    ax.legend(loc="upper left", fontsize=8.5)
+    ax.legend(loc="lower right", fontsize=8.5)
+
+    axw.set_xscale("log")
+    axw.set_xlim(left=1000)
+    axw.set_xlabel("total states evaluated (log scale)")
+    axw.set_title("Total work per run", fontsize=12)
+    axw.set_axisbelow(True)
+    axw.grid(True, which="both", axis="x", alpha=0.25)
+    axw.tick_params(labelsize=8)
 
     fig.tight_layout()
     fig.savefig(args.out, dpi=140)
 
     print("wrote %s from %d run(s):" % (args.out, len(runs)))
-    for commit, points, wall, name in runs:
-        last = points[-1]
-        print("  %-8s %-30s %4d samples, final t=%ss root=%s%s"
+    for commit, points, wall, total, name in order:
+        speedup = "" if wall is None else "  %.1fx vs slowest" % (slowest / wall)
+        print("  %-8s %-28s %2d samples, last sample t=%ss (%s of total), "
+              "total states=%s, wall=%s%s"
               % (commit[:8], TERMS.get(commit[:8], "unlabelled"), len(points),
-                 last[0], last[1],
-                 "" if wall is None else " (wall %s)" % human(wall)))
+                 points[-1][0], "%.0f%%" % (100.0 * points[-1][1] / total),
+                 human_count(total),
+                 "unknown" if wall is None else human_time(wall), speedup))
 
 
 if __name__ == "__main__":
