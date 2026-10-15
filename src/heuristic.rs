@@ -167,7 +167,36 @@ pub fn compute_max_branching_factor_seq_with_target(
     let mid = candidates.len() / 2;
     let (c_half1, c_half2) = candidates.split_at(mid);
     let rem_len = c_half2.len();
-    let data_ptr = matrix.data.as_ptr();
+    let num_guesses = matrix.num_guesses;
+    let data_c_g_ptr = matrix.data_c_g.as_ptr();
+
+    let mut stack_ptrs1 = [std::ptr::null::<crate::core::Response>(); 256];
+    let mut stack_ptrs2 = [std::ptr::null::<crate::core::Response>(); 256];
+    let mut heap_ptrs1 = Vec::new();
+    let mut heap_ptrs2 = Vec::new();
+    let (c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+        for (i, &c) in c_half1.iter().enumerate() {
+            unsafe {
+                *stack_ptrs1.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+            }
+        }
+        for (i, &c) in c_half2.iter().enumerate() {
+            unsafe {
+                *stack_ptrs2.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+            }
+        }
+        (&stack_ptrs1[..c_half1.len()], &stack_ptrs2[..c_half2.len()])
+    } else {
+        heap_ptrs1.reserve(c_half1.len());
+        for &c in c_half1 {
+            heap_ptrs1.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+        }
+        heap_ptrs2.reserve(c_half2.len());
+        for &c in c_half2 {
+            heap_ptrs2.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+        }
+        (&heap_ptrs1[..], &heap_ptrs2[..])
+    };
 
     for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
         let overlap = g_mask & c_mask;
@@ -198,10 +227,9 @@ pub fn compute_max_branching_factor_seq_with_target(
             continue;
         }
 
-        let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
         let mut mask = [0u64; 4];
-        for &c in c_half1 {
-            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+        for &c_base in c_half1_ptrs {
+            let r = unsafe { (*c_base.add(g)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
@@ -213,8 +241,8 @@ pub fn compute_max_branching_factor_seq_with_target(
         if half_unique + rem_len <= max_k {
             continue;
         }
-        for &c in c_half2 {
-            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+        for &c_base in c_half2_ptrs {
+            let r = unsafe { (*c_base.add(g)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
