@@ -2,10 +2,13 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(cuda_enabled)");
     println!("cargo:rerun-if-changed=src/gpu_kernel.cu");
 
-    if std::process::Command::new("nvcc")
-        .arg("--version")
-        .status()
-        .is_ok()
+    println!("cargo:rerun-if-env-changed=WORDLE_OPT_DISABLE_CUDA");
+
+    if std::env::var("WORDLE_OPT_DISABLE_CUDA").is_err()
+        && std::process::Command::new("nvcc")
+            .arg("--version")
+            .status()
+            .is_ok()
     {
         cc::Build::new()
             .cuda(true)
