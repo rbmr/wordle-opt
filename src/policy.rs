@@ -590,7 +590,7 @@ impl<'a> OptimalPolicy<'a> {
                     if let Some((cached_val, true)) = self.cache.get(hash) {
                         return cached_val;
                     }
-                    if bucket.len() <= 20 {
+                    if bucket.len() <= 15 {
                         let (q_val, is_exact) =
                             Solver::quick_bucket_eval(self.matrix, self.dict, &bucket);
                         if is_exact {
@@ -704,7 +704,7 @@ impl<'a> OptimalPolicy<'a> {
                             if lb >= cost_to_beat {
                                 return None;
                             }
-                        } else if p_len <= 20 {
+                        } else if p_len <= 15 {
                             has_uncached = true;
                             max_possible_slack += 1;
                         }
@@ -734,7 +734,7 @@ impl<'a> OptimalPolicy<'a> {
                         for j in 0..num_eval {
                             let r_idx = eval_indices[j] as usize;
                             let p_len = counts[r_idx] as usize;
-                            if p_len > 20 || cached_mask[r_idx] {
+                            if p_len > 15 || cached_mask[r_idx] {
                                 continue;
                             }
 
