@@ -1586,7 +1586,8 @@ impl<'a> Solver<'a> {
                 p_lbs[r_idx] = lb;
             }
 
-            if cost >= beta {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
@@ -1661,12 +1662,14 @@ impl<'a> Solver<'a> {
                     self.cache.insert(hash, used_val, false);
                 }
 
-                if cost >= beta {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
                     break;
                 }
             }
 
-            if cost >= beta {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
@@ -1685,6 +1688,12 @@ impl<'a> Solver<'a> {
                 }
                 if exact_vals[r_idx] > 0 {
                     continue;
+                }
+
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                if self.current_cost_so_far + cost >= current_global_beta {
+                    self.scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
                 }
 
                 let start = offsets[r_idx] as usize;
@@ -1718,6 +1727,7 @@ impl<'a> Solver<'a> {
                     return b + val;
                 }
                 // Propagate any tightening from the global beta.
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if self.current_cost_so_far + b + val >= current_global_beta {
                     self.scratch_sorted_sets[depth] = sorted_set;
                     return b + val;
