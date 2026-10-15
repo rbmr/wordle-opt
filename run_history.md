@@ -97,6 +97,10 @@ the commit that actually ran.
 | 2026-10-15 | `abb17ec` | pc01 | 1600 | 1 | optimal | 42.173s | 5256 | 1681 | 240 | ~253MB | guard branching factor computation in min_guess_val; validation OK |
 | 2026-10-15 | `abb17ec` | pc01 | 2000 | 1 | optimal | 90.106s (1.50m) | 6723 | 2119 | 12773 | ~302MB | guard branching factor computation in min_guess_val; regressed from 81.059s; validation OK |
 | 2026-10-15 | `abb17ec` | pc01 | 2200 | 1 | optimal | 205.528s (3.43m) | 7477 | 2331 | 46880 | ~354MB | guard branching factor computation in min_guess_val; regressed from 146.181s due to looser child beta in Pass 3; validation OK |
+| 2026-10-15 | `1711125` | pc01 | 1000 | 1 | optimal | 13.631s | 3124 | 1049 | — | — | defer Zobrist hashing in root pre-filter and restore tight min_guess_val bounds; validation OK |
+| 2026-10-15 | `1711125` | pc01 | 1600 | 1 | optimal | 40.980s | 5256 | 1681 | 240 | ~252MB | defer Zobrist hashing in root pre-filter and restore tight min_guess_val bounds; pick time 39.8s; validation OK |
+| 2026-10-15 | `1711125` | pc01 | 2000 | 1 | optimal | 81.102s (1.35m) | 6723 | 2119 | 7045 | ~284MB | defer Zobrist hashing in root pre-filter and restore tight min_guess_val bounds; pick time 80.2s; validation OK |
+| 2026-10-15 | `1711125` | pc01 | 2200 | 1 | optimal | 147.026s (2.45m) | 7477 | 2331 | 20111 | ~318MB | defer Zobrist hashing in root pre-filter and restore tight min_guess_val bounds; pick time 144.4s; validation OK |
 
 
 ## Notes
@@ -130,6 +134,7 @@ the commit that actually ran.
 - The full N=2340 `f9b82eb` row is taken from that run's own summary block (`Wall time: 252.639s (0.07h)`, `Total cost: 8001`, `Nodes: 2478`, `States evaluated: 26712`, peak `rss_mb=2315`, `Validation: OK`), captured via `./check_full.sh`. It solves the complete dictionary in 4.21 minutes (a 25.6x speedup over the 1.80h milestone from a67dd02, beating the 20-minute milestone), with states evaluated reduced by 5,231x (26,712 vs 139,753,702).
 - The full N=2340 `0c58727` row is taken from that run's own summary block (`Wall time: 231.972s (0.06h)`, `Total cost: 8001`, `Nodes: 2478`, `States evaluated: 26641`, peak `rss_mb=2308`, `Validation: OK`), captured via `./check_full.sh`. Evaluating largest candidate buckets first in root filter shaved another 20.7s off the full solve (3.87m vs 4.21m, an 8.2% speedup, 27.9x faster than the baseline a67dd02).
 - The `abb17ec` rows demonstrated that guarding branching factor computation in `min_guess_val` prevented tight capacity lower bounds from being inserted into `p_lbs` and cache, widening `child_beta` for sibling buckets in recursive Pass 3 and dramatically increasing explored states (e.g. 46.8k vs 22.2k at N=2200, regressing wall time from 146.181s to 205.528s). Guard reverted in subsequent commit.
+- The `1711125` rows confirm that reverting the guard in `min_guess_val` restored tight recursive child bounds (reducing N=2200 states from 46.8k back to 20.1k and runtime from 205.528s to 147.026s), while branchlessly counting responses and deferring Zobrist hash accumulation in root pre-filtering eliminated over 34 million unused XORs and lookups on discarded guesses.
 - Rows are keyed by `(commit, seed, candidates)`: one commit can have several
   rows, one per size, which is what makes the size-vs-time comparison possible.
 
