@@ -716,7 +716,7 @@ impl<'a> Solver<'a> {
         if c_len == 2 {
             return 3;
         }
-        if c_len <= 15 {
+        if c_len <= 20 {
             let (val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, set);
             if is_exact {
                 self.cache.insert(hash, val, true);
@@ -1592,7 +1592,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 let p_len = counts[r_idx] as usize;
-                if p_len > 15 {
+                if p_len > 20 {
                     continue;
                 }
                 let start = offsets[r_idx] as usize;
@@ -1626,7 +1626,7 @@ impl<'a> Solver<'a> {
                 return cost;
             }
 
-            // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
+            // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 20).
             // Only reached if small buckets alone did not exceed beta.
             for i in 0..num_eval {
                 let r_idx = eval_indices[i] as usize;
@@ -1634,7 +1634,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
                 let p_len = counts[r_idx] as usize;
-                if p_len <= 15 {
+                if p_len <= 20 {
                     continue;
                 }
                 let start = offsets[r_idx] as usize;
