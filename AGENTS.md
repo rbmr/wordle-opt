@@ -325,6 +325,15 @@ Operationally:
   it with `WORDLE_OPT_ORACLE_UPDATE=1 cargo test --release --test property_cli`
   when the generator changes, and never delete an entry to make a failure go
   away.
+- `tests/optimality_audit.rs` checks optimality where brute force on the whole
+  instance cannot reach: it brute-forces every small subtree of the committed
+  full tree, re-solves larger subtrees from scratch, fuzzes alternative guesses
+  at each node, checks metamorphic relations (renamed letters, permuted
+  positions, added or dropped guesses and candidates) and solves instances with
+  planted, provably known optima. It has its own feedback function, tree walker
+  and oracle. The full-scale variant rebuilds the 2,340-candidate tree with the
+  current solver and audits it; run it after any change to solver, bound or
+  cache logic: `cargo test --release --test optimality_audit -- --ignored`.
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.
