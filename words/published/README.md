@@ -28,7 +28,7 @@ Paskov, "An Exact Solution to Wordle", *Operations Research* 73(3), 2025.
 ## Reproduced by wordle-opt
 
 All five were solved by `wordle-opt solve --strategy optimal` at commit
-`6118a35` on the compute host (`pc01`, 16 cores) via `deploy_and_bench.sh`.
+`6118a35` on a 16-core machine.
 Each tree passed validation, and each opens with the published first guess
 (salet for `orig`, `nyt20220215`, `nyt20220316`; tarse for the other two).
 
@@ -43,12 +43,12 @@ Each tree passed validation, and each opens with the published first guess
 The bundled `words/candidates.txt` (2,340 words) is the `nyt20220830` hidden
 list plus 31 further words, so its optimum (8,001) has no published counterpart.
 
-`tests/optimality_audit.rs` re-solves these instances and requires the
+`tests/published_optima.rs` re-solves these instances and requires the
 published optimum. Both tests are ignored by default because each instance is
 a full-scale solve: `published_optima` covers the four ~2,300-candidate
-instances (about 30 s each on `pc01`) and `published_optimum_3158` the
-3,158-candidate one (about 6 minutes on `pc01`).
+instances (about 30 s each on 16 cores) and `published_optimum_3158` the
+3,158-candidate one (about 6 minutes on 16 cores).
 
 ```bash
-cargo test --release --test optimality_audit published_optim -- --ignored --nocapture
+cargo test --release --test published_optima -- --ignored --nocapture
 ```

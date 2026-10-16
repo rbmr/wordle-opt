@@ -1,10 +1,3 @@
-<!--
-  This file is for humans: people using the CLI, people using the viewer, and
-  people who want to understand the project. Agent-facing process rules,
-  compute-host operations and the full-run discipline live in AGENTS.md.
-  Please add those there, not here.
--->
-
 # wordle-opt
 
 wordle-opt computes the optimal strategy for Wordle-style word games. You give
@@ -66,13 +59,13 @@ directory.
 Solve the bundled lists and write the tree to a file:
 
 ```bash
-wordle-opt solve --strategy optimal --output tree.json
+wordle-opt solve --output tree.json
 ```
 
 Solve your own lists:
 
 ```bash
-wordle-opt solve --strategy optimal \
+wordle-opt solve \
   --guesses my_guesses.txt \
   --candidates my_answers.txt \
   --output my_tree.json
@@ -108,7 +101,7 @@ Builds a policy tree, checks it, and writes it as JSON.
 | flag | meaning |
 |---|---|
 | `--output <path>` | Where to write the tree. Required. |
-| `--strategy <name>` | `optimal`, or one of the faster heuristics `min-remaining` (fewest expected remaining answers) and `max-freq` (most common letters). Required. |
+| `--strategy <name>` | `optimal` (default), or one of the faster heuristics `min-remaining` (fewest expected remaining answers) and `max-freq` (most common letters). |
 | `--guesses <path>` | Allowed guesses. Defaults to the bundled 14,855 words. |
 | `--candidates <path>` | Possible answers. Defaults to the bundled 2,340 words. |
 | `--max-candidates <N>` | Use only the first `N` answers in alphabetical order. |
@@ -121,10 +114,6 @@ Builds a policy tree, checks it, and writes it as JSON.
 When it finishes, `solve` prints the total cost, the average number of guesses
 and the build time. Its `Max depth` line counts the edges from the root, so the
 most guesses any answer needs is that number plus one.
-
-For an optimal solve with more than 500 answers, `solve` prints a warning that
-mentions the project's compute host. That warning is meant for the project's
-own setup and can be ignored.
 
 ### `validate`
 
@@ -245,25 +234,28 @@ run the real solver on real word lists. The main checks are:
 - **Golden tests** in `src/solver.rs` fix the optimal cost for several subsets
   of the bundled lists. A change that alters one of these numbers is a bug
   until shown otherwise.
-- **`tests/property_cli.rs`** runs the binary on random word lists and
-  compares its result with a brute-force solver.
-- **`tests/optimality_audit.rs`** checks optimality on lists too large for
-  brute force. It solves every small part of the full optimal tree by brute
-  force, re-solves the larger parts from scratch, checks that no other guess
-  at any node gives a lower cost, and checks that renaming letters, reordering
-  letter positions or adding unused guesses does not change the result. It
-  uses its own implementation of the Wordle response rules, so a bug in the
-  solver's implementation does not also affect the check.
+- **Tests in `tests/`**, one file per kind of check. They share helpers in
+  `tests/common/`, which include their own implementation of the Wordle
+  response rules, their own tree checker and their own brute-force solver, so
+  a bug in the solver's code does not also affect the check.
 
-Some tests are skipped by default because each one solves a full-size list.
-Run them with:
+| file | what it checks |
+|---|---|
+| `brute_force.rs` | Small word lists: the solver, `src/naive.rs` and the brute-force solver in `tests/common/` must find the same optimum. |
+| `subtrees.rs` | Every part of an optimal tree must itself be optimal. Small parts of the full bundled tree and of other solved lists are checked by brute force, larger parts by solving them again from scratch. |
+| `alternative_guesses.rs` | At every step of the tree, no other guess may lead to a lower total cost. |
+| `metamorphic.rs` | Renaming letters, reordering letter positions or adding unused guesses must not change the optimum. Adding guesses must not raise it, and removing an answer must lower it. |
+| `planted_optima.rs` | Lists of up to about 240 answers built so that the optimum is known in advance. |
+| `published_optima.rs` | The published lists in `words/published/` must reach the published optima. |
+| `full_scale.rs` | Rebuilds the full bundled tree and runs the checks above on it. |
+| `cli.rs` | The binary reads word lists from files and writes and validates a tree. |
+
+`published_optima.rs` and `full_scale.rs` are skipped by default because each
+test solves full-size lists, which takes from seconds to minutes. Run them with:
 
 ```bash
-cargo test --release --test optimality_audit -- --ignored --nocapture
+cargo test --release --test published_optima --test full_scale -- --ignored --nocapture
 ```
-
-These include a rebuild and audit of the full bundled tree, and re-solves of
-the published lists in `words/published/`.
 
 CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release --
 -D warnings`, `cargo fmt -- --check`, and the viewer's tests

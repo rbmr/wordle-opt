@@ -17,20 +17,13 @@ use std::collections::HashMap;
 use std::env;
 use std::time::Instant;
 
-/// Short git commit hash of the working tree, or "unknown" if it can't be
-/// determined. Every run is stamped with this so a number in
-/// `run_history.md` can always be traced back to the exact code that
-/// produced it - a claim about performance is only as good as being able to
-/// check it against the commit it came from.
+/// Short git commit hash of the code being run, or "unknown". `solve` prints
+/// it and stores it in the progress series, so a timing can be traced to the
+/// code that produced it.
 ///
-/// Prefers `WORDLE_OPT_COMMIT` (set by `deploy_and_bench.sh` from the
-/// *local* repo before rsyncing) over running `git rev-parse` here: the
-/// remote build directory deliberately has no `.git` (rsync excludes it), so
-/// `git rev-parse` there either fails or - worse - silently reports the HEAD
-/// of some unrelated, stale git checkout that happens to sit in the same
-/// directory, mislabeling a run with a commit hash that isn't what actually
-/// ran. Only a git repo that is *actually the source of the code running
-/// right now* can answer this correctly, which on the remote is never true.
+/// `WORDLE_OPT_COMMIT` takes precedence over `git rev-parse`. A build made
+/// from a copy of the source without `.git` should set it, because
+/// `git rev-parse` there fails or reports an unrelated repository.
 fn git_commit_hash() -> String {
     if let Ok(commit) = std::env::var("WORDLE_OPT_COMMIT")
         && !commit.trim().is_empty()
@@ -47,32 +40,8 @@ fn git_commit_hash() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn hostname() -> String {
-    std::fs::read_to_string("/etc/hostname")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "unknown".to_string())
-}
-
-/// Whether `host` is a hostname of the designated compute machine. `pc01` is
-/// the bare-metal compute host since the October 2026 migration; the older
-/// names are kept so historical setups keep working.
-fn is_compute_hostname(host: &str) -> bool {
-    matches!(host, "pc01" | "ubuntu-main" | "compute")
-}
-
-/// Whether this process is running on the designated high-memory/high-core
-/// compute host, as opposed to a laptop/dev machine. Gates both the
-/// transposition table size and which CLI operations are
-/// allowed to run locally (`run_full`, large optimal tree builds) - kept as a
-/// single check so the two decisions can't silently drift apart if the
-/// compute host's name ever changes.
-pub fn is_compute_host() -> bool {
-    is_compute_hostname(&hostname())
-}
-
 /// Draws one random subset of `size` distinct candidate indices (no
-/// replacement) from `rng`, sorted. Shared by `benchmark-random` and
-/// `diagnose` so both draw samples the same way.
+/// replacement) from `rng`, sorted.
 pub(crate) fn sample_random_subset(
     rng: &mut fastrand::Rng,
     n_candidates: usize,
@@ -100,215 +69,12 @@ fn mix64(mut z: u64) -> u64 {
 
 /// Derives the RNG stream that draws the subset for one (seed, size) pair.
 ///
-/// Both `run_benchmark_random` and the old `run_diagnose` used to share one
-/// `fastrand::Rng` sequentially across an entire `sizes` list, so the subset
-/// drawn for a given size silently depended on what other sizes preceded it
-/// in that specific invocation's list - two runs asking for "the same N"
-/// could draw different subsets if their `sizes` lists differed, which
-/// silently invalidated any comparison keyed only on (seed, N). This was
-/// caught via `diagnose_history.md`: commit f618964 (`sizes=[750, 1000,
-/// 1100, ...]`) and commit ca7f4a9 (`sizes=[1000, 1200]`) drew two different
-/// N=1000 subsets under the identical seed, since N=1000 was the 2nd draw in
-/// one run and the 1st in the other.
-///
-/// Deriving the stream from `(seed, size)` alone - independent of list
-/// content or order - fixes this: the subset for a given size now depends
-/// only on the seed and that size, never on what else was requested
-/// alongside it.
+/// The stream depends on the seed and the size only, so `--max-candidates N
+/// --sample-seed S` always selects the same candidates for the same `N` and
+/// `S`. Timings are only comparable between runs on the same subset.
 fn subset_rng(seed: u64, size: usize) -> fastrand::Rng {
     let combined = mix64(seed) ^ mix64((size as u64).wrapping_mul(0x9E3779B97F4A7C15));
     fastrand::Rng::with_seed(mix64(combined))
-}
-
-/// Output paths for a full run, given the environment values they depend on.
-/// They live in the home directory rather than the rsync target: the build
-/// directory is deleted and rewritten by the next deploy, and a finished
-/// run's policy tree and progress series must survive it.
-fn full_output_paths_from(
-    home: Option<std::ffi::OsString>,
-    out: Option<String>,
-    stats: Option<String>,
-) -> (std::path::PathBuf, std::path::PathBuf) {
-    let home = home
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let out = out
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| home.join("optimal-2340.json"));
-    let stats = stats
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| home.join("optimal-2340-progress.parquet"));
-    (out, stats)
-}
-
-/// [`full_output_paths_from`] with the current environment:
-/// `WORDLE_OPT_POLICY_OUT` / `WORDLE_OPT_POLICY_STATS` override the defaults.
-fn full_output_paths() -> (std::path::PathBuf, std::path::PathBuf) {
-    full_output_paths_from(
-        std::env::var_os("HOME"),
-        std::env::var("WORDLE_OPT_POLICY_OUT").ok(),
-        std::env::var("WORDLE_OPT_POLICY_STATS").ok(),
-    )
-}
-
-fn run_full(matrix: &ResponseMatrix, dict: &Dictionary) {
-    // Restored 2026-09-16: this guard was silently commented out in commit
-    // ffb81d2 ("Perf: Prune branches using parent's max_k before full
-    // capacity check") - a commit whose message describes an unrelated
-    // pruning optimization and says nothing about disabling this check.
-    // Without it, nothing stops `full` (an exhaustive N=2340 solve) from
-    // being launched on the tiny 2-core/4GB `assistant` VM, which is
-    // supposed to stay lightweight and available - see AGENTS.md and the
-    // task guidance on why that machine must never run heavy computation.
-    if !is_compute_host() {
-        eprintln!(
-            "HARD GUARD: full run must execute on the compute host (hostname 'pc01'). Use rsync + ssh, or deploy_and_bench.sh."
-        );
-        std::process::exit(1);
-    }
-
-    let all_candidates: Vec<usize> = (0..dict.candidates.len()).collect();
-    let n_candidates = all_candidates.len();
-    let commit = git_commit_hash();
-    let host = hostname();
-    println!(
-        "Running full N={} optimal policy tree build... commit={} host={}",
-        n_candidates, commit, host
-    );
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-
-    // The policy JSON is the deliverable, and the progress series is what
-    // makes day-over-day comparison possible. Both live in the home
-    // directory rather than the build directory: the latter is deleted and
-    // rewritten by the next deploy, and these files must survive it.
-    let (out_path, stats_path) = full_output_paths();
-
-    let observer = std::sync::Arc::new(crate::policy::BuildObserver::default());
-    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    apply_memory_bounds();
-    let opts = BuildOptions {
-        collect_samples: true,
-        progress: true,
-        // 1 << 27 units x 16 bytes = 2 GB. Deliberately smaller than the
-        // cost-only full run's 512 M units (8 GB): this run also holds the
-        // equivalence cache, and the first attempt was OOM-killed with both
-        // at their maxima.
-        cache_entries: 1 << 27,
-        observer: Some(std::sync::Arc::clone(&observer)),
-        ..Default::default()
-    };
-    let cpu_start = process_cpu_seconds();
-    let start = Instant::now();
-    let (progress_thread, progress_samples) =
-        spawn_build_progress(&observer, std::time::Duration::from_secs(60), start, &done);
-    let (tree, stats) = match crate::policy::build_policy_tree(
-        matrix,
-        dict,
-        Strategy::Optimal,
-        &all_candidates,
-        &opts,
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("full: {e}");
-            std::process::exit(1);
-        }
-    };
-    let elapsed = start.elapsed();
-    done.store(true, std::sync::atomic::Ordering::Relaxed);
-    let _ = progress_thread.join();
-    let mut stats = stats;
-    merge_progress_samples(&mut stats, &progress_samples);
-
-    // Report the build's own numbers before touching the filesystem: a write
-    // failure must not discard the result of a multi-hour run.
-    println!("\n=== FULL POLICY TREE COMPLETE ===");
-    println!("Strategy: {}", Strategy::Optimal.name());
-    println!("Candidates: {}", n_candidates);
-    println!("Nodes: {}", stats.summary.nodes);
-    println!("Edges: {}", stats.summary.edges);
-    println!("Leaves: {}", stats.summary.leaves);
-    println!("Max depth: {}", stats.summary.max_depth);
-    println!("Total cost: {}", stats.summary.total_cost);
-    println!(
-        "Mean guesses: {:.6}",
-        stats.summary.total_cost as f64 / n_candidates as f64
-    );
-    println!(
-        "Wall time: {:.3}s ({:.2}h)",
-        elapsed.as_secs_f64(),
-        elapsed.as_secs_f64() / 3600.0
-    );
-    if let (Some(c0), Some(c1)) = (cpu_start, process_cpu_seconds()) {
-        println!(
-            "Avg busy cores: {:.1} (cpu {:.1}s over wall {:.1}s)",
-            (c1 - c0) / elapsed.as_secs_f64(),
-            c1 - c0,
-            elapsed.as_secs_f64()
-        );
-    }
-    println!("States evaluated: {}", stats.summary.states_evaluated);
-    println!("Guesses evaluated: {}", stats.summary.guesses_evaluated);
-    println!("Bounds pruned: {}", stats.summary.pruned_by_bounds);
-    println!("Equiv pruned: {}", stats.summary.pruned_by_equivalence);
-    println!("Cache hits: {}", stats.summary.cache_hits);
-    println!(
-        "Dictionary hash: {}",
-        crate::policy::hash_hex(tree.dictionary_hash)
-    );
-
-    // The solve is finished. Only now pay for the readable serialization, so
-    // it adds no meaningful overhead to the solve itself.
-    let serialized = match tree.to_readable(dict) {
-        Ok(r) => r.to_json(),
-        Err(e) => {
-            eprintln!("full: {e}");
-            std::process::exit(1);
-        }
-    };
-    if let Err(e) = std::fs::write(&out_path, &serialized) {
-        eprintln!("full: cannot write {}: {e}", out_path.display());
-        std::process::exit(1);
-    }
-
-    // Self-validate the written bytes (round-trip through the reader), so a
-    // full run can never report success on a tree the validator rejects.
-    let report = match validate_bytes(&serialized) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("full: internal error: written tree failed validation: {e}");
-            std::process::exit(1);
-        }
-    };
-    if report.total_cost != stats.summary.total_cost {
-        eprintln!(
-            "full: internal error: validator total {} disagrees with builder total {}",
-            report.total_cost, stats.summary.total_cost
-        );
-        std::process::exit(1);
-    }
-
-    let meta = crate::policy_stats::StatsMeta {
-        strategy: Strategy::Optimal.name().to_string(),
-        dictionary_hash: crate::policy::hash_hex(tree.dictionary_hash),
-        commit: commit.clone(),
-        num_guesses: dict.guesses.len() as u32,
-        num_candidates: n_candidates as u32,
-        root_candidates: n_candidates as u32,
-    };
-    if let Err(e) =
-        crate::policy_stats::write_parquet(std::path::Path::new(&stats_path), &stats, &meta)
-    {
-        eprintln!("full: warning: could not write progress series: {e}");
-    }
-
-    println!("Wrote: {} ({} bytes)", out_path.display(), serialized.len());
-    println!(
-        "Stats: wrote {} progress sample(s) to {} (parquet)",
-        stats.samples.len(),
-        stats_path.display()
-    );
-    println!("Validation: OK (edge iff possible at every node)");
 }
 
 /// Minimal `--key value` / `--key=value` / `--flag` argument parser. Positional
@@ -593,7 +359,7 @@ fn run_solve_cli(args: &[String]) {
         print_solve_usage();
         std::process::exit(2);
     };
-    let Some(strategy) = flags.get("strategy").and_then(Strategy::parse) else {
+    let Some(strategy) = Strategy::parse(flags.get_or("strategy", "optimal")) else {
         eprintln!(
             "solve: --strategy must be one of: {}\n",
             Strategy::all()
@@ -620,18 +386,13 @@ fn run_solve_cli(args: &[String]) {
     let (dict, selection) = load_dict_from_flags(&flags, max_candidates);
     let n = dict.candidates.len();
     println!(
-        "solve: strategy={} candidates={} guesses={} selection=\"{}\"",
+        "solve: strategy={} candidates={} guesses={} selection=\"{}\" commit={}",
         strategy.name(),
         n,
         dict.guesses.len(),
-        selection
+        selection,
+        git_commit_hash()
     );
-    if strategy == Strategy::Optimal && !is_compute_host() && n > 500 {
-        eprintln!(
-            "WARNING: building an optimal policy tree for N={n} off the compute host will be very slow; \
-             run it on `compute` (or use --max-candidates for an example)."
-        );
-    }
 
     println!("Computing response matrix...");
     let matrix = ResponseMatrix::new(&dict);
@@ -688,6 +449,11 @@ fn run_solve_cli(args: &[String]) {
             elapsed.as_secs_f64()
         );
     }
+    println!("States evaluated: {}", stats.summary.states_evaluated);
+    println!("Guesses evaluated: {}", stats.summary.guesses_evaluated);
+    println!("Bounds pruned: {}", stats.summary.pruned_by_bounds);
+    println!("Equiv pruned: {}", stats.summary.pruned_by_equivalence);
+    println!("Cache hits: {}", stats.summary.cache_hits);
     println!(
         "Dictionary hash: {}",
         crate::policy::hash_hex(tree.dictionary_hash)
@@ -837,14 +603,12 @@ fn print_cli_usage() {
     println!(
         "wordle-opt: Exact Wordle solver and decision-policy generator\n\n\
 USAGE:\n    \
-wordle-opt solve --output <path> --strategy <optimal|min-remaining|max-freq> [OPTIONS]\n    \
+wordle-opt solve --output <path> [--strategy <optimal|min-remaining|max-freq>] [OPTIONS]\n    \
 wordle-opt validate <tree.json>\n    \
-wordle-opt full\n    \
 wordle-opt verify\n\n\
 SUBCOMMANDS:\n    \
 solve       Generate a decision-policy tree and write it as readable JSON\n    \
 validate    Validate a policy tree against the edge-iff-possible invariant\n    \
-full        Run the full 2340-word optimal tree build on compute\n    \
 verify      Run differential fuzzing against naive solver reference\n\n\
 Use 'wordle-opt solve --help' for options on solving word lists."
     );
@@ -854,10 +618,10 @@ fn print_solve_usage() {
     println!(
         "wordle-opt solve: generate a policy tree for a word list\n\n\
 USAGE:\n    \
-wordle-opt solve --output <path> --strategy <optimal|min-remaining|max-freq> [OPTIONS]\n\n\
+wordle-opt solve --output <path> [--strategy <optimal|min-remaining|max-freq>] [OPTIONS]\n\n\
 OPTIONS:\n    \
 --output <path>                 Path to write the policy tree JSON (required)\n    \
---strategy <strategy>           Policy strategy: optimal | min-remaining | max-freq (required)\n    \
+--strategy <strategy>           Policy strategy: optimal | min-remaining | max-freq [default: optimal]\n    \
 --guesses <path>                Valid guesses file (one word per line) [default: bundled 14,855 words]\n    \
 --candidates <path>             Secret candidates file (one word per line) [default: bundled 2,340 words]\n    \
 --max-candidates <N>            Solve for the first N candidates only\n    \
@@ -887,11 +651,6 @@ pub fn run_cli() {
     match args.get(1).map(String::as_str) {
         Some("solve") => run_solve_cli(&args[2..]),
         Some("validate") => run_validate_cli(&args[2..]),
-        Some("full") => {
-            let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
-            let matrix = ResponseMatrix::new(&dict);
-            run_full(&matrix, &dict);
-        }
         Some("verify") => {
             let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
             let matrix = ResponseMatrix::new(&dict);
@@ -1008,47 +767,6 @@ mod tests {
             d.contains("full list"),
             "the full list must be described: {d}"
         );
-    }
-
-    /// The compute host must be recognised by its current name, or the full
-    /// run / benchmark guards refuse to run and the transposition table
-    /// silently falls back to its small non-compute size. Dev machines must
-    /// not be recognised.
-    #[test]
-    fn compute_hostnames_are_recognised() {
-        assert!(is_compute_hostname("pc01"));
-        assert!(is_compute_hostname("compute"));
-        assert!(is_compute_hostname("ubuntu-main"));
-        assert!(!is_compute_hostname("helios"));
-        assert!(!is_compute_hostname("assistant"));
-        assert!(!is_compute_hostname(""));
-    }
-
-    /// A full run's outputs default to the home directory (not the rsync
-    /// target, which the next deploy deletes) and can be overridden.
-    #[test]
-    fn full_output_paths_default_to_home_and_honor_overrides() {
-        use std::path::PathBuf;
-        let (out, stats) = full_output_paths_from(Some("/home/robert".into()), None, None);
-        assert_eq!(out, PathBuf::from("/home/robert/optimal-2340.json"));
-        assert_eq!(
-            stats,
-            PathBuf::from("/home/robert/optimal-2340-progress.parquet")
-        );
-
-        let (out, stats) = full_output_paths_from(
-            Some("/home/robert".into()),
-            Some("/tmp/tree.json".to_string()),
-            Some("/tmp/progress.ndjson".to_string()),
-        );
-        assert_eq!(out, PathBuf::from("/tmp/tree.json"));
-        assert_eq!(stats, PathBuf::from("/tmp/progress.ndjson"));
-
-        // Without HOME the defaults are still relative, never absolute paths
-        // into someone else's directory.
-        let (out, stats) = full_output_paths_from(None, None, None);
-        assert_eq!(out, PathBuf::from("./optimal-2340.json"));
-        assert_eq!(stats, PathBuf::from("./optimal-2340-progress.parquet"));
     }
 
     /// Samples from the progress thread and the builder must come out in time

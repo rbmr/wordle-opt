@@ -218,3 +218,13 @@ mod tests {
 fn test_cache_size_not_power_of_two() {
     let _cache = GlobalCache::new(1000);
 }
+
+/// The largest storable cost, (1 << 18) - 1, round-trips without overflowing
+/// into the neighbouring fields.
+#[test]
+fn test_cache_stores_max_value() {
+    let cache = GlobalCache::new(1024);
+    let max_val = (1 << 18) - 1;
+    cache.insert(12345, max_val, true);
+    assert_eq!(cache.get(12345), Some((max_val, true)));
+}

@@ -74,7 +74,7 @@ static SENTINEL_BETA: AtomicU32 = AtomicU32::new(u32::MAX);
 /// Per-shard entry cap for the equivalence cache. Each cached projection is an
 /// `Arc<Vec<u64>>` of one bit per guess (~2 KB for the full 14,855-word list),
 /// so the default cap of 65,536 entries per shard permits tens of GB in the
-/// worst case - more than the compute host has. A large run can lower it with
+/// worst case. A large run can lower it with
 /// [`set_equiv_cache_cap`] to bound memory at some cost in hit rate.
 static EQUIV_CACHE_CAP: AtomicUsize = AtomicUsize::new(65_536);
 
@@ -373,16 +373,8 @@ impl<'a> Solver<'a> {
             2 => return 3,
             _ => {}
         }
-        let cache_size = if crate::is_compute_host() {
-            // 512 M units x 16 bytes each (two AtomicU64 slots per unit) =
-            // 8 GB, which is the whole reason the cost-only full run is tight
-            // on the 16 GB compute host. The policy-tree full run uses a
-            // smaller table (see run_full) because it also holds the
-            // equivalence cache and the tree.
-            512 * 1024 * 1024
-        } else {
-            64 * 1024 * 1024
-        };
+        // 64 M units x 16 bytes (two AtomicU64 slots per unit) = 1 GB.
+        let cache_size = 64 * 1024 * 1024;
         let global_cache = crate::cache::GlobalCache::new(cache_size);
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
 

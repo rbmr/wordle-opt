@@ -25,8 +25,8 @@ writer's update can occasionally be lost. This does not affect correctness
 - alpha-beta search with a transposition table is correct even when entries
 are lost, since a lost entry just costs a redundant recompute, not a wrong
 answer - so the code accepts the race rather than paying for a
-compare_exchange retry loop under contention. See issue #4 for the original
-analysis and `src/cache.rs`'s comment on `insert()`.
+compare_exchange retry loop under contention. See the comment on `insert()`
+in `src/cache.rs`.
 
 ## 2. Capacity Bounds (`src/heuristic.rs::capacity_bound`)
 
@@ -58,13 +58,7 @@ root tasks to launch is filtered.
 
 The surviving root candidates are then sorted by their lower bound and
 expected-remaining score, so the most promising guesses are dispatched to
-`rayon` first and tighten the shared `beta` earlier. NOTE: the intended
-benefit (later root tasks pruned quickly once `beta` is tight) is a
-hypothesis, not a measured result. A full N=2340 run at this ordering
-(maintainer, commit 6dfb74a) solved only 673/14,472 root guesses in 11
-minutes, so any speedup it gives at full scale is unproven. An earlier
-revision of this section claimed a 69s full run; that claim was false (no
-run completed) and has been retracted - see issue #1.
+`rayon` first and tighten the shared `beta` earlier.
 
 ## 4. Move Ordering (`src/heuristic.rs::sort_guesses_by_expected_remaining`)
 
@@ -104,50 +98,37 @@ apply.
 
 ## Known Scaling Behavior: depth transitions, not a smooth curve
 
-Historical diagnostic runs (see `diagnose_history.md`) showed avg
-cost/candidate scaling smoothly from N=1000 to N=1500 (~3.13 -> ~3.26
-guesses/candidate) while wall-clock time jumped ~25x. The cause is `max_depth` - the
-deepest guess-sequence the search has to explore to *prove* optimality -
-stepping from 4 to 5 somewhere between N=1100 and N=1200. That single
-step, not smooth growth in N, dominates: wall time jumped 5.2x for only
-a 1.09x increase in N right at that transition, and the transposition
-table's cache-hit rate dropped from ~61-63% to ~46-56% at the same
-point.
+Solve time does not grow smoothly with the number of candidates. In
+measurements with an earlier version, the average cost per candidate grew
+smoothly from N=1000 to N=1500 (about 3.13 to 3.26 guesses), while wall-clock
+time grew about 25 times. The cause was `max_depth`, the deepest guess sequence
+the search has to explore to prove optimality, which stepped from 4 to 5
+between N=1100 and N=1200. At that step, wall time grew 5.2 times for a 1.09
+times larger N, and the transposition table's hit rate fell from about 61-63%
+to about 46-56%.
 
-Why a depth transition costs so much more than sample-count growth
-alone would suggest: transposition-table reuse depends on different
-guess orderings converging on the *same* candidate subset, and the
-number of distinct subsets reachable grows combinatorially with depth -
-so reuse gets rarer each level deeper. Cost-per-candidate barely moves
-because only a minority of candidates in a given sample actually need
-the extra guess, but the search still has to exhaustively rule out a
-shallower solution for the *whole* set before it can conclude a deeper
-one is needed - and that exhaustive ruling-out is what balloons.
+A depth step costs more than the growth in N suggests because table reuse
+depends on different guess orders reaching the same candidate subset, and the
+number of distinct subsets grows quickly with depth. The cost per candidate
+barely moves, because only a few candidates need the extra guess, but the
+search still has to rule out a shallower solution for the whole set before it
+can accept a deeper one.
 
-This matters for the N=2340/10-hour goal: expect similar step-function
-jumps, not smooth extrapolation, at every depth threshold the full-scale
-search crosses (it will almost certainly need depth 5, likely 6, for the
-hardest real Wordle answers). Improving cache/transposition-table reuse
-at depth, or reducing how often the search re-proves a shallower
-solution impossible before searching deeper, looks like a higher-leverage
-target than per-node micro-optimization - though this is one investigation
-at one point in the search space, not a proven optimization strategy;
-treat it as a lead to chase, not a conclusion to build on unverified.
+So timings at small N cannot be extrapolated to large N with a smooth curve.
+Expect a jump at each depth the search has to cross.
 
 ## Verifying claims in this document
 
-Every algorithmic claim here should be checkable against the code it cites
-and against `cargo test --release` (the golden regression tests in
-`src/solver.rs` pin down exact expected costs and tree validity for fixed inputs) or
-`run_history.md` (deterministic, commit-stamped timing and tree statistics). If a future change
-makes a section here inaccurate, fix the section rather than leaving it as
-aspirational documentation of what used to be true.
+Every algorithmic claim here should be checkable against the code it cites and
+against `cargo test --release`, whose golden tests in `src/solver.rs` fix the
+exact optimal cost for several inputs. If a change makes a section here
+inaccurate, update the section.
 
-## Equivalence Caching and Mathematical Bounds (Added 2026-09)
+## Equivalence Caching and Mathematical Bounds
 
 To eliminate the `O(G log G)` sorting overhead of finding equivalence classes at every node, `wordle-opt` implements a lock-striped globally shared `EquivCache`. 
 - **The Key (`set_hash`)**: The cache uses a 64-bit Zobrist hash of the exact candidate set (`set_hash`).
-- **The Projection (`proj`)**: It maps `set_hash` to a deduplicated list of allowed guesses. The deduplication works by computing a 64-bit Zobrist hash of the actual responses each guess produces against the current candidate set. If two guesses produce the exact same response hashes across the candidate set, they are mathematically guaranteed to partition the set identically and are treated as equivalent.
+- **The Projection (`proj`)**: It maps `set_hash` to a deduplicated list of allowed guesses. The deduplication works by computing a 64-bit Zobrist hash of the actual responses each guess produces against the current candidate set. Two guesses with the same hash are treated as partitioning the set identically. Guesses that give the same response for every candidate always get the same hash. Two guesses with different responses could in principle share a 64-bit hash, which would wrongly drop one of them, but the chance is negligible.
 - **Deep Node Bypass**: Small sets (`c_len < 10`) are extremely fast to compute on the fly (~50µs) and are rarely re-searched. To prevent millions of deep nodes from polluting the cache and evicting highly reusable shallow sets (which are critical for MTDF zero-window re-searches), `EquivCache` completely bypasses insertion for small sets.
 - **L1 Cache Sizing**: To minimize memory fetch latency during intense node lookups, the individual `FxHashMap` underlying caches dynamically size their mask, tightly bound to a maximum of 32 KB to perfectly reside in the CPU L1 cache.
 
@@ -155,16 +136,16 @@ Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) a
 - `valid_max_k` (the maximum branching factor among Phase 1 guesses) restricts the capacity bounds of trees rooted in a Phase 1 guess.
 - `local_max_k` (the maximum branching factor across all guesses) bounds Phase 2 guesses. 
 - A rigorous `phase2_capacity_bound` is implemented for Phase 2 guesses (since they cannot result in a WIN at depth 1, all candidates are pushed to depth 2 or deeper). The global heuristic lower bound `tight_lb` is perfectly constrained to `min(phase1_capacity_bound, phase2_capacity_bound)`.
-- **Bitwise Phase Classification**: To rapidly separate Phase 1 and Phase 2 guesses inside the hot loop without branching, a thread-local `is_in_set` bitset is sized to the full guess domain (`14855 / 64` blocks). By taking the bitwise AND of the `active_guesses_slice` bitset with `is_in_set[block_idx]` and `!is_in_set[block_idx]`, guesses are perfectly partitioned into `phase1_guesses` and `phase2_guesses` using only bitwise operations and `trailing_zeros()`, completely eliminating the per-guess `if is_in_set[g]` conditional branch.
+- **Bitwise Phase Classification**: To rapidly separate Phase 1 and Phase 2 guesses inside the hot loop without branching, a thread-local `is_in_set` bitset with one bit per guess in the dictionary. By taking the bitwise AND of the `active_guesses_slice` bitset with `is_in_set[block_idx]` and `!is_in_set[block_idx]`, guesses are perfectly partitioned into `phase1_guesses` and `phase2_guesses` using only bitwise operations and `trailing_zeros()`, completely eliminating the per-guess `if is_in_set[g]` conditional branch.
 
 
 ## 8. Depth-2 Parallel Alpha-Beta (`src/parallel_depth.rs`)
 
-To mitigate the straggler problem at extreme depths (e.g. `N=2340`) where a single root guess can take over 17 hours to evaluate, the solver pushes work-stealing parallelism (`rayon`) down to the `depth=2` layer. Rather than exclusively evaluating root guesses in parallel, `parallel_depth.rs` distributes the top-level subtrees across cores while sharing a unified global beta limit to maximize hardware utilization and prevent individual hard subtrees from stalling the cluster wall clock.
+A few root guesses can take much longer to evaluate than the rest, which leaves cores idle at the end of a parallel root scan. To reduce this, the solver also parallelizes at depth 2 with `rayon`: `parallel_depth.rs` distributes the subtrees below the root across cores, sharing one global beta, so a single slow subtree does not hold up the whole solve.
 
 ## 9. GPU Acceleration Evaluation and Removal
 
-An RTX 2060 GPU offload path (`gpu_kernel.cu`, `gpu.rs`) was evaluated to accelerate node histogram counting and capacity bound calculations. On 2026-10-15, direct head-to-head benchmarking on the compute host `pc01` (commit `cf283ed`) across identical candidate sets showed negligible wall-time differences (CPU was 2.3% faster at N=1000; difference was 2.4% / 0.67s at N=1600 within measurement noise) while the CPU path consumed 40% less memory (163MB vs 269MB).
+An RTX 2060 GPU offload path (`gpu_kernel.cu`, `gpu.rs`) was evaluated to accelerate node histogram counting and capacity bound calculations. On 2026-10-15, a direct comparison on a 16-core machine (commit `cf283ed`) across identical candidate sets showed negligible wall-time differences (CPU was 2.3% faster at N=1000; difference was 2.4% / 0.67s at N=1600 within measurement noise) while the CPU path consumed 40% less memory (163MB vs 269MB).
 
 In policy tree construction, candidate sets after the opener partition rapidly into small buckets (size $\le 50$), well below the threshold where GPU offload kernel launches break even with cache-local CPU execution. Consequently, the GPU path was removed completely in favor of pure CPU SIMD/Rayon parallelism, eliminating external toolchain dependencies (`nvcc`, `g++-13`, `cc`), build scripts, and FFI maintenance overhead.
  

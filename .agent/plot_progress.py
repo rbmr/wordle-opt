@@ -14,8 +14,8 @@ migration (run_history.md holds nothing else by construction):
 Every axis label is an explicit string; a missing field renders as "unknown",
 never "undefined".
 
-    ./scripts/plot_progress.py                     # writes progress.png
-    ./scripts/plot_progress.py --out /tmp/p.png    # or wherever
+    ./.agent/plot_progress.py                     # writes progress.png
+    ./.agent/plot_progress.py --out /tmp/p.png    # or wherever
 """
 
 import argparse
@@ -85,7 +85,7 @@ def parse_run_history(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.join(REPO, "progress.png"))
-    ap.add_argument("--history", default=os.path.join(REPO, "run_history.md"))
+    ap.add_argument("--history", default=os.path.join(REPO, ".agent", "run_history.md"))
     args = ap.parse_args()
 
     runs = parse_run_history(read(args.history))

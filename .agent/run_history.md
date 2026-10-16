@@ -1,38 +1,30 @@
-# Run history — completed policy-tree runs
+# Run history: completed policy-tree runs
 
-One row per **completed tree run**, from the 2026-10-11 Ubuntu-server migration
-onwards. The deliverable is the tree build, so every run that counts produces a
-policy tree; record it here with the commit it ran as, the candidate-set size it
-covered, and the seed that drew that subset.
+One row per completed tree run on the compute host, from 2026-10-11 onwards.
+AGENTS.md says when to add a row and how runs are made. Rows are never rewritten.
 
 **A run's identity is `(commit, seed, size)`.** The subset is drawn from
 `subset_rng(seed, size)`, so those three values determine which candidates were
-solved — and a different subset of the same size can perform very differently,
-which is why the seed is part of the row and not an afterthought. Timings are
-only comparable between runs that share all three.
+solved. Timings are only comparable between runs that share all three. Smaller
+candidate sets are included on purpose: a change can make the full run faster
+while making small runs slower.
 
-**Only runs from this point on are comparable.** Runs before the migration (the
-old Proxmox VM) were on different hardware, a different OS and older code, so
-they are not listed and must not be used as a baseline for anything. The earlier
-`benchmark_history*` files are kept only as historical records — AGENTS.md says
-not to rewrite them — but their numbers are obsolete for comparison purposes.
+The files of a full run stay on the compute host in `~/full-runs/`, named by the
+UTC date and the commit:
 
-Smaller candidate sets are deliberately included: a change can make the full run
-faster while making small runs slower, and that trade is worth seeing rather than
-hiding.
+- `~/full-runs/<YYYY-MM-DD>-<commit>.json`: the policy tree
+- `~/full-runs/<YYYY-MM-DD>-<commit>-progress.parquet`: its progress series
+- `~/full-runs/<YYYY-MM-DD>-<commit>.log`: the run output, with the summary
 
-The run's own artifacts stay on the compute host, under `~/full-runs/`, stamped
-with the UTC day and the commit, so successive runs never overwrite each other:
+The run output prints the selection it used (`selection="seeded subset (seed=…,
+size=… of …)"`) and the commit. `scripts/check_full.sh` prints the end of a full
+run's output, including the summary. Full runs only start on a clean tree, so
+the commit in a row is the commit that ran.
 
-- `~/full-runs/<YYYY-MM-DD>-<commit>.json` — the policy tree
-- `~/full-runs/<YYYY-MM-DD>-<commit>-progress.parquet` — its progress series
-- `~/full-runs/<YYYY-MM-DD>-<commit>.log` — the run log, summary block included
-
-Add a row when a run completes. The run's own output prints the selection it
-used (`selection="seeded subset (seed=…, size=… of …)"`), so the seed comes
-straight from the log; `./check_full.sh` prints the stamp and summary block for a
-full run. A `full` run only starts on a clean tree, so the commit in the row is
-the commit that actually ran.
+Older notes below refer to the scripts by their previous root paths
+(`./deploy_and_bench.sh`, `./check_full.sh`) and to the removed `full`
+subcommand, whose summary printed `Wall time:` where `solve` prints
+`Build time:`.
 
 | Date (UTC) | Commit | Host | Candidates | Seed | Strategy | Wall time | Cost | Nodes | States | Peak RSS | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|

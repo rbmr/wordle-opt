@@ -56,7 +56,7 @@ bottleneck, the lever is using more of *this one machine's* resources better
 
 **Completing a full run is a validation checkpoint, not the finish line.** Getting
 an answer is not success, and getting a run to completion is not a goal in itself.
-Chase the optimizations. See "The `full` run" below.
+Chase the optimizations. See "Full runs" below.
 
 **Keep trying indefinitely, and do not declare the work done.** "The algorithm is
 fully optimal", "this cannot be improved further" and "there is nothing left to
@@ -131,7 +131,7 @@ overshot). Concretely:
   log output.** "I started it" and "it is running" are different claims. Verify
   the second one before asserting it, every time.
 - **Every timing or cost claim must trace to captured tool output.** Before
-  posting a result, find the exact output line (e.g. `Wall time: ...` /
+  posting a result, find the exact output line (e.g. `Build time: ...` /
   `Total cost: ...` from a *completed* run) and quote the command and that line in
   the report. A `[progress]` line is not a result, a process that was
   `Killed`/cancelled is not a result, and numbers that only exist in your own
@@ -144,13 +144,13 @@ overshot). Concretely:
   reads as a measurement, not a guess, and this repo has been burned by exactly
   that.
 - **Only trust reproducible, seeded methodology** (e.g. `solve` on a seeded subset
-  via `deploy_and_bench.sh` - see "Tree-only runs" below) for anything you report
+  via `scripts/deploy_and_bench.sh` - see "Tree-only runs" below) for anything you report
   as a real result. A one-off unseeded sample is not evidence of a trend.
 - **Don't run benchmarks in a way that produces unreliable numbers** (see "One job
   at a time" below) and then report the result as if it were clean.
 - **Correct a claim as soon as you find it was wrong.** Including your own, in
   public, on the issue where you made it. A retraction costs a paragraph; a
-  silently wrong number in `run_history.md` costs everyone who reads it next.
+  silently wrong number in `.agent/run_history.md` costs everyone who reads it next.
 
 ## What runs where
 
@@ -164,8 +164,8 @@ work onto them.
   `cargo build`, `cargo clippy`, small and quick checks, anything on the order of
   a few tens of seconds.
 - **Must go to `compute` via the scripts below:** anything exhaustive, full-scale
-  or open-ended in runtime - tree iteration via `deploy_and_bench.sh`, and
-  especially `full`.
+  or open-ended in runtime - tree iteration via `scripts/deploy_and_bench.sh`, and
+  especially full runs via `scripts/run_full.sh`.
 
 If you are unsure which side of that line something falls on, wrap it in a short
 `timeout` locally rather than guessing.
@@ -194,25 +194,39 @@ there rather than in this repo: this file is about the solver, and that file is
 about the machines. Do not put credentials, addresses or MAC addresses in commits
 or issues here, because this repo is public.
 
+## Public files and agent files
+
+Everything aimed at you lives in this file, plus the run log and its plot script
+in `.agent/`. Everything else in the repo is for the public: the README,
+ARCHITECTURE.md, the other docs, the CLI's output and help text, code comments,
+tests and the scripts in `scripts/`. Keep those free of this homelab (host
+names, the tailnet, power control), the agent and its process, issue numbers,
+and retracted or superseded claims. Write them for a stranger who has a
+checkout and nothing else. If a public file needs a host, take it from an
+environment variable or an argument, and put the value here.
+
 ## Workflow on compute
 
 - **Check which machine you are on first** (`hostname`). Reach `compute` over
-  Tailscale as `user@pc01`, which is the scripts' default, so
-  `WORDLE_OPT_COMPUTE_HOST` can be left unset. The tailnet policy grants agent
+  Tailscale as `user@pc01`. The scripts in `scripts/` take the host from
+  `WORDLE_OPT_COMPUTE_HOST` and refuse to run without it, so prefix every call
+  with `WORDLE_OPT_COMPUTE_HOST=user@pc01` (the scripts are public and must not
+  name this homelab). The tailnet policy grants agent
   traffic to the homelab nodes in accept mode, so this SSH path needs no
   interactive re-auth. If `pc01` is unreachable, check whether it is simply
   powered off first - wake it with `upsnap wake pc01` - and only treat it as a
   real problem if it is up and the connection still fails.
 - **Never hand-roll rsync/ssh/cargo commands against `compute`.** Use
-  `deploy_and_bench.sh` for benchmark iteration and `run_full.sh` /
-  `check_full.sh` for a full run (see "The `full` run" below). They exist so that
+  `scripts/deploy_and_bench.sh` for benchmark iteration and `scripts/run_full.sh` /
+  `scripts/check_full.sh` for a full run (see "Full runs" below). They exist so that
   every run, yours or a future session's, syncs, tests and benchmarks the same
   way, and so results are stamped with the commit that actually produced them
   (`WORDLE_OPT_COMMIT`). `git rev-parse` on compute itself cannot work, because
   compute's build directory intentionally has no `.git`.
 - **One job at a time on compute, always.** Before starting anything there,
   confirm nothing else is running
-  (`ssh user@pc01 pgrep -f target/release/wordle-opt`). Concurrent jobs contend
+  (`ssh user@pc01 "pgrep -fa '[t]arget/release/wordle-opt'"`; the brackets stop
+  the pattern from matching the ssh command itself). Concurrent jobs contend
   for the same cores and cache and silently invalidate both jobs' timings. A
   number produced next to another running job is not real data. Don't report or
   commit it as if it were.
@@ -222,8 +236,8 @@ or issues here, because this repo is public.
   rsync target (`--delete`d and rebuilt every run), not a place for notes, scratch
   scripts or alternate checkouts. If you need to leave code changes anywhere,
   commit them to this repo.
-- **Don't block synchronously waiting on a long job.** `run_full.sh` launches the
-  full run detached and returns immediately; poll it later with `check_full.sh`
+- **Don't block synchronously waiting on a long job.** `scripts/run_full.sh` launches the
+  full run detached and returns immediately; poll it later with `scripts/check_full.sh`
   instead of sitting idle. The same goes for anything you background manually:
   background it, note it in the progress issue, and do something else meanwhile.
 
@@ -246,19 +260,21 @@ any user-facing run whose output is a bare cost.
 To run one cheaply, a tree at a smaller candidate set, reproducible from a seed:
 
 ```
-./deploy_and_bench.sh solve --strategy optimal --max-candidates 500 --sample-seed 1 --output /tmp/n500.json
+WORDLE_OPT_COMPUTE_HOST=user@pc01 scripts/deploy_and_bench.sh solve --strategy optimal --max-candidates 500 --sample-seed 1 --output /tmp/n500.json
 ```
 
 The subset is drawn from `subset_rng(seed, size)`, so **(commit, seed, size) is the
 run's identity**: the run prints that triple into its log, and its timing is only
 comparable against a run with the same triple. Record every completed run, seed
-included, in `run_history.md`. That is what builds the size-vs-time trend, and it
+included, in `.agent/run_history.md`. That is what builds the size-vs-time trend, and it
 is how a full run that got faster while small runs got slower becomes visible
 rather than hidden.
 
-## The `full` run
+## Full runs
 
-A `full` run solves the whole default candidate set end to end. Its output is the
+A full run solves the whole default candidate set end to end. There is no `full`
+subcommand: `scripts/run_full.sh` runs `solve --strategy optimal` on the bundled
+lists with a 2 GB transposition table and `--stats`. Its output is the
 **policy tree**, not just the optimal cost. Construct the readable JSON only after
 the solve has finished: during the run keep everything in the efficient in-memory
 representation, and build the JSON once the solve completes, so serialization adds
@@ -283,21 +299,21 @@ When to run it is your judgment, not a schedule:
 - Only launch it when large-N evidence gives a specific, verified reason to expect
   it will finish in a bounded time (see ARCHITECTURE.md's "Known Scaling
   Behavior" for why small-N extrapolation alone is not that evidence).
-- It **requires a clean tree**. `run_full.sh` refuses to start with uncommitted
+- It **requires a clean tree**. `scripts/run_full.sh` refuses to start with uncommitted
   changes, because the run records the commit it ran as and an uncommitted edit
   would make that record wrong.
 - Every run keeps its own artifacts, stamped with the UTC day and the commit
   (`~/full-runs/<YYYY-MM-DD>-<commit>.{json,parquet,log}` in compute's home), so no
   run can overwrite another's data. **Add a row for each completed run to
-  `run_history.md`.** That repo-side index is what makes the trend visible and what
+  `.agent/run_history.md`.** That repo-side index is what makes the trend visible and what
   survives a compute rebuild.
 
 Operationally:
 
-- `./run_full.sh` syncs, builds, tests, then launches `full` **detached** and
+- `scripts/run_full.sh` syncs, builds, tests, then launches the solve **detached** and
   returns immediately. It does not wait for it to finish. The `timeout` is a safety
   cap: killing a run early throws away the tree it was building.
-- `./check_full.sh` is the cheap, near-instant status check: still running?
+- `scripts/check_full.sh` is the cheap, near-instant status check: still running?
   crashed? done? Poll it on your own schedule instead of blocking on the run.
 - The run keeps its artifacts in `~/full-runs/` in compute's home directory, not
   in the rsync target, so neither the next deploy nor a later run can delete or
@@ -316,28 +332,21 @@ Operationally:
   touches solver, heuristic or cache logic. A golden test failure means "figure
   out why the new number is correct" or "this change is wrong" - never "update the
   constant to match."
-- `tests/property_cli.rs` is the CLI-level property test: it generates seeded
-  random guess and candidate lists, drives the real binary through `solve` and
-  `validate`, and requires the cost `solve` claims, the cost `validate`
-  re-derives from the written tree, and an independent brute-force optimum to
-  agree. Its brute-force oracle is cached in `tests/property_oracle.json` so the
-  suite stays fast; a missing cache entry fails the test on purpose. Regenerate
-  it with `WORDLE_OPT_ORACLE_UPDATE=1 cargo test --release --test property_cli`
-  when the generator changes, and never delete an entry to make a failure go
-  away.
-- `tests/optimality_audit.rs` checks optimality where brute force on the whole
-  instance cannot reach: it brute-forces every small subtree of the committed
-  full tree, re-solves larger subtrees from scratch, fuzzes alternative guesses
-  at each node, checks metamorphic relations (renamed letters, permuted
-  positions, added or dropped guesses and candidates) and solves instances with
-  planted, provably known optima. It has its own feedback function, tree walker
-  and oracle. The full-scale variant rebuilds the 2,340-candidate tree with the
-  current solver and audits it; run it after any change to solver, bound or
-  cache logic: `cargo test --release --test optimality_audit -- --ignored`.
-  That includes `published_optima` and `published_optimum_3158`, which re-solve the full-scale word lists in
-  `words/published/` and require the optima Alex Selby's independent solver
-  published for them (7,920 for the original lists, among others). A
-  disagreement there is a correctness bug in this solver until proven otherwise.
+- The integration tests in `tests/` are split by kind of check (the README has
+  the table) and share independent helpers in `tests/common/`: their own
+  feedback function, tree walker and bitmask brute-force oracle.
+  `brute_force.rs` compares the solver with two brute-force solvers live on
+  small lists, so it needs no cached answers. `subtrees.rs`,
+  `alternative_guesses.rs`, `metamorphic.rs` and `planted_optima.rs` check
+  optimality where whole-instance brute force cannot reach. The ignored
+  `full_scale.rs` rebuilds the 2,340-candidate tree with the current solver and
+  audits it, and the ignored `published_optima.rs` requires the optima Alex
+  Selby's independent solver published for the lists in `words/published/`
+  (7,920 for the original lists, among others). Run both after any change to
+  solver, bound or cache logic:
+  `cargo test --release --test published_optima --test full_scale -- --ignored`.
+  A disagreement there is a correctness bug in this solver until proven
+  otherwise.
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.
