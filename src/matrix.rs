@@ -37,30 +37,23 @@ impl ResponseMatrix {
             zobrist.push(rng.u64(..));
         }
 
+        // Letter masks use the dictionary's injective letter index. Past 31
+        // symbols there is none, and every mask is all ones instead: each guess
+        // then looks like it shares every letter with every candidate, which
+        // only disables the letter-based shortcuts (projection deduplication,
+        // the varying-position branching bound) and never prunes wrongly.
+        let index = crate::dict::letter_index(dict.guesses.iter().chain(&dict.candidates));
+        let mask_of = |w: &crate::core::Word| match &index {
+            Some(ix) => w.0.iter().fold(0u32, |m, &b| m | 1 << ix[b as usize]),
+            None => u32::MAX,
+        };
+
         for guess in &dict.guesses {
-            let mut mask = 0u32;
-            for &b in &guess.0 {
-                let bit = if b.is_ascii_lowercase() {
-                    b - b'a'
-                } else {
-                    b % 26
-                };
-                mask |= 1 << bit;
-            }
-            guess_masks.push(mask);
+            guess_masks.push(mask_of(guess));
         }
 
         for candidate in &dict.candidates {
-            let mut mask = 0u32;
-            for &b in &candidate.0 {
-                let bit = if b.is_ascii_lowercase() {
-                    b - b'a'
-                } else {
-                    b % 26
-                };
-                mask |= 1 << bit;
-            }
-            candidate_masks.push(mask);
+            candidate_masks.push(mask_of(candidate));
         }
 
         use rayon::prelude::*;

@@ -419,28 +419,23 @@ impl<'a> MaxFreqPolicy<'a> {
 
 impl CandidatesPolicy for MaxFreqPolicy<'_> {
     fn guess(&self, candidates: &[usize]) -> usize {
-        let mut letter_freq = [0u32; 26];
+        // Counted per byte, so any symbol alphabet works.
+        let mut letter_freq = [0u32; 256];
         for &c in candidates {
-            let mut mask = 0u32;
-            for &b in &self.dict.candidates[c].0 {
-                let l = (b - b'a') as usize;
-                mask |= 1 << l;
-            }
-            for l in 0..26 {
-                if mask & (1 << l) != 0 {
-                    letter_freq[l] += 1;
+            let w = &self.dict.candidates[c].0;
+            for (i, &b) in w.iter().enumerate() {
+                if !w[..i].contains(&b) {
+                    letter_freq[b as usize] += 1;
                 }
             }
         }
         let mut scored: Vec<(u32, usize)> = (0..self.dict.guesses.len())
             .map(|g| {
-                let mut seen = 0u32;
+                let w = &self.dict.guesses[g].0;
                 let mut score = 0u32;
-                for &l in &self.dict.guess_chars[g] {
-                    let l = l as usize;
-                    if seen & (1 << l) == 0 {
-                        seen |= 1 << l;
-                        score += letter_freq[l];
+                for (i, &b) in w.iter().enumerate() {
+                    if !w[..i].contains(&b) {
+                        score += letter_freq[b as usize];
                     }
                 }
                 (score, g)

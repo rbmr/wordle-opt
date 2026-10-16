@@ -13,6 +13,42 @@ pub struct Dictionary {
     pub candidate_to_guess: Vec<usize>,
 }
 
+/// An injective map from the byte symbols used in `words` to letter indices
+/// below 31, the most the `u32` letter masks and the 5-bit packed guess
+/// projections can hold. Words over `a`-`z` keep `b - b'a'`; any other alphabet
+/// of at most 31 symbols is numbered densely in byte order.
+///
+/// Returns `None` for a larger alphabet. There is then no injective index, and
+/// the letter-based shortcuts must be switched off (see `ResponseMatrix::new`)
+/// rather than fed colliding indices: two guesses whose letters merely share an
+/// index would be treated as interchangeable, and one of them silently dropped.
+pub fn letter_index<'a>(words: impl IntoIterator<Item = &'a Word>) -> Option<[u8; 256]> {
+    let mut used = [false; 256];
+    for w in words {
+        for &b in &w.0 {
+            used[b as usize] = true;
+        }
+    }
+    let mut index = [u8::MAX; 256];
+    if (0..=255u8).all(|b| !used[b as usize] || b.is_ascii_lowercase()) {
+        for b in b'a'..=b'z' {
+            index[b as usize] = b - b'a';
+        }
+        return Some(index);
+    }
+    let mut next = 0u8;
+    for b in 0..256 {
+        if used[b] {
+            if next == 31 {
+                return None;
+            }
+            index[b] = next;
+            next += 1;
+        }
+    }
+    Some(index)
+}
+
 pub const DEFAULT_GUESSES: &str = include_str!("../words/guesses.txt");
 pub const DEFAULT_CANDIDATES: &str = include_str!("../words/candidates.txt");
 
@@ -94,18 +130,15 @@ impl Dictionary {
         guesses.sort();
         guesses.dedup();
 
-        let mut guess_chars = Vec::with_capacity(guesses.len());
-        for g in &guesses {
-            let mut chars = [0u8; 5];
-            for i in 0..5 {
-                chars[i] = if g.0[i].is_ascii_lowercase() {
-                    g.0[i] - b'a'
-                } else {
-                    g.0[i] % 26
-                };
-            }
-            guess_chars.push(chars);
-        }
+        // Every candidate is a guess, so the guesses carry the whole alphabet.
+        let index = letter_index(&guesses);
+        let guess_chars = guesses
+            .iter()
+            .map(|g| match &index {
+                Some(ix) => g.0.map(|b| ix[b as usize]),
+                None => [0; 5],
+            })
+            .collect();
 
         let mut candidate_to_guess = Vec::with_capacity(candidates.len());
         for c in &candidates {
