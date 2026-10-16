@@ -1,130 +1,130 @@
 <!--
-  This file is for humans: people using the CLI, people using the visualizer,
-  or people wanting to understand the project. Agent-facing process rules,
-  compute-host operations and the full-run discipline live in AGENTS.md -
-  please add them there, not here.
+  This file is for humans: people using the CLI, people using the viewer, and
+  people who want to understand the project. Agent-facing process rules,
+  compute-host operations and the full-run discipline live in AGENTS.md.
+  Please add those there, not here.
 -->
 
-# Wordle-Opt
+# wordle-opt
 
-A Rust engine that computes the mathematically optimal guessing strategy for
-Wordle: the strategy that minimizes the total number of guesses needed to solve
-every candidate word, found by exhaustive branch-and-bound search rather than
-heuristics.
+wordle-opt computes the optimal strategy for Wordle-style word games. You give
+it a list of possible answers and a list of allowed guesses. It returns the
+strategy that solves every answer with the fewest guesses in total, as a
+decision tree you can open in a browser.
 
-It has solved the full 2340-word candidate set exactly (total cost **8001**,
-mean 3.419 guesses per game), and the complete optimal policy tree is bundled
-with the interactive viewer - so you can inspect the optimal strategy guess by
-guess, or play against it.
+The result is exact, not a heuristic. The solver considers every allowed guess
+at every step. It skips a guess only when a bound proves that the guess cannot
+beat the best strategy found so far.
 
-## How it works
+## Results
 
-Brute-forcing the full search tree over the ~2340-word candidate set is
-computationally infeasible, so the solver (`src/solver.rs`) prunes aggressively
-while guaranteeing the final answer is still exactly optimal:
+For the bundled word lists (2,340 answers, 14,855 allowed guesses), the optimal
+strategy needs 8,001 guesses in total, or 3.419 guesses per game on average.
+It opens with `tarse` and needs at most 6 guesses for any answer. Building that
+tree takes about 37 seconds on a 16-core machine.
 
-- **Alpha-beta pruning** over the guess/response tree, seeded with a tight
-  initial upper bound from a fast single-threaded greedy pre-pass
-  (`greedy_solve`), so early cutoffs are effective from the start.
-- **Capacity lower bounds** (`heuristic::capacity_bound`): an
-  information-theoretic minimum cost for solving `n` remaining candidates given
-  a branching factor `k`, used to discard guesses that provably cannot beat the
-  current best.
-- **Equivalence-class guess pruning**: guesses that partition the current
-  candidate set identically to a guess already tried are skipped, since they
-  can't produce a different outcome. The projection per `c_mask` is memoized in
-  an `FxHashMap` cache, dynamically sized to fit tightly within the 32 KB L1
-  cache.
-- **A lock-free transposition table** (`src/cache.rs::GlobalCache`): a
-  fixed-size array of `AtomicU64` slots, each packing a 45-bit Zobrist hash, an
-  18-bit cost value, and an exact/lower-bound flag, shared across threads
-  without locking. It is a best-effort cache (a documented, accepted race can
-  occasionally lose an update - see issue #4); the correctness of the
-  alpha-beta search does not depend on it.
-- **Parallelism via `rayon`**: root guesses are evaluated in parallel against a
-  shared atomic beta, so threads prune against each other's progress. Root
-  candidates are sorted by their lower bounds first, so promising guesses
-  tighten the shared beta earlier.
+The solver also reproduces every optimum that Alex Selby published for the
+official Wordle lists, which were computed with his own independent program:
 
-The reasoning behind each of these, the scaling behaviour at large N, and the
-memory layout are in `ARCHITECTURE.md`.
+| word lists | answers | guesses | optimum | first guess |
+|---|--:|--:|--:|---|
+| original Wordle | 2,315 | 12,972 | 7,920 | salet |
+| NYT, February 2022 | 2,309 | 12,947 | 7,897 | salet |
+| NYT, March 2022 | 2,309 | 12,972 | 7,897 | salet |
+| NYT, August 2022 | 2,309 | 14,855 | 7,883 | tarse |
+| NYT, July 2023 | 3,158 | 14,855 | 11,219 | tarse |
 
-## Status
+The lists and the sources of these numbers are in
+[`words/published/`](words/published/README.md).
 
-The engine solved the full 2340-candidate set exactly: total cost **8001**,
-mean **3.419** guesses per game. Building the complete **optimal policy tree**
-— 2,478 nodes, maximum depth 5 — takes under **37 seconds** on a modern 16-core
-CPU (down from 4.28 hours in early versions, a >400x speedup), and is what the
-viewer renders by default.
+## Installation
 
-The optimal strategy is fixed; the deliverable is continuing to make exact solves faster and ensuring the tool is usable on arbitrary word lists.
-
-## Installation and Usage
-
-Build the release binary or install it to your `PATH`:
+There are no prebuilt binaries. You need a Rust toolchain, which you can
+install with [rustup](https://rustup.rs). The repository pins the Rust version
+in `rust-toolchain.toml`, and rustup downloads it on the first build.
 
 ```bash
+git clone https://github.com/rbmr/wordle-opt.git
+cd wordle-opt
 cargo build --release
-# The binary is located at target/release/wordle-opt
+```
 
-# Or install directly to ~/.cargo/bin:
+The binary is `target/release/wordle-opt`. To put it on your `PATH` instead:
+
+```bash
 cargo install --path .
 ```
 
-The binary is fully standalone with the default Wordle dictionary embedded directly inside it; it can be run from any working directory without needing the repository files on disk.
+The build is tuned for the CPU it is built on (`target-cpu=native` in
+`.cargo/config.toml`). Build it on the machine where you will run it.
+
+The bundled word lists are compiled into the binary, so it works from any
+directory.
+
+## Quick start
+
+Solve the bundled lists and write the tree to a file:
 
 ```bash
-# Build an optimal policy tree (see "Policy trees" below)
 wordle-opt solve --strategy optimal --output tree.json
-
-# Solve for your own custom word lists (one word per line)
-wordle-opt solve --strategy optimal \
-  --candidates my_candidates.txt \
-  --guesses my_guesses.txt \
-  --output custom_tree.json
-
-# A smaller tree for a quick look: the first 250 candidates
-wordle-opt solve --strategy optimal --max-candidates 250 \
-  --output tree-250.json
-
-# Cheaper heuristic strategies: min-remaining | max-freq
-wordle-opt solve --strategy min-remaining --output heuristic.json
-
-# Validate any policy tree file
-wordle-opt validate tree.json
-
-# Differential correctness fuzzer: compares the optimized solver against an
-# unoptimized naive reference (src/naive.rs) on random subsets
-wordle-opt verify
 ```
 
-Building an `optimal` tree for the full candidate set finishes in under a minute on a modern multi-core machine; for quick exploration on low-powered machines, start with `--max-candidates` or a smaller custom list. Other subcommands exist for full-scale tree builds
-and verification (`full`, `verify`); AGENTS.md describes what they do and the
-dedicated machine they are meant to run on.
+Solve your own lists:
 
-### `solve` flags
+```bash
+wordle-opt solve --strategy optimal \
+  --guesses my_guesses.txt \
+  --candidates my_answers.txt \
+  --output my_tree.json
+```
 
-- `--candidates <path>` - Secret candidate words file (one word per line). Defaults
-  to the bundled 2,340 official Wordle words.
-- `--guesses <path>` - Valid allowed guess words file (one word per line). Defaults
-  to the bundled 14,855 words.
-- `--max-candidates N` - build for the first `N` candidates only (the same
-  deterministic convention the golden tests use). Add `--sample-seed S` to
-  instead draw a reproducible, representative `N`-candidate spread.
-- `--stats progress.parquet [--stats-format parquet|ndjson]` - export a small
-  **progress time series** (one row per sampled interval: nodes built, frontier
-  size, depth, cache hits, ...). Sampling is periodic and clock-gated, never
-  per node, so it cannot measurably slow a build; it is off unless `--stats` is
-  given. A periodic progress thread fills the series during long node
-  evaluations (the root scan can run for hours), so it covers the whole run
-  rather than only the node-boundary phase. The Parquet file is written with
-  `SNAPPY` compression and loads directly into pandas/polars/duckdb for
-  plotting.
-- `--no-progress` - silence the periodic stderr progress line.
-- `--cache-entries N` - transposition-table size (power of two).
+Then open the viewer at <https://rbmr.github.io/wordle-opt/>, click
+**Load tree**, and choose the file. The tree is checked in the browser and
+displayed. The file is read locally and is not uploaded anywhere.
 
-`solve` self-validates the tree it writes (round-tripping through the reader)
-and prints a summary.
+## Input files
+
+Both files contain one word per line.
+
+- Every word must have exactly 5 characters.
+- Any characters are allowed, not just `a` to `z`. Letters are converted to
+  lowercase, so `Crane` and `crane` are the same word.
+- Blank lines and duplicate words are ignored.
+- Every answer is added to the guess list automatically, so the guess file does
+  not need to repeat them.
+- The guess list can hold at most 65,535 words.
+
+Solve time grows quickly with the number of answers. A few hundred answers take
+seconds. About 2,300 answers take 30 to 50 seconds on 16 cores, and 3,158
+answers took about 5.5 minutes. To try out a large list, solve a subset first
+with `--max-candidates`.
+
+## Commands
+
+### `solve`
+
+Builds a policy tree, checks it, and writes it as JSON.
+
+| flag | meaning |
+|---|---|
+| `--output <path>` | Where to write the tree. Required. |
+| `--strategy <name>` | `optimal`, or one of the faster heuristics `min-remaining` (fewest expected remaining answers) and `max-freq` (most common letters). Required. |
+| `--guesses <path>` | Allowed guesses. Defaults to the bundled 14,855 words. |
+| `--candidates <path>` | Possible answers. Defaults to the bundled 2,340 words. |
+| `--max-candidates <N>` | Use only the first `N` answers in alphabetical order. |
+| `--sample-seed <S>` | With `--max-candidates`, pick `N` answers at random instead, reproducibly for a given seed. |
+| `--no-progress` | Do not print progress lines while solving. |
+| `--cache-entries <N>` | Size of the solver's cache, as a power of two. The default is 4,194,304 entries (64 MB). |
+| `--stats <path>` | Also write a progress time series of the build (nodes, cache hits, and so on). |
+| `--stats-format <fmt>` | `parquet` (default) or `ndjson`. |
+
+When it finishes, `solve` prints the total cost, the average number of guesses
+and the build time. Its `Max depth` line counts the edges from the root, so the
+most guesses any answer needs is that number plus one.
+
+For an optimal solve with more than 500 answers, `solve` prints a warning that
+mentions the project's compute host. That warning is meant for the project's
+own setup and can be ignored.
 
 ### `validate`
 
@@ -132,92 +132,139 @@ and prints a summary.
 wordle-opt validate tree.json
 ```
 
-Recomputes every node's candidate set from the root and checks the defining
-invariant: **at each node, an edge for a response exists if and only if that
-response is possible** for some still-reachable candidate, and each edge leads
-to exactly the subtree for the candidates that produce it. It also verifies the
-tree is a tree (each node reachable once), that leaves are wins, that every
-candidate terminates, and that the dictionary hash matches. The tree is
-self-contained, so no other files are needed.
+Checks a tree file without trusting anything else about it. It recomputes which
+answers are still possible at every node and checks that:
 
-## Policy trees
+- each node has a child for exactly the responses that are still possible,
+- every answer is guessed exactly once, at the end of its path,
+- the tree matches the word lists stored in the file.
 
-A policy is a map from the set of remaining candidates to a guess. Because it
-is deterministic, the whole game under that policy is a static decision tree:
-**nodes are guesses**, **edges are responses**, and a node **wins** for the
-candidate equal to its own guess whenever that candidate is still reachable
-there. The all-green response is never an edge - it is the implicit win - so a
-leaf (no children) is a win with one candidate left. `src/policy.rs` stores and
-validates such trees. A node's candidate set is not stored at all, since it is
-implied by the path of responses taken to reach it, and consumers (the
-validator, the viewer) recompute it; that is what makes the representation
-compact. Note that a win therefore depends on the *remaining* candidates, not
-the initial list: a guess can be in the initial candidate list and still have
-been eliminated along the path, in which case it cannot win there.
+It then prints the total cost. The file contains its own word lists, so no other
+files are needed.
 
-A tree is serialized as **readable** JSON: nested
-`{"guess": "trace", "children": {"bgybg": ...}}` with the word lists embedded,
-so the file is fully self-contained and can be validated (and rendered by the
-viewer) with no other files. It also carries a **dictionary hash**, an FNV-1a
-digest of the sorted guess and candidate lists, so a tree can never be silently
-applied to the wrong dictionary.
+### `verify`
 
-## Interactive viewer
+```bash
+wordle-opt verify
+```
 
-`site/` is a dependency-free static viewer, published to GitHub Pages at
-**https://rbmr.github.io/wordle-opt/** (or accessible locally by opening
-`site/index.html` directly in any web browser).
+Compares the solver with a slow, simple reference solver (`src/naive.rs`) on
+random small subsets of the bundled lists.
 
-To view a policy you generated with `wordle-opt solve`:
-1. Open the viewer (online or `site/index.html`).
-2. Click **Load tree** in the top toolbar and select your policy `.json` file.
-3. The viewer immediately validates the tree and displays it.
+## Tree format
 
-It loads a readable policy tree (a bundled example, or one of your own) and **validates it in the browser**
-against the same edge-iff-possible rule, so anything that loads can be assumed
-valid. The viewer's pure logic - response computation, candidate filtering,
-validation, per-node stats and the win rule - lives in `site/policy-core.js`,
-separate from the DOM layer in `site/app.js`, and is tested by
-`node site/policy-core.test.js` (also run by CI).
+A policy tree has a guess at every node. Each edge is a response to that guess,
+written as five letters: `g` for green, `y` for yellow, `b` for gray. The
+all-green response has no edge, because it means the game is won.
 
-Two views, selected once a policy is loaded:
+```json
+{
+  "format": "wordle-policy-tree",
+  "version": 1,
+  "strategy": "optimal",
+  "dictionary_hash": "0x890d6b04b8d49ef6",
+  "guesses": ["aahed", "..."],
+  "candidates": ["aback", "..."],
+  "root": {
+    "guess": "tarse",
+    "children": {
+      "bbbbb": { "guess": "godly", "children": { "...": "..." } }
+    }
+  }
+}
+```
 
-- **Play** (default): traverse the policy like the game. Each row is one guess;
-  click a letter of the current guess to cycle its response (gray -> yellow ->
-  green), then Submit. An impossible response is reported as such; the
-  all-green response wins and shows a solved line with a confetti button. Back
-  returns to the previous guess with its response still filled in, so a typo
-  can be fixed without re-entering it. When only one candidate remains, the
-  all-green response is pre-filled as a convenience - it is still just a
-  response, and Submit is what wins. Each node shows its *expected guesses
-  remaining* and how many candidates are still possible, and Options lists
-  every possible response for the current guess (including the win, when it is
-  available).
-- **Explore**: the statistics (a table of the input files and the policy, next
-  to a bar plot of the guess-count distribution) and the tree explorer (the
-  full collapsible tree, with expand/collapse, expand-to-depth, and find).
+The file stores both word lists, so it can be checked and displayed on its own.
+The `dictionary_hash` is a checksum of the two lists, and a tree is rejected if
+it does not match them.
 
-The word length is taken from the tree, so it is not tied to 5 letters (there
-are 3-, 4- and 6-letter examples under `site/examples/`).
+The set of answers still possible at a node is not stored. It follows from the
+responses on the path to that node, and the validator and the viewer recompute
+it.
+
+## Viewer
+
+The viewer in `site/` is a static web page with no dependencies. It is
+published at <https://rbmr.github.io/wordle-opt/>, and you can also open
+`site/index.html` directly from disk.
+
+It loads the bundled example trees or a tree you made with `solve`, and checks
+it with the same rules as `validate` before showing it. It has two modes:
+
+- **Play** walks through the strategy like a game. Click the letters of the
+  current guess to set the response you got, then submit. The viewer shows the
+  next guess, how many answers are still possible, and the expected number of
+  guesses left.
+- **Explore** shows statistics for the tree, a chart of how many games take 1,
+  2, 3 or more guesses, and the full tree, which you can expand and search.
+
+The viewer reads the word length from the tree, so it also works with trees
+for words of other lengths. `site/examples/` has 3, 4 and 6 letter examples.
+The solver itself only handles 5-letter words.
 
 Bundled examples:
 
-| example | strategy | candidates | nodes | max depth | total cost | mean guesses |
+| example | strategy | answers | nodes | most guesses | total cost | mean guesses |
 |---|---|--:|--:|--:|--:|--:|
-| `optimal` | optimal | 2340 | 2478 | 5 | 8001 | 3.419 |
-| `min-remaining` | min-remaining | 2340 | 2934 | 4 | 8561 | 3.659 |
-| `max-freq` | max-freq | 2340 | 2908 | 8 | 9545 | 4.079 |
+| `optimal` | optimal | 2,340 | 2,478 | 6 | 8,001 | 3.419 |
+| `min-remaining` | min-remaining | 2,340 | 2,934 | 5 | 8,561 | 3.659 |
+| `max-freq` | max-freq | 2,340 | 2,908 | 9 | 9,545 | 4.079 |
 
-See `site/examples/README.md` for how they were generated.
+`site/examples/README.md` explains how they were generated.
 
-## Development
+## How the solver works
 
-`cargo test --release` runs the full suite, including golden regression tests
-in `src/solver.rs` that assert exact optimal costs for fixed candidate subsets.
-They exist to make silent correctness regressions loud: if a change to the
-search or pruning logic produces a different cost for the same fixed input, the
-test fails immediately instead of the mistake being noticed later. Treat a
-golden-test failure as "explain why the new number is correct," not "update the
-constant." Use `--release` - these tests run the real solver on real instances.
-CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release -- -D
-warnings`, `cargo fmt -- --check`, and the viewer's Node tests.
+The cost of a strategy is the total number of guesses it uses over all
+answers. For a set of possible answers `S`, the best cost is the minimum over
+all guesses `g` of `|S|` plus the best costs of the groups that `g` splits `S`
+into. The solver evaluates this with a depth-first branch-and-bound search
+(`src/solver.rs`):
+
+- **Upper bound first.** A quick greedy strategy gives an initial cost to
+  beat, so most guesses can be discarded early.
+- **Lower bounds.** `heuristic::capacity_bound` gives the smallest possible
+  cost for `n` answers when no guess can split them into more than `k` groups.
+  A guess whose lower bound already reaches the best known cost is skipped.
+- **Equivalent guesses.** Two guesses that split the remaining answers into
+  the same groups have the same cost, so only one of them is searched.
+- **Transposition table.** Results for answer sets that have already been
+  solved are stored in a shared table, so a set reached by different paths is
+  solved only once (`src/cache.rs`).
+- **Parallel search.** The first guesses are evaluated in parallel on all
+  cores with `rayon`. The threads share the best cost found so far, so each
+  thread can skip guesses that another thread has already beaten.
+
+[`ARCHITECTURE.md`](ARCHITECTURE.md) describes each of these in more detail,
+along with how solve time grows with the number of answers.
+
+## Testing
+
+`cargo test --release` runs the test suite. Use `--release`, because the tests
+run the real solver on real word lists. The main checks are:
+
+- **Golden tests** in `src/solver.rs` fix the optimal cost for several subsets
+  of the bundled lists. A change that alters one of these numbers is a bug
+  until shown otherwise.
+- **`tests/property_cli.rs`** runs the binary on random word lists and
+  compares its result with a brute-force solver.
+- **`tests/optimality_audit.rs`** checks optimality on lists too large for
+  brute force. It solves every small part of the full optimal tree by brute
+  force, re-solves the larger parts from scratch, checks that no other guess
+  at any node gives a lower cost, and checks that renaming letters, reordering
+  letter positions or adding unused guesses does not change the result. It
+  uses its own implementation of the Wordle response rules, so a bug in the
+  solver's implementation does not also affect the check.
+
+Some tests are skipped by default because each one solves a full-size list.
+Run them with:
+
+```bash
+cargo test --release --test optimality_audit -- --ignored --nocapture
+```
+
+These include a rebuild and audit of the full bundled tree, and re-solves of
+the published lists in `words/published/`.
+
+CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release --
+-D warnings`, `cargo fmt -- --check`, and the viewer's tests
+(`node site/policy-core.test.js`).
