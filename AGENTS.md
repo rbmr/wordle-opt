@@ -334,6 +334,10 @@ Operationally:
   and oracle. The full-scale variant rebuilds the 2,340-candidate tree with the
   current solver and audits it; run it after any change to solver, bound or
   cache logic: `cargo test --release --test optimality_audit -- --ignored`.
+  That includes `published_optima`, which re-solves the full-scale word lists in
+  `words/published/` and requires the optima Alex Selby's independent solver
+  published for them (7,920 for the original lists, among others). A
+  disagreement there is a correctness bug in this solver until proven otherwise.
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.

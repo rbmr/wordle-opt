@@ -1094,3 +1094,53 @@ fn full_scale_current_solver_audit() {
     );
     eprintln!("relabel + permutation full solves in {:.1?}", t.elapsed());
 }
+
+fn read_list(rel: &str) -> Vec<W> {
+    let path = format!("{}/{rel}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {path}: {e}"))
+        .lines()
+        .map(|l| l.trim().to_ascii_lowercase())
+        .filter(|l| !l.is_empty())
+        .map(|l| word(&l))
+        .collect()
+}
+
+/// Full-scale instances whose optimum was computed independently by Alex
+/// Selby's solver (see `words/published/README.md`); the `orig` value was also
+/// reproduced by Bertsimas and Paskov. The tree must reach exactly the
+/// published total.
+#[test]
+#[ignore = "full-scale: four ~40 s solves; run with --ignored"]
+fn published_optima() {
+    let cases = [
+        ("orig", "words/published/wordlist_orig_all.txt", 7920),
+        (
+            "nyt20220215",
+            "words/published/wordlist_nyt20220215_all.txt",
+            7897,
+        ),
+        (
+            "nyt20220316",
+            "words/published/wordlist_nyt20220316_all.txt",
+            7897,
+        ),
+        ("nyt20220830", "words/guesses.txt", 7883),
+    ];
+    for (name, guesses, published) in cases {
+        let candidates = read_list(&format!("words/published/wordlist_{name}_hidden.txt"));
+        let inst = Instance::new(read_list(guesses), candidates);
+        let t = Instant::now();
+        let got = solve_cost(&inst);
+        eprintln!(
+            "{name}: {} candidates x {} guesses: cost {got} (published {published}) in {:.1?}",
+            inst.candidates.len(),
+            inst.guesses.len(),
+            t.elapsed()
+        );
+        assert_eq!(
+            got, published,
+            "{name}: solver disagrees with the published optimum"
+        );
+    }
+}
