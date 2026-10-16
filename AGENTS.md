@@ -74,7 +74,7 @@ avenues need to have actually been tried, not just reasoned about:
 - **The GPU avenue is closed, with evidence.** A custom CUDA kernel and driver
   integration were implemented to offload histogram counting and capacity bounds
   to the RTX 2060. Direct measurement on identical candidate sets on `pc01`
-  (commit `cf283ed`) showed the difference was negligible - CPU 2.3% faster at
+  (commit `0ba60c3`) showed the difference was negligible - CPU 2.3% faster at
   N=1000, 2.4% at N=1600, within noise - while CPU used 40% less memory (163 MB
   vs 269 MB). Policy tree child sets partition rapidly into buckets of 50 or
   fewer, below the kernel's offload threshold, so the kernel was virtually never

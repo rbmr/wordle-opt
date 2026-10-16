@@ -145,7 +145,7 @@ A few root guesses can take much longer to evaluate than the rest, which leaves 
 
 ## 9. GPU Acceleration Evaluation and Removal
 
-An RTX 2060 GPU offload path (`gpu_kernel.cu`, `gpu.rs`) was evaluated to accelerate node histogram counting and capacity bound calculations. On 2026-10-15, a direct comparison on a 16-core machine (commit `cf283ed`) across identical candidate sets showed negligible wall-time differences (CPU was 2.3% faster at N=1000; difference was 2.4% / 0.67s at N=1600 within measurement noise) while the CPU path consumed 40% less memory (163MB vs 269MB).
+An RTX 2060 GPU offload path (`gpu_kernel.cu`, `gpu.rs`) was evaluated to accelerate node histogram counting and capacity bound calculations. On 2026-10-15, a direct comparison on a 16-core machine (commit `0ba60c3`) across identical candidate sets showed negligible wall-time differences (CPU was 2.3% faster at N=1000; difference was 2.4% / 0.67s at N=1600 within measurement noise) while the CPU path consumed 40% less memory (163MB vs 269MB).
 
 In policy tree construction, candidate sets after the opener partition rapidly into small buckets (size $\le 50$), well below the threshold where GPU offload kernel launches break even with cache-local CPU execution. Consequently, the GPU path was removed completely in favor of pure CPU SIMD/Rayon parallelism, eliminating external toolchain dependencies (`nvcc`, `g++-13`, `cc`), build scripts, and FFI maintenance overhead.
  

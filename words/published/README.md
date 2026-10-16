@@ -28,7 +28,7 @@ Paskov, "An Exact Solution to Wordle", *Operations Research* 73(3), 2025.
 ## Reproduced by wordle-opt
 
 All five were solved by `wordle-opt solve --strategy optimal` at commit
-`6118a35` on a 16-core machine.
+`a4946f3` on a 16-core machine.
 Each tree passed validation, and each opens with the published first guess
 (salet for `orig`, `nyt20220215`, `nyt20220316`; tarse for the other two).
 
