@@ -99,8 +99,37 @@ pub struct SolverScratch {
     pub scratch_guess_child_max_ks: [[u16; 243]; 32],
 }
 
+impl SolverScratch {
+    /// Grows the guess-indexed buffers to fit a dictionary of `num_guesses`.
+    ///
+    /// The scratch is pooled per thread and outlives any one solve, so a thread
+    /// can meet a dictionary with more guesses than the one the scratch was
+    /// first sized for (several solves in one process, or a guess list larger
+    /// than the bundled 14,855). These buffers are written through unchecked
+    /// indexing, so they must be sized here, before any use. Buffers are only
+    /// ever grown, and each is all-zero between uses, so growing with zeros
+    /// keeps that invariant.
+    fn fit_dictionary(&mut self, num_guesses: usize) {
+        let words = num_guesses.div_ceil(64);
+        // The projection table holds at most 243 useless-guess sentinels plus
+        // one entry per guess, and is kept at most half full.
+        let table_len = ((num_guesses + 243) * 2).next_power_of_two().max(32768);
+        for d in 0..32 {
+            if self.scratch_is_in_set[d].len() < words {
+                self.scratch_is_in_set[d].resize(words, 0);
+            }
+            if self.scratch_projs[d].len() < num_guesses {
+                self.scratch_projs[d].resize(num_guesses, 0);
+            }
+            if self.scratch_hash_table[d].len() < table_len {
+                self.scratch_hash_table[d].resize(table_len, 0);
+            }
+        }
+    }
+}
+
 thread_local! {
-    static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
+    static THREAD_SCRATCH:std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The optimal Wordle solver using Branch and Bound.
@@ -291,7 +320,7 @@ impl<'a> Solver<'a> {
         global_beta: &'a AtomicU32,
         equiv_cache: &'a EquivCache,
     ) -> Self {
-        let scratch = THREAD_SCRATCH
+        let mut scratch = THREAD_SCRATCH
             .with(|ts| ts.borrow_mut().take())
             .unwrap_or_else(|| {
                 Box::new(SolverScratch {
@@ -311,6 +340,7 @@ impl<'a> Solver<'a> {
                     scratch_guess_child_max_ks: [[0u16; 243]; 32],
                 })
             });
+        scratch.fit_dictionary(dict.guesses.len());
 
         Self {
             matrix,
@@ -740,9 +770,8 @@ impl<'a> Solver<'a> {
             let projs = &mut scratch_ref.scratch_projs[depth];
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size = ((active_count + 243) * 2)
-                .next_power_of_two()
-                .clamp(1024, 32768) as usize;
+            let table_size =
+                (((active_count + 243) * 2).next_power_of_two() as usize).clamp(1024, table.len());
             let mask = table_size - 1;
             let shift = 64 - table_size.trailing_zeros();
 
@@ -762,7 +791,7 @@ impl<'a> Solver<'a> {
                     continue;
                 }
 
-                let projs_chunk = unsafe { projs.get_unchecked_mut(chunk_start..chunk_end) };
+                let projs_chunk = &mut projs[chunk_start..chunk_end];
                 projs_chunk.fill(0);
                 for &c in set {
                     let c_off = c * num_guesses;
