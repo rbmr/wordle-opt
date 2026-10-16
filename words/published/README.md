@@ -25,13 +25,30 @@ hard) mode, which is the cost `wordle-opt` reports. The `orig` result
 (average 3.4212 with SALET) was also reproduced independently by Bertsimas and
 Paskov, "An Exact Solution to Wordle", *Operations Research* 73(3), 2025.
 
+## Reproduced by wordle-opt
+
+All five were solved by `wordle-opt solve --strategy optimal` at commit
+`6118a35` on the compute host (`pc01`, 16 cores) via `deploy_and_bench.sh`.
+Each tree passed validation, and each opens with the published first guess
+(salet for `orig`, `nyt20220215`, `nyt20220316`; tarse for the other two).
+
+| lists | wordle-opt total | published | build time |
+|---|---:|---:|---:|
+| `orig` | 7,920 | 7,920 | 28.8 s |
+| `nyt20220215` | 7,897 | 7,897 | 28.8 s |
+| `nyt20220316` | 7,897 | 7,897 | 28.5 s |
+| `nyt20220830` | 7,883 | 7,883 | 33.6 s |
+| `nyt20230701` | 11,219 | 11,219 | 329.7 s |
+
 The bundled `words/candidates.txt` (2,340 words) is the `nyt20220830` hidden
 list plus 31 further words, so its optimum (8,001) has no published counterpart.
 
 `tests/optimality_audit.rs` re-solves these instances and requires the
-published optimum (`published_optima`, ignored by default because each is a
-full-scale solve):
+published optimum. Both tests are ignored by default because each instance is
+a full-scale solve: `published_optima` covers the four ~2,300-candidate
+instances (about 30 s each on `pc01`) and `published_optimum_3158` the
+3,158-candidate one (about 6 minutes on `pc01`).
 
 ```bash
-cargo test --release --test optimality_audit published_optima -- --ignored --nocapture
+cargo test --release --test optimality_audit published_optim -- --ignored --nocapture
 ```

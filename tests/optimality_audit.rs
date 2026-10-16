@@ -1144,3 +1144,23 @@ fn published_optima() {
         );
     }
 }
+
+/// The 3,158-candidate NYT list of July 2023 against the full guess list:
+/// larger than any instance the solver is otherwise run on. Published optimum
+/// 11,219 (Selby); about 6 minutes on the 16-core compute host.
+#[test]
+#[ignore = "full-scale: one ~6 minute solve on 16 cores; run with --ignored"]
+fn published_optimum_3158() {
+    let inst = Instance::new(
+        read_list("words/guesses.txt"),
+        read_list("words/published/wordlist_nyt20230701_hidden.txt"),
+    );
+    assert_eq!(inst.candidates.len(), 3158);
+    let t = Instant::now();
+    let got = solve_cost(&inst);
+    eprintln!(
+        "nyt20230701: cost {got} (published 11219) in {:.1?}",
+        t.elapsed()
+    );
+    assert_eq!(got, 11219, "solver disagrees with the published optimum");
+}
