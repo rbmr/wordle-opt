@@ -132,6 +132,44 @@ lookups sound (never reusing a bound that doesn't apply to a tighter
 current constraint) while still avoiding a full re-expansion when it does
 apply.
 
+## 10. Optimality Certificates (`crates/wordle-solver/src/cert.rs`, `crates/wordle-checker`)
+
+`solve --certify` writes a proof that no tree for the same lists costs less
+than the one it built, which `check-cert` verifies without the solver.
+
+**Format** (`crates/wordle-common/src/certfile.rs`). A list of claims
+`LB(S) >= b`. Each names its set as every candidate, or as the bucket of an
+earlier claim's set under one guess and response, and cites one rule:
+*base* (`|S| <= 2`), *capacity* (`b <= L3(|S|, k)`, where `k` is the most
+responses any guess gives on `S` and `L3(n, k) = max(2n - 1, 3n - k - 1)` is
+the capacity bound cut off at depth 3), or *expansion* (every guess that
+splits `S`, counted over the whole guess list, costs at least `b` given the
+claims on its buckets, or the default `base`/`L3` bound for buckets without
+one). Soundness is induction on `|S|`, because an expansion only uses claims
+on strict subsets.
+
+**Generation.** While recording is on (`certlog::set_enabled`), the solver
+logs every bound it proves, at the points where it writes the transposition
+table. While it is off, each hook costs one relaxed load; plain solves time
+the same as before the hooks existed. Searches cut short by the shared global
+beta are not proven, so they are set aside rather than logged. After the solve,
+`cert::assemble` works down from the root: it tries the capacity rule, and
+otherwise expands the claim, requesting claims on buckets only where the
+default bound is too low. A guess the logged facts cannot refute gets one
+targeted search, and the assembly is redone.
+
+**Checking** (`crates/wordle-checker`). The checker depends only on
+`wordle-common`, so it shares the word lists, the response table and the file
+formats with the solver, and none of its search. It recomputes every set from
+its definition and every `k` and bucket from the response table. Two filters
+keep it fast without trusting anything: `wordle_common::profile` bounds how
+many responses a guess can give on a set from which letters occur where, so
+guesses that cannot exceed a capacity limit are not read, and an expansion
+skips guesses whose smallest possible default sum already reaches the claim,
+while still reading every guess that could raise `k`. On the bundled lists the
+certificate has about 630,000 claims (9.5 MB); assembling it takes about a
+minute and checking it about 45 seconds on 16 cores.
+
 ## Known Scaling Behavior: depth transitions, not a smooth curve
 
 Solve time does not grow smoothly with the number of candidates. In

@@ -353,6 +353,12 @@ Operationally:
   (`--features tt-audit`), which checks every table write rather than only the
   answer: with the issue #14 guard removed it flagged 33 of 600 runs, against
   6 of 600 with a wrong answer.
+- Optimality certificates are a further, independent audit: `solve --certify`
+  writes one and `check-cert` verifies it with a checker that shares no search
+  code with the solver (`crates/wordle-checker`). After a change to solver,
+  bound or cache logic, certify a full run now and then and check it, as with
+  the ignored full-scale tests. A rejected certificate for a tree the solver
+  called optimal is a correctness bug until proven otherwise.
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.

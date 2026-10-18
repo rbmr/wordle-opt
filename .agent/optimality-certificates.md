@@ -1,7 +1,10 @@
 # Optimality certificates: investigation
 
-Status: investigation with a prototype (branch `cert-investigation`), not a
-shipped feature. The question was whether, and how, `solve` should produce a
+Status: shipped. Since 2026-10-18 `solve --certify`, `certify` and
+`check-cert` are in main as a runtime option (no build feature), the checker
+is its own crate (`crates/wordle-checker`), and the full certificate checks in
+about 45 s on pc01. The rest of this file is the original investigation, from
+branch `cert-investigation`; build-feature details below are historical. The question was whether, and how, `solve` should produce a
 lower-bound proof that a small independent checker verifies, without making the
 plain solve slower.
 
