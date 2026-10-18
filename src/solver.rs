@@ -2001,7 +2001,7 @@ mod solver_cache_tests {
     fn test_global_beta_cut_leaves_no_wrong_cache_entry() {
         let words = crate::dict::Dictionary::read_words(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../words/candidates.txt"
+            "/words/candidates.txt"
         ))
         .unwrap();
         let dict = crate::dict::Dictionary::from_words(words.clone(), words[..300].to_vec());

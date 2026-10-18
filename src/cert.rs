@@ -1,6 +1,6 @@
 //! Optimality-certificate generation: an investigation prototype.
 //!
-//! Turns a solved policy tree into a certificate that `wordle_checker`
+//! Turns a solved policy tree into a certificate that `crate::certcheck`
 //! verifies without trusting the solver. Two sources of lower-bound facts:
 //!
 //! * a **refutation pass** ([`refutation_pass`]): the tree is taken as given,
@@ -15,20 +15,20 @@
 //! default bound is not enough. Nothing here is trusted; a wrong fact makes
 //! the assembly fail (or the checker reject).
 
+use crate::certfile::{
+    self, Claim, Header, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef,
+};
 use crate::core::Response;
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
 use crate::policy::PolicyTree;
+use crate::profile::SetProfile;
 use crate::solver::{Metrics, Solver};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
-use wordle_common::certfile::{
-    self, Claim, Header, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef,
-};
-use wordle_common::profile::SetProfile;
 
 pub type FactMap = FxHashMap<Box<[u16]>, u32>;
 

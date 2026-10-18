@@ -90,7 +90,7 @@ jobs:
           $bin solve --max-candidates 120 --sample-seed 1 --no-progress \
             --output smoke.json --certify smoke.cert
           $bin validate smoke.json
-          $bin check-cert smoke.json smoke.cert
+          $bin check smoke.json smoke.cert
 
       - name: Package
         shell: bash

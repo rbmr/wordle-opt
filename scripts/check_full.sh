@@ -20,7 +20,7 @@ ssh "$HOST" "
 		echo \"RUNNING (run \$stamp, pid \$(cat \"\$pidfile\"))\"
 	else
 		echo \"NOT RUNNING (run \$stamp has exited, see the output below)\"
-		echo \"Files: ~/$RUN_DIR/\$stamp.json, ~/$RUN_DIR/\$stamp-progress.parquet, ~/$RUN_DIR/\$stamp.log\"
+		echo \"Files: ~/$RUN_DIR/\$stamp.json, ~/$RUN_DIR/\$stamp.log\"
 	fi
 	echo \"--- last 25 lines of \$stamp.log ---\"
 	tail -n 25 \"\$log\" 2>/dev/null || echo '(no output yet)'
