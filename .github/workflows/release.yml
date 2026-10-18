@@ -1,0 +1,145 @@
+name: Prebuilt binaries
+
+# Builds the command line for Linux, macOS and Windows from every commit on
+# main that passes "Rust CI", and publishes the binaries as the release tagged
+# `latest`. There are no version numbers: each new set replaces the previous
+# one, and the tag points at the commit the set was built from.
+
+on:
+  workflow_run:
+    workflows: ["Rust CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: prebuilt-binaries
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # A CI run for a push carries its commit; a manual run builds main as it is.
+  COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  build:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # x86-64-v2 runs on any x86-64 CPU from roughly 2009 on. A build
+          # tuned for one machine (see "Build from source") is about 5% faster.
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rustflags: -C target-cpu=x86-64-v2
+            run: true
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            rustflags: -C target-cpu=generic
+            run: true
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            rustflags: -C target-cpu=apple-m1
+            run: true
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            rustflags: -C target-cpu=x86-64-v2
+            run: false
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rustflags: -C target-cpu=x86-64-v2
+            run: true
+    runs-on: ${{ matrix.os }}
+    env:
+      # Replaces the repository's `target-cpu=native`, which would tie the
+      # binary to the build machine's CPU.
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      WORDLE_OPT_BUILD_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT }}
+
+      - name: Add the target
+        shell: bash
+        # rust-toolchain.toml pins the toolchain; rustup installs it here.
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke test
+        if: matrix.run
+        shell: bash
+        run: |
+          bin=target/${{ matrix.target }}/release/wordle-opt
+          $bin solve --max-candidates 120 --sample-seed 1 --no-progress \
+            --output smoke.json --certify smoke.cert
+          $bin validate smoke.json
+          $bin check-cert smoke.json smoke.cert
+
+      - name: Package
+        shell: bash
+        run: |
+          name=wordle-opt-${{ matrix.name }}
+          mkdir "$name"
+          cp README.md LICENSE "$name"/
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/${{ matrix.target }}/release/wordle-opt.exe "$name"/
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            cp target/${{ matrix.target }}/release/wordle-opt "$name"/
+            tar czf "$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordle-opt-${{ matrix.name }}
+          path: wordle-opt-${{ matrix.name }}.*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Replace the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          sha256sum wordle-opt-* > SHA256SUMS
+          short=${COMMIT:0:7}
+          {
+            echo "Built from commit $COMMIT after it passed CI."
+            echo
+            echo "Download the archive for your system, unpack it and run \`wordle-opt\`."
+            echo "See the README for details, and for building from source."
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > notes.md
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest wordle-opt-* SHA256SUMS \
+            --target "$COMMIT" \
+            --title "Latest build ($short)" \
+            --notes-file notes.md \
+            --latest

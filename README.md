@@ -32,9 +32,46 @@ The lists and the sources of these numbers are in
 
 ## Installation
 
-There are no prebuilt binaries. You need a Rust toolchain, which you can
-install with [rustup](https://rustup.rs). The repository pins the Rust version
-in `rust-toolchain.toml`, and rustup downloads it on the first build.
+### Download a prebuilt binary
+
+Every commit on `main` that passes the tests is built for the platforms below
+and published as the [latest release](https://github.com/rbmr/wordle-opt/releases/latest).
+There are no version numbers: the release notes name the commit the binaries
+were built from, and each new commit replaces them.
+
+| system | archive |
+|---|---|
+| Linux, x86-64 | [`wordle-opt-linux-x86_64.tar.gz`](https://github.com/rbmr/wordle-opt/releases/latest/download/wordle-opt-linux-x86_64.tar.gz) |
+| Linux, ARM64 | [`wordle-opt-linux-arm64.tar.gz`](https://github.com/rbmr/wordle-opt/releases/latest/download/wordle-opt-linux-arm64.tar.gz) |
+| macOS, Apple silicon | [`wordle-opt-macos-arm64.tar.gz`](https://github.com/rbmr/wordle-opt/releases/latest/download/wordle-opt-macos-arm64.tar.gz) |
+| macOS, Intel | [`wordle-opt-macos-x86_64.tar.gz`](https://github.com/rbmr/wordle-opt/releases/latest/download/wordle-opt-macos-x86_64.tar.gz) |
+| Windows, x86-64 | [`wordle-opt-windows-x86_64.zip`](https://github.com/rbmr/wordle-opt/releases/latest/download/wordle-opt-windows-x86_64.zip) |
+
+On Linux or macOS, for example:
+
+```bash
+curl -LO https://github.com/rbmr/wordle-opt/releases/latest/download/wordle-opt-linux-x86_64.tar.gz
+tar xzf wordle-opt-linux-x86_64.tar.gz
+./wordle-opt-linux-x86_64/wordle-opt --help
+```
+
+On Windows, unpack the zip and run `wordle-opt.exe` from a terminal. The
+release also lists a SHA-256 checksum for every archive.
+
+macOS may refuse to open the binary because it is not signed. Allow it once
+with `xattr -d com.apple.quarantine wordle-opt` in the unpacked folder.
+
+The bundled word lists are compiled into the binary, so it works from any
+directory and needs no other files.
+
+### Build from source
+
+Building it yourself makes the binary about 5% faster, because the build is
+tuned for the CPU it runs on (`target-cpu=native` in `.cargo/config.toml`),
+while the prebuilt binaries target any reasonably recent CPU. You need a Rust
+toolchain, which you can install with [rustup](https://rustup.rs). The
+repository pins the Rust version in `rust-toolchain.toml`, and rustup
+downloads it on the first build.
 
 ```bash
 git clone https://github.com/rbmr/wordle-opt.git
@@ -48,11 +85,7 @@ The binary is `target/release/wordle-opt`. To put it on your `PATH` instead:
 cargo install --path .
 ```
 
-The build is tuned for the CPU it is built on (`target-cpu=native` in
-`.cargo/config.toml`). Build it on the machine where you will run it.
-
-The bundled word lists are compiled into the binary, so it works from any
-directory.
+Build it on the machine where you will run it.
 
 ## Quick start
 
@@ -332,4 +365,6 @@ cargo test --release --features tt-audit --test tt_audit -- --ignored --nocaptur
 
 CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release --
 -D warnings`, `cargo fmt --all -- --check`, and the viewer's tests
-(`node site/policy-core.test.js`).
+(`node site/policy-core.test.js`). When it passes on `main`,
+`.github/workflows/release.yml` builds the prebuilt binaries, runs a small
+solve, certificate and check with each, and replaces the latest release.

@@ -387,6 +387,11 @@ Operationally:
   checking GitHub sees a stale state. Push after each commit, or at minimum before
   moving on to a different task. (This has happened: 11 commits, including a
   correctness fix to `build.rs`, sat unpushed for over a day.)
+- Every commit on `main` that passes CI is built and published as the
+  `latest` release (`.github/workflows/release.yml`), so whatever lands on
+  `main` is what strangers download. After pushing, check that both "Rust CI"
+  and "Prebuilt binaries" succeeded; a failed release build is a bug to fix
+  like a failed test.
 - **Always run the exact CI gates before pushing.** You must have a pre-push hook
   configured (`git config core.hooksPath .githooks`) containing:
   `cargo fmt --all -- --check && cargo clippy --release -- -D warnings && cargo test --release`.
