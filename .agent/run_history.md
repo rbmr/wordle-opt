@@ -372,6 +372,11 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-18 | `ac0cb8a` | pc01 | 1000 | 1 | optimal | 3.819s | 3124 | 1049 | 1034–1186 | — | capacity bounds count guesses outside the set, plus tt-audit hooks and the global-beta reload (branch fix-capacity-bound); 3 runs 3.812 / 3.819 / 3.819s (median shown); guesses 16323–16944; validation OK |
 | 2026-10-18 | `fd4e06f` | pc01 | 2340 | — | optimal | 36.076s (0.01h) | 8001 | 2478 | 28013–28189 | — | baseline, full list via deploy_and_bench (not run_full.sh); 3 runs 36.064 / 36.076 / 36.096s (median shown); guesses 773977–776815; validation OK |
 | 2026-10-18 | `ac0cb8a` | pc01 | 2340 | — | optimal | 36.051s (0.01h) | 8001 | 2478 | 28062–28229 | — | capacity-bound fix (branch), full list via deploy_and_bench (not run_full.sh); 3 runs 36.051 / 36.048 / 36.435s (median shown); guesses 773012–776130; validation OK |
+| 2026-10-18 | `911a89e` | pc01 | 1000 | 1 | optimal | 3.816s | 3124 | 1049 | 1140–1167 | — | main, baseline for the crate split, interleaved with 9e072bb; 3 runs 3.816 / 3.817 / 3.814s (median shown); guesses 16599–16838; validation OK |
+| 2026-10-18 | `9e072bb` | pc01 | 1000 | 1 | optimal | 3.818s | 3124 | 1049 | 1152–1167 | — | common/solver/checker crate split (branch certificates); 3 runs 3.810 / 3.819 / 3.818s (median shown); guesses 16676–16967; validation OK |
+| 2026-10-18 | `911a89e` | pc01 | 2340 | — | optimal | 36.258s (0.01h) | 8001 | 2478 | 28103–28173 | — | main, full list via deploy_and_bench; 3 runs 36.732 / 36.083 / 36.258s (median shown); guesses 774984–775547; validation OK |
+| 2026-10-18 | `9e072bb` | pc01 | 2340 | — | optimal | 36.158s (0.01h) | 8001 | 2478 | 28091–28109 | — | crate split (branch), full list via deploy_and_bench; 3 runs 36.029 / 36.158 / 36.164s (median shown); guesses 774453–775138; validation OK |
+| 2026-10-18 | `9e072bb` | pc01 | 2340 | — | optimal --certify | 36.195s (0.01h) | 8001 | 2478 | — | — | certlog build: 1,348,354 facts; gap fill 582 refutations 12.379s; assembly 80.782s; 634,004 claims (445,488 capacity, 188,516 expansion), 9,510,079 bytes; check-cert 74.819s, CERTIFICATE VALID; validation OK |
 
 
 
