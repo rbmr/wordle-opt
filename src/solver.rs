@@ -720,6 +720,12 @@ impl<'a> Solver<'a> {
         }
 
         let mut best_val = beta;
+        // Set when the shared global beta, rather than this node's own `beta`,
+        // stops the search before every guess is resolved. Such a result is not
+        // proven for this set alone, so it must not reach the transposition
+        // table: a later search of the set with a different cost so far would
+        // trust it as an exact value or lower bound.
+        let mut cut_by_global = false;
 
         let set_hash = hash;
 
@@ -1016,9 +1022,11 @@ impl<'a> Solver<'a> {
         for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
             if self.current_cost_so_far + local_lb >= current_global_beta {
+                cut_by_global = true;
                 break;
             }
             if self.current_cost_so_far + g_lb >= current_global_beta {
+                cut_by_global = true;
                 min_val_found = min_val_found.min(g_lb);
                 self.metrics.pruned_by_bounds.fetch_add(
                     phase1_tuples.len() - idx,
@@ -1037,6 +1045,10 @@ impl<'a> Solver<'a> {
             let val =
                 self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
             min_val_found = min_val_found.min(val);
+            // A guess cut short by the global beta returns a partial cost.
+            if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                cut_by_global = true;
+            }
             if val < best_val {
                 best_val = val;
                 if best_val <= local_lb {
@@ -1170,15 +1182,20 @@ impl<'a> Solver<'a> {
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if local_lb < best_val && self.current_cost_so_far + local_lb >= current_global_beta {
+                cut_by_global = true;
+            }
             if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
                 phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
 
                 for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if self.current_cost_so_far + local_lb >= current_global_beta {
+                        cut_by_global = true;
                         break;
                     }
                     if self.current_cost_so_far + g_lb >= current_global_beta {
+                        cut_by_global = true;
                         min_val_found = min_val_found.min(g_lb);
                         self.metrics.pruned_by_bounds.fetch_add(
                             phase2_tuples.len() - idx,
@@ -1203,6 +1220,9 @@ impl<'a> Solver<'a> {
                         local_max_k,
                     );
                     min_val_found = min_val_found.min(val);
+                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                        cut_by_global = true;
+                    }
                     if val < best_val {
                         best_val = val;
                         if best_val <= local_lb {
@@ -1212,6 +1232,10 @@ impl<'a> Solver<'a> {
                 }
             }
         } else {
+            if best_val > phase2_effective_lb {
+                // Phase 2 was skipped because of the global beta.
+                cut_by_global = true;
+            }
             min_val_found = min_val_found.min(phase2_min_lb);
         }
 
@@ -1220,14 +1244,18 @@ impl<'a> Solver<'a> {
 
         let is_exact = best_val < beta;
         if is_exact {
-            self.cache.insert(hash, best_val, true);
+            if !cut_by_global {
+                self.cache.insert(hash, best_val, true);
+            }
             best_val
         } else {
             let mut final_lb = beta.max(local_lb);
             if best_val > local_lb && min_val_found != u32::MAX {
                 final_lb = final_lb.max(min_val_found);
             }
-            self.cache.insert(hash, final_lb, false);
+            if !cut_by_global {
+                self.cache.insert(hash, final_lb, false);
+            }
             final_lb
         }
     }
@@ -1916,6 +1944,122 @@ mod solver_cache_tests {
         let _metrics = Metrics::new();
         let cache = crate::cache::GlobalCache::new(1024);
         assert_eq!(cache.get(0), None);
+    }
+
+    /// The optimum of `set` from a search with fresh caches and no global beta.
+    fn fresh_optimum(
+        matrix: &crate::matrix::ResponseMatrix,
+        dict: &crate::dict::Dictionary,
+        set: &[usize],
+        bits: &[u64],
+        capacity_bounds_2d: &[Vec<u32>],
+        max_k: usize,
+    ) -> u32 {
+        let metrics = Metrics::new();
+        let cache = crate::cache::GlobalCache::new(1 << 16);
+        let equiv_cache: EquivCache =
+            std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
+        let mut solver = Solver::new(
+            matrix,
+            max_k,
+            dict,
+            &metrics,
+            capacity_bounds_2d,
+            &cache,
+            &equiv_cache,
+        );
+        let greedy = Solver::greedy_solve(matrix, dict, set);
+        solver
+            .min_state_val(set, bits, greedy + 1, 1, max_k)
+            .min(greedy)
+    }
+
+    /// A search that the shared global beta cuts short has not proven its
+    /// result, so it must leave nothing in the transposition table that a
+    /// later, unconstrained search of the same set could trust. Here the global
+    /// beta is fixed at or below the optimum, under the search's own beta,
+    /// before the search starts. That cuts the search the way a concurrent
+    /// tightening does in the parallel scans; a second search sharing the same
+    /// table must still find the optimum.
+    #[test]
+    fn test_global_beta_cut_leaves_no_wrong_cache_entry() {
+        let words = crate::dict::Dictionary::read_words("words/candidates.txt").unwrap();
+        let dict = crate::dict::Dictionary::from_words(words.clone(), words[..300].to_vec());
+        let matrix = crate::matrix::ResponseMatrix::new(&dict);
+        let num_u64s = dict.guesses.len().div_ceil(64);
+        let mut bits = vec![u64::MAX; num_u64s];
+        let rem = dict.guesses.len() % 64;
+        if rem != 0 {
+            bits[num_u64s - 1] = (1 << rem) - 1;
+        }
+
+        let mut checked = 0;
+        let mut wrong = Vec::new();
+        for (start, len) in [(0, 40), (40, 60), (100, 30), (130, 80), (210, 50)] {
+            let set: Vec<usize> = (start..start + len).collect();
+            let max_k = heuristic::compute_max_branching_factor(&matrix, &set);
+            let mut capacity_bounds_2d = vec![vec![0; dict.candidates.len() + 1]; max_k + 1];
+            for k in 2..=max_k {
+                for i in 0..=dict.candidates.len() {
+                    capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
+                }
+            }
+            let opt = fresh_optimum(&matrix, &dict, &set, &bits, &capacity_bounds_2d, max_k);
+            let lb = capacity_bounds_2d[max_k][set.len()];
+            let greedy = Solver::greedy_solve(&matrix, &dict, &set);
+
+            for global in (lb + 1)..=opt {
+                let metrics = Metrics::new();
+                let cache = crate::cache::GlobalCache::new(1 << 16);
+                let equiv_cache: EquivCache = std::array::from_fn(|_| {
+                    std::sync::RwLock::new(rustc_hash::FxHashMap::default())
+                });
+                let global_beta = AtomicU32::new(global);
+                {
+                    let mut cut = Solver::new_with_global_beta(
+                        &matrix,
+                        max_k,
+                        &dict,
+                        &metrics,
+                        &capacity_bounds_2d,
+                        &cache,
+                        &global_beta,
+                        &equiv_cache,
+                    );
+                    cut.min_state_val(&set, &bits, greedy + 1, 1, max_k);
+                }
+                let mut solver = Solver::new(
+                    &matrix,
+                    max_k,
+                    &dict,
+                    &metrics,
+                    &capacity_bounds_2d,
+                    &cache,
+                    &equiv_cache,
+                );
+                let val = solver
+                    .min_state_val(&set, &bits, greedy + 1, 1, max_k)
+                    .min(greedy);
+                if val != opt {
+                    wrong.push(format!(
+                        "set {start}..{}, global beta {global}: {val} instead of {opt}",
+                        start + len
+                    ));
+                }
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 0,
+            "no global beta between the bound and the optimum"
+        );
+        assert!(
+            wrong.is_empty(),
+            "after a search cut short by the global beta, a search of the same set \
+             with the same cache went wrong in {} of {checked} cases:\n{}",
+            wrong.len(),
+            wrong.join("\n")
+        );
     }
 
     #[test]
