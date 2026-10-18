@@ -379,6 +379,12 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-18 | `9e072bb` | pc01 | 2340 | — | optimal --certify | 36.195s (0.01h) | 8001 | 2478 | — | — | certlog build: 1,348,354 facts; gap fill 582 refutations 12.379s; assembly 80.782s; 634,004 claims (445,488 capacity, 188,516 expansion), 9,510,079 bytes; check-cert 74.819s, CERTIFICATE VALID; validation OK |
 | 2026-10-18 | `1386e2b` | pc01 | 2340 | — | optimal --certify | 36.294s (0.01h) | 8001 | 2478 | — | — | certlog build with guess filters from set profiles: gap fill 579 refutations 11.891s; assembly 61.809s (was 80.782s); 632,992 claims (445,041 capacity, 187,951 expansion), 9,494,899 bytes; check-cert (at 8b7b15f, same checker) 44.252 / 45.356s (was 74.819s), capacity 33.9s, expansion 9.1s, CERTIFICATE VALID; validation OK |
 | 2026-10-18 | `6f09b70` | pc01 | 2340 | — | check-cert | 94.862s | — | — | — | — | branchless per-word capacity scan, same certificate: 94.862 / 95.157s, capacity 84.7s (slower than the scalar 33.9s), CERTIFICATE VALID; reverted in c5f1ca8 |
+| 2026-10-18 | `911a89e` | pc01 | 1000 | 1 | optimal | 3.821s | 3124 | 1049 | — | — | main, baseline for runtime certificate hooks, interleaved with 223000f; 3 runs 3.821 / 3.810 / 3.822s (median shown); validation OK |
+| 2026-10-18 | `223000f` | pc01 | 1000 | 1 | optimal | 3.815s | 3124 | 1049 | — | — | certificate hooks compiled in, recording off (branch certificates); 3 runs 3.817 / 3.809 / 3.815s (median shown); validation OK |
+| 2026-10-18 | `911a89e` | pc01 | 2340 | — | optimal | 36.140s (0.01h) | 8001 | 2478 | — | — | main, full list via deploy_and_bench; 3 runs 36.077 / 36.177 / 36.140s (median shown); validation OK |
+| 2026-10-18 | `223000f` | pc01 | 2340 | — | optimal | 36.082s (0.01h) | 8001 | 2478 | — | — | runtime certificate hooks (branch), full list; 3 runs 36.019 / 36.082 / 36.113s (median shown); validation OK |
+| 2026-10-18 | `223000f` | pc01 | 2340 | — | optimal | 37.970s (0.01h) | 8001 | 2478 | — | — | portable build, RUSTFLAGS -C target-cpu=x86-64-v2 instead of native; 3 runs 37.849 / 37.970 / 38.097s (median shown); validation OK |
+| 2026-10-18 | `223000f` | pc01 | 2340 | — | optimal | 39.525s (0.01h) | 8001 | 2478 | — | — | portable build, RUSTFLAGS -C target-cpu=x86-64-v3; 3 runs 39.391 / 39.528 / 39.525s (median shown); validation OK |
 
 
 
