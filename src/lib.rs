@@ -22,11 +22,20 @@ use std::time::Instant;
 /// it and stores it in the progress series, so a timing can be traced to the
 /// code that produced it.
 ///
-/// `WORDLE_OPT_COMMIT` takes precedence over `git rev-parse`. A build made
-/// from a copy of the source without `.git` should set it, because
-/// `git rev-parse` there fails or reports an unrelated repository.
+/// In order: `WORDLE_OPT_COMMIT` at run time, `WORDLE_OPT_BUILD_COMMIT` at
+/// build time (the prebuilt binaries set it), then `git rev-parse`. A build
+/// made from a copy of the source without `.git` should set one of the first
+/// two, because `git rev-parse` there fails or reports an unrelated
+/// repository.
 fn git_commit_hash() -> String {
     if let Ok(commit) = std::env::var("WORDLE_OPT_COMMIT")
+        && !commit.trim().is_empty()
+    {
+        return commit.trim().to_string();
+    }
+    // Set when the binary was built by the release workflow, which knows the
+    // commit it built; a downloaded binary has no repository to ask.
+    if let Some(commit) = option_env!("WORDLE_OPT_BUILD_COMMIT")
         && !commit.trim().is_empty()
     {
         return commit.trim().to_string();
