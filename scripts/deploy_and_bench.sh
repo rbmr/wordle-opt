@@ -12,7 +12,9 @@ set -e
 #
 # Optional: WORDLE_OPT_FEATURES=tt-audit builds, tests and runs with that cargo
 # feature; WORDLE_OPT_REPEAT=N runs the command N times in a row, so one
-# invocation yields N timings of the same build.
+# invocation yields N timings of the same build; WORDLE_OPT_RUSTFLAGS replaces
+# the default compiler flags (-C target-cpu=native), for example to time a
+# portable build.
 #
 # The remote copy lives in ~/wordle-opt and is an exact mirror of this working
 # tree without .git, so the commit is determined here and passed to the run in
@@ -24,6 +26,7 @@ if [ -n "${WORDLE_OPT_FEATURES:-}" ]; then
 	FEATURES="--features ${WORDLE_OPT_FEATURES}"
 fi
 REPEAT="${WORDLE_OPT_REPEAT:-1}"
+RUSTFLAGS_REMOTE="${WORDLE_OPT_RUSTFLAGS:--C target-cpu=native}"
 
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
@@ -34,10 +37,10 @@ echo "Syncing to $HOST (commit $COMMIT)..."
 rsync -aP --delete --exclude 'target' --exclude '.git' . "$HOST:~/wordle-opt/"
 
 echo "Building on $HOST..."
-ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo build --release $FEATURES"
+ssh "$HOST" "cd wordle-opt && env RUSTFLAGS=\"$RUSTFLAGS_REMOTE\" ~/.cargo/bin/cargo build --release $FEATURES"
 
 echo "Running the test suite on $HOST..."
-ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo test --release $FEATURES"
+ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"$RUSTFLAGS_REMOTE\" ~/.cargo/bin/cargo test --release $FEATURES"
 
 CMD_ARGS="$*"
 if [ -z "$CMD_ARGS" ]; then
@@ -46,5 +49,5 @@ fi
 
 for i in $(seq 1 "$REPEAT"); do
 	echo "Running on $HOST (run $i/$REPEAT, time limit 10 h): $CMD_ARGS"
-	ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"-C target-cpu=native\" ~/.cargo/bin/cargo run --release $FEATURES -- $CMD_ARGS"
+	ssh "$HOST" "cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT timeout 36000 env RUSTFLAGS=\"$RUSTFLAGS_REMOTE\" ~/.cargo/bin/cargo run --release $FEATURES -- $CMD_ARGS"
 done
