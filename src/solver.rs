@@ -699,7 +699,7 @@ impl<'a> Solver<'a> {
         if c_len <= 15 {
             let (val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, set);
             if is_exact {
-                self.cache.insert(hash, val, true);
+                self.cache.insert_set(hash, set, val, true);
                 return val;
             }
             cached_lower_bound = cached_lower_bound.max(val);
@@ -707,7 +707,7 @@ impl<'a> Solver<'a> {
             if cached_lower_bound >= beta
                 || self.current_cost_so_far + cached_lower_bound >= current_global_beta
             {
-                self.cache.insert(hash, cached_lower_bound, false);
+                self.cache.insert_set(hash, set, cached_lower_bound, false);
                 return cached_lower_bound;
             }
         }
@@ -1245,7 +1245,7 @@ impl<'a> Solver<'a> {
         let is_exact = best_val < beta;
         if is_exact {
             if !cut_by_global {
-                self.cache.insert(hash, best_val, true);
+                self.cache.insert_set(hash, set, best_val, true);
             }
             best_val
         } else {
@@ -1254,7 +1254,7 @@ impl<'a> Solver<'a> {
                 final_lb = final_lb.max(min_val_found);
             }
             if !cut_by_global {
-                self.cache.insert(hash, final_lb, false);
+                self.cache.insert_set(hash, set, final_lb, false);
             }
             final_lb
         }
@@ -1406,7 +1406,12 @@ impl<'a> Solver<'a> {
                 );
                 self.current_cost_so_far -= b;
 
-                if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
+                // Reload the global beta: a child cut short by it returns a
+                // value that only means something against its current value.
+                if b + val >= beta
+                    || self.current_cost_so_far + b + val
+                        >= self.global_beta.load(Ordering::Relaxed)
+                {
                     return b + val;
                 }
                 cost = b + val;
@@ -1645,7 +1650,7 @@ impl<'a> Solver<'a> {
                     }
                     num_exact += 1;
                 }
-                self.cache.insert(hash, used_val, is_exact);
+                self.cache.insert_set(hash, p, used_val, is_exact);
                 unsafe {
                     *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
                 }
@@ -1692,7 +1697,7 @@ impl<'a> Solver<'a> {
                         *child_max_ks_ptr.add(r_idx) =
                             (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
                     }
-                    self.cache.insert(hash, lb, false);
+                    self.cache.insert_set(hash, p, lb, false);
                 } else {
                     let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
                         self.matrix,
@@ -1704,7 +1709,7 @@ impl<'a> Solver<'a> {
                             *child_max_ks_ptr.add(r_idx) =
                                 (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
                         }
-                        self.cache.insert(hash, lb, false);
+                        self.cache.insert_set(hash, p, lb, false);
                     } else {
                         let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
                             self.matrix,
@@ -1717,7 +1722,7 @@ impl<'a> Solver<'a> {
                                 *child_max_ks_ptr.add(r_idx) =
                                     (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
                             }
-                            self.cache.insert(hash, lb, false);
+                            self.cache.insert_set(hash, p, lb, false);
                         } else {
                             unsafe {
                                 *child_max_ks_ptr.add(r_idx) =
@@ -1730,7 +1735,7 @@ impl<'a> Solver<'a> {
                             unsafe {
                                 *p_lbs_ptr.add(r_idx) = used_val;
                             }
-                            self.cache.insert(hash, used_val, false);
+                            self.cache.insert_set(hash, p, used_val, false);
                         }
                     }
                 }

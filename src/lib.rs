@@ -67,6 +67,12 @@ fn mix64(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// The candidate indices that `--max-candidates size --sample-seed seed`
+/// selects from a list of `total` candidates, sorted.
+pub fn seeded_subset(seed: u64, size: usize, total: usize) -> Vec<usize> {
+    sample_random_subset(&mut subset_rng(seed, size), total, size)
+}
+
 /// Derives the RNG stream that draws the subset for one (seed, size) pair.
 ///
 /// The stream depends on the seed and the size only, so `--max-candidates N
@@ -169,8 +175,7 @@ fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> (Dictionary, St
     }
     let (idx, description) = match flags.get("sample-seed").and_then(|v| v.parse::<u64>().ok()) {
         Some(seed) => {
-            let mut rng = subset_rng(seed, max_candidates);
-            let idx = sample_random_subset(&mut rng, total, max_candidates);
+            let idx = seeded_subset(seed, max_candidates, total);
             (
                 idx,
                 format!("seeded subset (seed={seed}, size={max_candidates} of {total})"),

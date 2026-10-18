@@ -107,14 +107,14 @@ pub fn solve_parallel_depth2<'a>(
                 if is_exact {
                     exact_vals[r_idx] = true;
                 }
-                global_cache.insert(hash, used_val, is_exact);
+                global_cache.insert_set(hash, p, used_val, is_exact);
             } else {
                 let k = crate::heuristic::compute_max_branching_factor_seq(matrix, p);
                 let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, max_k);
                 let used_val = tight_lb.max(cap_lb);
                 p_lbs[r_idx] = used_val;
                 lb += used_val;
-                global_cache.insert(hash, used_val, false);
+                global_cache.insert_set(hash, p, used_val, false);
             }
 
             if lb >= beta.load(Ordering::Relaxed) {

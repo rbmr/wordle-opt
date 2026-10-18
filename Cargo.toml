@@ -19,6 +19,12 @@ serde_json = "1.0.151"
 # optional solve-trace export. `snap` is the codec applied to those files.
 parquet = { version = "60.0.0", default-features = false, features = ["snap"] }
 
+[features]
+# Records every transposition-table write with the candidate set it is for,
+# so `tests/tt_audit.rs` can check each stored value. Off by default; it slows
+# the search down and is only for testing.
+tt-audit = []
+
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3.8.0"

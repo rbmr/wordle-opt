@@ -113,6 +113,18 @@ impl GlobalCache {
         slot0.store(packed, Ordering::Relaxed);
     }
 
+    /// [`GlobalCache::insert`] for the candidate set `set`, whose hash is
+    /// `full_hash`. With the `tt-audit` feature the write is also recorded
+    /// (see [`audit`]); without it, `set` is unused.
+    #[inline(always)]
+    pub fn insert_set(&self, full_hash: u64, set: &[usize], value: u32, is_exact: bool) {
+        #[cfg(feature = "tt-audit")]
+        audit::record(set, value, is_exact);
+        #[cfg(not(feature = "tt-audit"))]
+        let _ = set;
+        self.insert(full_hash, value, is_exact);
+    }
+
     #[inline]
     pub fn get(&self, full_hash: u64) -> Option<(u32, bool)> {
         let base_index = (full_hash as usize & self.mask) << 1;
@@ -135,6 +147,43 @@ impl GlobalCache {
         }
 
         None
+    }
+}
+
+/// Every value the search writes to a transposition table, with the set it
+/// is for, so a test can check each one against an independent solver. Each
+/// thread appends to its own buffer, so recording adds no contention between
+/// threads.
+#[cfg(feature = "tt-audit")]
+pub mod audit {
+    use std::sync::{Arc, Mutex};
+
+    /// One write: the candidate set (as written by the search), the value, and
+    /// whether it was stored as exact (otherwise as a lower bound).
+    pub type Entry = (Vec<usize>, u32, bool);
+
+    static BUFFERS: Mutex<Vec<Arc<Mutex<Vec<Entry>>>>> = Mutex::new(Vec::new());
+
+    thread_local! {
+        static LOCAL: Arc<Mutex<Vec<Entry>>> = {
+            let buf = Arc::new(Mutex::new(Vec::new()));
+            BUFFERS.lock().unwrap().push(Arc::clone(&buf));
+            buf
+        };
+    }
+
+    pub(crate) fn record(set: &[usize], value: u32, is_exact: bool) {
+        LOCAL.with(|buf| buf.lock().unwrap().push((set.to_vec(), value, is_exact)));
+    }
+
+    /// Removes and returns everything recorded so far, on every thread.
+    pub fn take() -> Vec<Entry> {
+        let buffers = BUFFERS.lock().unwrap();
+        let mut out = Vec::new();
+        for buf in buffers.iter() {
+            out.append(&mut buf.lock().unwrap());
+        }
+        out
     }
 }
 

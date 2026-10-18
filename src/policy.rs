@@ -649,7 +649,7 @@ impl<'a> OptimalPolicy<'a> {
                         let (q_val, is_exact) =
                             Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
                         if is_exact {
-                            self.cache.insert(hash, q_val, true);
+                            self.cache.insert_set(hash, bucket, q_val, true);
                             return q_val;
                         }
                     }
@@ -672,7 +672,7 @@ impl<'a> OptimalPolicy<'a> {
                         bucket_k,
                     );
                     let exact_val = val.min(bucket_greedy);
-                    self.cache.insert(hash, exact_val, true);
+                    self.cache.insert_set(hash, bucket, exact_val, true);
                     exact_val
                 })
                 .sum();

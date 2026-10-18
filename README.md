@@ -249,6 +249,7 @@ run the real solver on real word lists. The main checks are:
 | `published_optima.rs` | The published lists in `words/published/` must reach the published optima. |
 | `full_scale.rs` | Rebuilds the full bundled tree and runs the checks above on it. |
 | `parallel_consistency.rs` | Repeated multi-threaded solves of one list must always reach the single-threaded optimum, whatever the thread timing. |
+| `tt_audit.rs` | During repeated multi-threaded solves, every value written to the transposition table must hold for its set, checked against a solve of that set alone. Needs the `tt-audit` feature. |
 | `cli.rs` | The binary reads word lists from files and writes and validates a tree. |
 
 `published_optima.rs` and `full_scale.rs` are skipped by default because each
@@ -263,6 +264,15 @@ same list a few hundred times (about a minute and a half). Run it with:
 
 ```bash
 cargo test --release --test parallel_consistency -- --ignored --nocapture
+```
+
+`tt_audit.rs` needs the `tt-audit` feature, which records every table write
+and slows the solver down, so it is built only on request (about half a minute
+with the default 10 solves per thread count; `WORDLE_OPT_AUDIT_RUNS` changes
+that):
+
+```bash
+cargo test --release --features tt-audit --test tt_audit -- --ignored --nocapture
 ```
 
 CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release --

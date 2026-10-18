@@ -91,7 +91,33 @@ Work-stealing parallelism is applied at the root: the first root guess's
 response buckets are evaluated in parallel, then the remaining root
 guesses are evaluated in parallel against each other, sharing a single
 atomic `global_beta` so one thread's progress prunes the others' search
-space. Recursion below the root is single-threaded per branch. Bucket
+space. Recursion below the root is single-threaded per branch.
+
+The shared bound must never leave a wrong value in the transposition table.
+`global_beta` is the cost of a complete tree some thread has already found
+(plus one where ties matter), and it only ever decreases.
+`current_cost_so_far` is a lower bound on the rest of the tree the current
+node belongs to. Every value a search returns is either *proven* for its set
+(below the search's own `beta` it is the exact optimum, at or above it a
+lower bound) or *cut*: the search stopped early and
+`current_cost_so_far + value >= global_beta` held when it returned. A cut
+value can be wrong in either direction. Because `global_beta` never
+increases, the condition still holds when the caller reads it, and every
+caller checks it straight after the call and then treats its own result as
+cut as well. `min_state_val` tracks this in `cut_by_global` and does not
+store a cut result. Every other write to the table is a capacity bound or a
+small-set evaluation, which depend only on the set. So the table only ever
+holds proven values.
+
+At the root, a guess that costs no more than the best tree found so far is
+never cut. Along its optimal subtree, `current_cost_so_far` plus the optimum
+of the current set never exceeds the guess's cost, which is below
+`global_beta`, so no comparison that could cut it succeeds. It is therefore
+evaluated exactly. `tests/tt_audit.rs` (behind the `tt-audit` feature)
+checks every table write made during repeated multi-threaded solves
+against a solve of that set alone.
+
+Bucket
 histogramming in the hot loop uses fixed-size stack arrays (`counts[243]`,
 etc., since there are at most 243 distinct Wordle responses) rather than
 heap allocation.

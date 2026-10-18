@@ -349,7 +349,10 @@ Operationally:
   otherwise. After any change to the parallel scans, the global beta or what
   goes into the transposition table, also run the ignored
   `parallel_consistency.rs`, which repeats a multi-threaded solve that used to
-  go wrong only under some thread timings (issue #14).
+  go wrong only under some thread timings (issue #14), and `tt_audit.rs`
+  (`--features tt-audit`), which checks every table write rather than only the
+  answer: with the issue #14 guard removed it flagged 33 of 600 runs, against
+  6 of 600 with a wrong answer.
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.
