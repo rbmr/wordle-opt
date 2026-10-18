@@ -1,0 +1,955 @@
+# Raw result lines for .agent/optimality-certificates.md
+# Series 1 (2026-10-16, branch 1b1e0f4 = solver code of 615e8ce/b9989cb):
+  == A_base_n1000.log
+    Syncing to user@pc01 (commit 3724ef7)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.807s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.810s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.809s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.804s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.804s
+  == A_base_n500.log
+    Syncing to user@pc01 (commit 3724ef7)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.485s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.494s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.488s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.489s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.494s
+  == B_cert_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.823s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.814s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.818s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.811s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.820s
+  == B_cert_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.499s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.498s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.501s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.496s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.497s
+  == C_pass_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 318 guesses_evaluated 12961
+    Refutation pass time: 3.655s
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 318 guesses_evaluated 12961
+    Refutation pass time: 3.669s
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 323 guesses_evaluated 13064
+    Refutation pass time: 3.652s
+  == C_pass_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.442s
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.433s
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.440s
+  == C_shallow_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=2
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 316 guesses_evaluated 13063
+    Refutation pass time: 3.659s
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=2
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 316 guesses_evaluated 12941
+    Refutation pass time: 3.660s
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=2
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 316 guesses_evaluated 12946
+    Refutation pass time: 3.660s
+  == C_shallow_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=2
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.435s
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=2
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.437s
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=2
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.435s
+  == D_hooks_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.820s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.827s
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.825s
+  == D_hooks_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.504s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.497s
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.504s
+  == E_ao_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.826s
+    Facts proved: 174767 records (95318 exact, 79449 lower-bound only), 172388 distinct sets, 7 MB of member data
+    Assembly time: 0.104s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 1000, 0 with |S| <= 30)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 1000, target 3124, depth 0: guess #1993 reaches only 3123 with the known facts (k = 124): [102: d203 f246] [11: d21 f21] [22: d43 f45] [37: d73 f87] [7: d13 f14] [11: d21 f22] [31: d61 f68] [8: d15 f16] [10: d19 f20] [13: d25 f26] [4: d7 f7] [4: d7 f7] [45: d89 f103] [8: d15 f16] [3: d5 f5] [8: d15 f16] [31: d61 f74] [5: d9 f10] [19: d37 f43] [3: d5 f5] [6: d11 f11] [6: d11 f12] [41: d81 f94] [6: d11 f12] [6: d11 f11] [8: d15 f16] [31: d61 f73] [6: d11 f12] [5: d9 f10] [5: d9 f9] [3: d5 f5] [8: d15 f16] [41: d81 f90] [3: d5 f5] [8: d15 f16] [7: d13 f14] [19: d37 f42] [3: d5 f5] [10: d19 f20] [24: d47 f53] [9: d17 f18] [5: d9 f10] [5: d9 f10] [14: d27 f28] [8: d15 f16] [50: d99 f116] [5: d9 f10] [9: d17 f17] [22: d43 f48] [3: d5 f5] [11: d21 f22] [3: d5 f5] [3: d5 f5] [57: d113 f149] [6: d11 f12] [4: d7 f7] [11: d21 f24] [15: d29 f30] [9: d17 f18] [24: d47 f53] [3: d5 f5] [6: d11 f12] [11: d21 f22] [9: d17 f18] [3: d5 f5]
+    Facts set aside (search cut short by the global beta): 64 (27 claimed exact)
+    Wrote certificate: /tmp/ao-n1000.cert (34 bytes)
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.829s
+    Facts proved: 174619 records (95215 exact, 79404 lower-bound only), 172245 distinct sets, 7 MB of member data
+    Assembly time: 0.100s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 1000, 0 with |S| <= 30)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 1000, target 3124, depth 0: guess #1993 reaches only 3123 with the known facts (k = 124): [102: d203 f246] [11: d21 f21] [22: d43 f45] [37: d73 f87] [7: d13 f14] [11: d21 f22] [31: d61 f68] [8: d15 f16] [10: d19 f20] [13: d25 f26] [4: d7 f7] [4: d7 f7] [45: d89 f103] [8: d15 f16] [3: d5 f5] [8: d15 f16] [31: d61 f74] [5: d9 f10] [19: d37 f43] [3: d5 f5] [6: d11 f11] [6: d11 f12] [41: d81 f94] [6: d11 f12] [6: d11 f11] [8: d15 f16] [31: d61 f73] [6: d11 f12] [5: d9 f10] [5: d9 f9] [3: d5 f5] [8: d15 f16] [41: d81 f90] [3: d5 f5] [8: d15 f16] [7: d13 f14] [19: d37 f42] [3: d5 f5] [10: d19 f20] [24: d47 f53] [9: d17 f18] [5: d9 f10] [5: d9 f10] [14: d27 f28] [8: d15 f16] [50: d99 f116] [5: d9 f10] [9: d17 f17] [22: d43 f48] [3: d5 f5] [11: d21 f22] [3: d5 f5] [3: d5 f5] [57: d113 f149] [6: d11 f12] [4: d7 f7] [11: d21 f24] [15: d29 f30] [9: d17 f18] [24: d47 f53] [3: d5 f5] [6: d11 f12] [11: d21 f22] [9: d17 f18] [3: d5 f5]
+    Facts set aside (search cut short by the global beta): 60 (23 claimed exact)
+    Wrote certificate: /tmp/ao-n1000.cert (34 bytes)
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)"
+    Total cost: 3124
+    Build time: 3.825s
+    Facts proved: 174839 records (95394 exact, 79445 lower-bound only), 172450 distinct sets, 7 MB of member data
+    Assembly time: 0.102s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 1000, 0 with |S| <= 30)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 1000, target 3124, depth 0: guess #1993 reaches only 3123 with the known facts (k = 124): [102: d203 f246] [11: d21 f21] [22: d43 f45] [37: d73 f87] [7: d13 f14] [11: d21 f22] [31: d61 f68] [8: d15 f16] [10: d19 f20] [13: d25 f26] [4: d7 f7] [4: d7 f7] [45: d89 f103] [8: d15 f16] [3: d5 f5] [8: d15 f16] [31: d61 f74] [5: d9 f10] [19: d37 f43] [3: d5 f5] [6: d11 f11] [6: d11 f12] [41: d81 f94] [6: d11 f12] [6: d11 f11] [8: d15 f16] [31: d61 f73] [6: d11 f12] [5: d9 f10] [5: d9 f9] [3: d5 f5] [8: d15 f16] [41: d81 f90] [3: d5 f5] [8: d15 f16] [7: d13 f14] [19: d37 f42] [3: d5 f5] [10: d19 f20] [24: d47 f53] [9: d17 f18] [5: d9 f10] [5: d9 f10] [14: d27 f28] [8: d15 f16] [50: d99 f116] [5: d9 f10] [9: d17 f17] [22: d43 f48] [3: d5 f5] [11: d21 f22] [3: d5 f5] [3: d5 f5] [57: d113 f149] [6: d11 f12] [4: d7 f7] [11: d21 f24] [15: d29 f30] [9: d17 f18] [24: d47 f53] [3: d5 f5] [6: d11 f12] [11: d21 f22] [9: d17 f18] [3: d5 f5]
+    Facts set aside (search cut short by the global beta): 67 (27 claimed exact)
+    Wrote certificate: /tmp/ao-n1000.cert (34 bytes)
+  == E_ao_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.498s
+    Facts proved: 62670 records (45338 exact, 17332 lower-bound only), 62334 distinct sets, 1 MB of member data
+    Assembly time: 1.853s
+    Proof claims: 13161 (base 0, capacity 5909, expansion 7252, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 12 (1 claimed exact)
+    Wrote certificate: /tmp/ao-n500.cert (197434 bytes)
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.495s
+    Facts proved: 62793 records (45411 exact, 17382 lower-bound only), 62460 distinct sets, 1 MB of member data
+    Assembly time: 1.833s
+    Proof claims: 13026 (base 0, capacity 5856, expansion 7170, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 15 (8 claimed exact)
+    Wrote certificate: /tmp/ao-n500.cert (195409 bytes)
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)"
+    Total cost: 1453
+    Build time: 0.499s
+    Facts proved: 62802 records (45437 exact, 17365 lower-bound only), 62440 distinct sets, 1 MB of member data
+    Assembly time: 1.880s
+    Proof claims: 13101 (base 0, capacity 5875, expansion 7226, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 13 (4 claimed exact)
+    Wrote certificate: /tmp/ao-n500.cert (196534 bytes)
+  == F_sh_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=2
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 321 guesses_evaluated 13064
+    Refutation pass time: 3.668s
+    Facts proved: 172432 records (94035 exact, 78397 lower-bound only), 171577 distinct sets, 7 MB of member data
+    Assembly time: 12.946s
+    Proof claims: 56223 (base 0, capacity 35500, expansion 20723, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sh-n1000.cert (843364 bytes)
+  == F_sh_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=2
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.439s
+    Facts proved: 64246 records (46479 exact, 17767 lower-bound only), 64150 distinct sets, 1 MB of member data
+    Assembly time: 1.822s
+    Proof claims: 13101 (base 0, capacity 5974, expansion 7127, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sh-n500.cert (196534 bytes)
+  == F_sp_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 343 guesses_evaluated 13127
+    Refutation pass time: 3.670s
+    Facts proved: 173001 records (94413 exact, 78588 lower-bound only), 172126 distinct sets, 7 MB of member data
+    Assembly time: 12.991s
+    Proof claims: 56358 (base 0, capacity 35578, expansion 20780, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sp-n1000.cert (845389 bytes)
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 321 guesses_evaluated 13064
+    Refutation pass time: 3.661s
+    Facts proved: 172444 records (94085 exact, 78359 lower-bound only), 171595 distinct sets, 7 MB of member data
+    Assembly time: 12.916s
+    Proof claims: 56369 (base 0, capacity 35512, expansion 20857, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sp-n1000.cert (845554 bytes)
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 317 guesses_evaluated 12961
+    Refutation pass time: 3.668s
+    Facts proved: 172765 records (94266 exact, 78499 lower-bound only), 171915 distinct sets, 7 MB of member data
+    Assembly time: 12.990s
+    Proof claims: 56190 (base 0, capacity 35465, expansion 20725, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sp-n1000.cert (842869 bytes)
+  == F_sp_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.437s
+    Facts proved: 64033 records (46433 exact, 17600 lower-bound only), 63959 distinct sets, 1 MB of member data
+    Assembly time: 1.843s
+    Proof claims: 13164 (base 0, capacity 6000, expansion 7164, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sp-n500.cert (197479 bytes)
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.436s
+    Facts proved: 64190 records (46537 exact, 17653 lower-bound only), 64107 distinct sets, 1 MB of member data
+    Assembly time: 1.816s
+    Proof claims: 13134 (base 0, capacity 5988, expansion 7146, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sp-n500.cert (197029 bytes)
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.438s
+    Facts proved: 64365 records (46588 exact, 17777 lower-bound only), 64287 distinct sets, 1 MB of member data
+    Assembly time: 1.811s
+    Proof claims: 13152 (base 0, capacity 5980, expansion 7172, assumed 0); tree-node claims 19; max depth 2
+    Assembly failures: 0
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Wrote certificate: /tmp/sp-n500.cert (197299 bytes)
+  == G_chk_ao_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    Root claim: LB >= 3124
+    Claims: 1 (base 0, capacity 0, expansion 0, assumed 1)
+    Certificate bytes: 34
+    Check time: 0.052s
+    CERTIFICATE VALID GIVEN 1 ASSUMED CLAIMS (largest |S| = 1000)
+  == G_chk_ao_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    Root claim: LB >= 1453
+    Claims: 13101 (base 0, capacity 5875, expansion 7226, assumed 0)
+    Certificate bytes: 196534
+    Check time: 1.469s
+    CERTIFICATE VALID: the tree is optimal
+  == G_chk_sh_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    Root claim: LB >= 3124
+    Claims: 56223 (base 0, capacity 35500, expansion 20723, assumed 0)
+    Certificate bytes: 843364
+    Check time: 13.740s
+    CERTIFICATE VALID: the tree is optimal
+  == G_chk_sh_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    Root claim: LB >= 1453
+    Claims: 13101 (base 0, capacity 5974, expansion 7127, assumed 0)
+    Certificate bytes: 196534
+    Check time: 1.493s
+    CERTIFICATE VALID: the tree is optimal
+  == G_chk_sp_n1000.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    Root claim: LB >= 3124
+    Claims: 56190 (base 0, capacity 35465, expansion 20725, assumed 0)
+    Certificate bytes: 842869
+    Check time: 13.215s
+    CERTIFICATE VALID: the tree is optimal
+    Root claim: LB >= 3124
+    Claims: 56190 (base 0, capacity 35465, expansion 20725, assumed 0)
+    Certificate bytes: 842869
+    Check time: 13.663s
+    CERTIFICATE VALID: the tree is optimal
+    Root claim: LB >= 3124
+    Claims: 56190 (base 0, capacity 35465, expansion 20725, assumed 0)
+    Certificate bytes: 842869
+    Check time: 13.771s
+    CERTIFICATE VALID: the tree is optimal
+  == G_chk_sp_n500.log
+    Syncing to user@pc01 (commit 1b1e0f4)...
+    Root claim: LB >= 1453
+    Claims: 13152 (base 0, capacity 5980, expansion 7172, assumed 0)
+    Certificate bytes: 197299
+    Check time: 1.477s
+    CERTIFICATE VALID: the tree is optimal
+    Root claim: LB >= 1453
+    Claims: 13152 (base 0, capacity 5980, expansion 7172, assumed 0)
+    Certificate bytes: 197299
+    Check time: 1.465s
+    CERTIFICATE VALID: the tree is optimal
+    Root claim: LB >= 1453
+    Claims: 13152 (base 0, capacity 5980, expansion 7172, assumed 0)
+    Certificate bytes: 197299
+    Check time: 1.492s
+    CERTIFICATE VALID: the tree is optimal
+
+# Series 3 (2026-10-16/17, branch b9989cb, main d7654fc):
+  == AO_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 36.360s
+    States evaluated: 28184
+    Guesses evaluated: 775759
+    Solve work: k-scans 549896 (3.319e11 response reads, upper bound), node scans 6.506e9 response reads
+    Facts proved: 1350115 records (639680 exact, 710435 lower-bound only), 1276022 distinct sets, 59 MB of member data
+    Facts set aside (search cut short by the global beta): 1074 (399 claimed exact)
+    Assembly time: 1.440s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 2340, 0 with |S| <= 30)
+    Check volume: 0 response reads (0.00e0)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 2340, target 8001, depth 0: guess #275 reaches only 8000 with the known facts (k = 150): [183: d398 f476] [27: d53 f59] [201: d452 f540] [27: d53 f59] [22: d43 f48] [53: d105 f131] [34: d67 f80] [83: d165 f216] [11: d21 f22] [4: d7 f8] [17: d33 f36] [7: d13 f14] [118: d235 f304] [14: d27 f28] [55: d109 f134] [3: d5 f5] [32: d63 f74] [6: d11 f11] [40: d79 f97] [4: d7 f7] [24: d47 f55] [4: d7 f8] [3: d5 f5] [5: d9 f9] [13: d25 f26] [65: d129 f161] [11: d21 f22] [79: d157 f203] [13: d25 f26] [6: d11 f12] [29: d57 f71] [5: d9 f10] [5: d9 f10] [3: d5 f5] [20: d39 f43] [4: d7 f8] [25: d49 f59] [114: d227 f290] [19: d37 f41] [75: d149 f191] [14: d27 f28] [9: d17 f18] [5: d9 f9] [5: d9 f9] [38: d75 f95] [8: d15 f16] [9: d17 f18] [27: d53 f61] [3: d5 f5] [13: d25 f26] [7: d13 f14] [8: d15 f16] [21: d41 f45] [3: d5 f5] [26: d51 f63] [9: d17 f18] [4: d7 f7] [211: d482 f565] [14: d27 f28] [90: d179 f236] [17: d33 f34] [5: d9 f9] [21: d41 f46] [16: d31 f33] [4: d7 f7] [66: d131 f168] [5: d9 f9] [6: d11 f11] [18: d35 f39] [6: d11 f11] [3: d5 f5] [61: d121 f152] [6: d11 f12] [53: d105 f133] [6: d11 f11] [3: d5 f5] [19: d37 f43] (582 guesses unrefuted)
+    Gap fill round 1: 582 targeted refutations (0 not refuted), 974905 facts, 12.263s
+    Assembly time: 232.771s
+    Proof claims: 629538 (base 0, capacity 442864, expansion 186674, assumed 0); tree-node claims 149; max depth 4
+    Check volume: 391557894300 response reads (3.92e11)
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-full.cert (9443089 bytes)
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 36.338s
+    States evaluated: 28177
+    Guesses evaluated: 775705
+    Solve work: k-scans 549826 (3.318e11 response reads, upper bound), node scans 6.508e9 response reads
+    Facts proved: 1347410 records (638062 exact, 709348 lower-bound only), 1275977 distinct sets, 59 MB of member data
+    Facts set aside (search cut short by the global beta): 1078 (402 claimed exact)
+    Assembly time: 1.454s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 2340, 0 with |S| <= 30)
+    Check volume: 0 response reads (0.00e0)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 2340, target 8001, depth 0: guess #275 reaches only 8000 with the known facts (k = 150): [183: d398 f476] [27: d53 f59] [201: d452 f540] [27: d53 f59] [22: d43 f48] [53: d105 f131] [34: d67 f80] [83: d165 f216] [11: d21 f22] [4: d7 f8] [17: d33 f36] [7: d13 f14] [118: d235 f304] [14: d27 f28] [55: d109 f134] [3: d5 f5] [32: d63 f74] [6: d11 f11] [40: d79 f97] [4: d7 f7] [24: d47 f55] [4: d7 f8] [3: d5 f5] [5: d9 f9] [13: d25 f26] [65: d129 f161] [11: d21 f22] [79: d157 f203] [13: d25 f26] [6: d11 f12] [29: d57 f71] [5: d9 f10] [5: d9 f10] [3: d5 f5] [20: d39 f43] [4: d7 f8] [25: d49 f59] [114: d227 f290] [19: d37 f41] [75: d149 f191] [14: d27 f28] [9: d17 f18] [5: d9 f9] [5: d9 f9] [38: d75 f95] [8: d15 f16] [9: d17 f18] [27: d53 f61] [3: d5 f5] [13: d25 f26] [7: d13 f14] [8: d15 f16] [21: d41 f45] [3: d5 f5] [26: d51 f63] [9: d17 f18] [4: d7 f7] [211: d482 f565] [14: d27 f28] [90: d179 f236] [17: d33 f34] [5: d9 f9] [21: d41 f46] [16: d31 f33] [4: d7 f7] [66: d131 f168] [5: d9 f9] [6: d11 f11] [18: d35 f39] [6: d11 f11] [3: d5 f5] [61: d121 f152] [6: d11 f12] [53: d105 f133] [6: d11 f11] [3: d5 f5] [19: d37 f43] (583 guesses unrefuted)
+    Gap fill round 1: 583 targeted refutations (0 not refuted), 991304 facts, 12.167s
+    Assembly time: 233.129s
+    Proof claims: 633334 (base 0, capacity 445309, expansion 188025, assumed 0); tree-node claims 149; max depth 4
+    Check volume: 392949451280 response reads (3.93e11)
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-full.cert (9500029 bytes)
+  == AO_n1000.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)" commit=b9989cb
+    Total cost: 3124
+    Build time: 3.841s
+    States evaluated: 1153
+    Guesses evaluated: 16796
+    Solve work: k-scans 51842 (4.119e10 response reads, upper bound), node scans 2.353e8 response reads
+    Facts proved: 174719 records (95255 exact, 79464 lower-bound only), 172324 distinct sets, 7 MB of member data
+    Facts set aside (search cut short by the global beta): 64 (28 claimed exact)
+    Assembly time: 0.610s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 1000, 0 with |S| <= 30)
+    Check volume: 0 response reads (0.00e0)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 1000, target 3124, depth 0: guess #1993 reaches only 3123 with the known facts (k = 124): [102: d203 f246] [11: d21 f21] [22: d43 f45] [37: d73 f87] [7: d13 f14] [11: d21 f22] [31: d61 f68] [8: d15 f16] [10: d19 f20] [13: d25 f26] [4: d7 f7] [4: d7 f7] [45: d89 f103] [8: d15 f16] [3: d5 f5] [8: d15 f16] [31: d61 f74] [5: d9 f10] [19: d37 f43] [3: d5 f5] [6: d11 f11] [6: d11 f12] [41: d81 f94] [6: d11 f12] [6: d11 f11] [8: d15 f16] [31: d61 f73] [6: d11 f12] [5: d9 f10] [5: d9 f9] [3: d5 f5] [8: d15 f16] [41: d81 f90] [3: d5 f5] [8: d15 f16] [7: d13 f14] [19: d37 f42] [3: d5 f5] [10: d19 f20] [24: d47 f53] [9: d17 f18] [5: d9 f10] [5: d9 f10] [14: d27 f28] [8: d15 f16] [50: d99 f116] [5: d9 f10] [9: d17 f17] [22: d43 f48] [3: d5 f5] [11: d21 f22] [3: d5 f5] [3: d5 f5] [57: d113 f149] [6: d11 f12] [4: d7 f7] [11: d21 f24] [15: d29 f30] [9: d17 f18] [24: d47 f53] [3: d5 f5] [6: d11 f12] [11: d21 f22] [9: d17 f18] [3: d5 f5] (6 guesses unrefuted)
+    Gap fill round 1: 6 targeted refutations (0 not refuted), 1402 facts, 0.093s
+    Assembly time: 14.151s
+    Proof claims: 57293 (base 0, capacity 35633, expansion 21660, assumed 0); tree-node claims 53; max depth 3
+    Check volume: 46537803420 response reads (4.65e10)
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-n1000.cert (859414 bytes)
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)" commit=b9989cb
+    Total cost: 3124
+    Build time: 3.847s
+    States evaluated: 1078
+    Guesses evaluated: 16588
+    Solve work: k-scans 51824 (4.118e10 response reads, upper bound), node scans 2.364e8 response reads
+    Facts proved: 174477 records (95252 exact, 79225 lower-bound only), 172233 distinct sets, 7 MB of member data
+    Facts set aside (search cut short by the global beta): 61 (29 claimed exact)
+    Assembly time: 0.617s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assumed claims: 1 (largest |S| = 1000, 0 with |S| <= 30)
+    Check volume: 0 response reads (0.00e0)
+    Assembly failures: 1
+    ASSEMBLY FAIL: |S| = 1000, target 3124, depth 0: guess #1993 reaches only 3123 with the known facts (k = 124): [102: d203 f246] [11: d21 f21] [22: d43 f45] [37: d73 f87] [7: d13 f14] [11: d21 f22] [31: d61 f68] [8: d15 f16] [10: d19 f20] [13: d25 f26] [4: d7 f7] [4: d7 f7] [45: d89 f103] [8: d15 f16] [3: d5 f5] [8: d15 f16] [31: d61 f74] [5: d9 f10] [19: d37 f43] [3: d5 f5] [6: d11 f11] [6: d11 f12] [41: d81 f94] [6: d11 f12] [6: d11 f11] [8: d15 f16] [31: d61 f73] [6: d11 f12] [5: d9 f10] [5: d9 f9] [3: d5 f5] [8: d15 f16] [41: d81 f90] [3: d5 f5] [8: d15 f16] [7: d13 f14] [19: d37 f42] [3: d5 f5] [10: d19 f20] [24: d47 f53] [9: d17 f18] [5: d9 f10] [5: d9 f10] [14: d27 f28] [8: d15 f16] [50: d99 f116] [5: d9 f10] [9: d17 f17] [22: d43 f48] [3: d5 f5] [11: d21 f22] [3: d5 f5] [3: d5 f5] [57: d113 f149] [6: d11 f12] [4: d7 f7] [11: d21 f24] [15: d29 f30] [9: d17 f18] [24: d47 f53] [3: d5 f5] [6: d11 f12] [11: d21 f22] [9: d17 f18] [3: d5 f5] (6 guesses unrefuted)
+    Gap fill round 1: 6 targeted refutations (0 not refuted), 1421 facts, 0.088s
+    Assembly time: 14.247s
+    Proof claims: 57310 (base 0, capacity 35654, expansion 21656, assumed 0); tree-node claims 53; max depth 3
+    Check volume: 46538962110 response reads (4.65e10)
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-n1000.cert (859669 bytes)
+  == AO_n500.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)" commit=b9989cb
+    Total cost: 1453
+    Build time: 0.494s
+    States evaluated: 107
+    Guesses evaluated: 8454
+    Solve work: k-scans 8168 (4.564e9 response reads, upper bound), node scans 2.760e7 response reads
+    Facts proved: 62778 records (45390 exact, 17388 lower-bound only), 62429 distinct sets, 1 MB of member data
+    Facts set aside (search cut short by the global beta): 15 (3 claimed exact)
+    Assembly time: 1.918s
+    Proof claims: 13021 (base 0, capacity 5869, expansion 7152, assumed 0); tree-node claims 19; max depth 2
+    Check volume: 6652603780 response reads (6.65e9)
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-n500.cert (195334 bytes)
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)" commit=b9989cb
+    Total cost: 1453
+    Build time: 0.497s
+    States evaluated: 66
+    Guesses evaluated: 8380
+    Solve work: k-scans 8068 (4.548e9 response reads, upper bound), node scans 2.168e7 response reads
+    Facts proved: 62650 records (45331 exact, 17319 lower-bound only), 62336 distinct sets, 1 MB of member data
+    Facts set aside (search cut short by the global beta): 8 (2 claimed exact)
+    Assembly time: 1.981s
+    Proof claims: 13180 (base 0, capacity 5922, expansion 7258, assumed 0); tree-node claims 19; max depth 2
+    Check volume: 6679461620 response reads (6.68e9)
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-n500.cert (197719 bytes)
+  == C_pass_full.failed-missing-tree.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: cannot read /tmp/cert-full.json: No such file or directory (os error 2)
+  == C_pass_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: candidates=2340 guesses=14855 tree cost=8001 nodes=2478 max-depth=all
+    Refutation pass: 287 nodes, 21397 guesses searched, 1169919 refuted by capacity alone, states 26458 guesses_evaluated 738292
+    Refutation pass time: 36.604s
+    Refutation pass detail: prefilter 0.037s wall; task time summed over threads by node depth: d0 567.75s, d1 2.69s, d2 0.00s, d3+ 0.00s
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0079s, 4.426e9 response reads/s
+    certify: candidates=2340 guesses=14855 tree cost=8001 nodes=2478 max-depth=all
+    Refutation pass: 287 nodes, 21397 guesses searched, 1169919 refuted by capacity alone, states 26526 guesses_evaluated 739254
+    Refutation pass time: 36.157s
+    Refutation pass detail: prefilter 0.038s wall; task time summed over threads by node depth: d0 570.70s, d1 2.17s, d2 0.00s, d3+ 0.00s
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0062s, 5.609e9 response reads/s
+  == C_shallow_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: candidates=2340 guesses=14855 tree cost=8001 nodes=2478 max-depth=2
+    Refutation pass: 283 nodes, 21397 guesses searched, 1164531 refuted by capacity alone, states 26499 guesses_evaluated 740647
+    Refutation pass time: 36.314s
+    Refutation pass detail: prefilter 0.033s wall; task time summed over threads by node depth: d0 570.21s, d1 2.29s, d2 0.00s, d3+ 0.00s
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0086s, 4.027e9 response reads/s
+    certify: candidates=2340 guesses=14855 tree cost=8001 nodes=2478 max-depth=2
+    Refutation pass: 283 nodes, 21397 guesses searched, 1164531 refuted by capacity alone, states 26457 guesses_evaluated 739074
+    Refutation pass time: 36.787s
+    Refutation pass detail: prefilter 0.032s wall; task time summed over threads by node depth: d0 567.67s, d1 2.34s, d2 0.00s, d3+ 0.00s
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0059s, 5.863e9 response reads/s
+  == K_ao_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 8001
+    Claims: 633334 (base 0, capacity 445309, expansion 188025, assumed 0)
+    Certificate bytes: 9500029
+    Check volume: 392949451280 response reads (3.93e11)
+    Check time: 266.000s
+    CERTIFICATE VALID: the tree is optimal
+  == K_ao_n1000.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 3124
+    Claims: 57310 (base 0, capacity 35654, expansion 21656, assumed 0)
+    Certificate bytes: 859669
+    Check volume: 46538962110 response reads (4.65e10)
+    Check time: 13.618s
+    CERTIFICATE VALID: the tree is optimal
+  == K_ao_n500.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 1453
+    Claims: 13180 (base 0, capacity 5922, expansion 7258, assumed 0)
+    Certificate bytes: 197719
+    Check volume: 6679461620 response reads (6.68e9)
+    Check time: 1.475s
+    CERTIFICATE VALID: the tree is optimal
+  == K_sh_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 8001
+    Claims: 615249 (base 0, capacity 432774, expansion 180772, assumed 1703)
+    Certificate bytes: 9228754
+    Check volume: 386015241265 response reads (3.86e11)
+    Check time: 241.810s
+    CERTIFICATE VALID GIVEN 1703 ASSUMED CLAIMS (largest |S| = 16)
+  == K_sp_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 8001
+    Claims: 615132 (base 0, capacity 432761, expansion 182371, assumed 0)
+    Certificate bytes: 9226999
+    Check volume: 386279957365 response reads (3.86e11)
+    Check time: 257.051s
+    CERTIFICATE VALID: the tree is optimal
+  == K_sp_n1000.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 3124
+    Claims: 56270 (base 0, capacity 35472, expansion 20798, assumed 0)
+    Certificate bytes: 844069
+    Check volume: 46469425855 response reads (4.65e10)
+    Check time: 13.566s
+    CERTIFICATE VALID: the tree is optimal
+  == K_sp_n500.log
+    Syncing to user@pc01 (commit b9989cb)...
+    Root claim: LB >= 1453
+    Claims: 13133 (base 0, capacity 5969, expansion 7164, assumed 0)
+    Certificate bytes: 197014
+    Check volume: 6717742955 response reads (6.72e9)
+    Check time: 1.527s
+    CERTIFICATE VALID: the tree is optimal
+  == SH_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: candidates=2340 guesses=14855 tree cost=8001 nodes=2478 max-depth=2
+    Refutation pass: 283 nodes, 21397 guesses searched, 1164531 refuted by capacity alone, states 26467 guesses_evaluated 748898
+    Refutation pass time: 36.988s
+    Refutation pass detail: prefilter 0.034s wall; task time summed over threads by node depth: d0 570.98s, d1 2.57s, d2 0.00s, d3+ 0.00s
+    Refutation pass work: k-scans 549645 (3.316e11 response reads, upper bound), node scans 6.236e9 response reads
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0068s, 5.118e9 response reads/s
+    Facts proved: 1364628 records (651072 exact, 713556 lower-bound only), 1294083 distinct sets, 59 MB of member data
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Assembly time: 225.797s
+    Proof claims: 615249 (base 0, capacity 432774, expansion 180772, assumed 1703); tree-node claims 149; max depth 3
+    Assumed claims: 1703 (largest |S| = 16, 1703 with |S| <= 30)
+    Check volume: 386015241265 response reads (3.86e11)
+    Assembly failures: 0
+    Wrote certificate: /tmp/sh-full.cert (9228754 bytes)
+  == SP_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: candidates=2340 guesses=14855 tree cost=8001 nodes=2478 max-depth=all
+    Refutation pass: 287 nodes, 21397 guesses searched, 1169919 refuted by capacity alone, states 26521 guesses_evaluated 732251
+    Refutation pass time: 36.859s
+    Refutation pass detail: prefilter 0.034s wall; task time summed over threads by node depth: d0 574.69s, d1 2.65s, d2 0.00s, d3+ 0.00s
+    Refutation pass work: k-scans 550150 (3.317e11 response reads, upper bound), node scans 6.179e9 response reads
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0073s, 4.781e9 response reads/s
+    Facts proved: 1361935 records (649039 exact, 712896 lower-bound only), 1291225 distinct sets, 59 MB of member data
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Assembly time: 225.791s
+    Proof claims: 615132 (base 0, capacity 432761, expansion 182371, assumed 0); tree-node claims 149; max depth 4
+    Check volume: 386279957365 response reads (3.86e11)
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9226999 bytes)
+  == SP_n1000.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: candidates=1000 guesses=14855 tree cost=3124 nodes=1049 max-depth=all
+    Refutation pass: 115 nodes, 11496 guesses searched, 536085 refuted by capacity alone, states 321 guesses_evaluated 12962
+    Refutation pass time: 3.681s
+    Refutation pass detail: prefilter 0.014s wall; task time summed over threads by node depth: d0 57.80s, d1 0.00s, d2 0.00s, d3+ 0.00s
+    Refutation pass work: k-scans 51502 (4.118e10 response reads, upper bound), node scans 1.153e8 response reads
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0023s, 6.555e9 response reads/s
+    Facts proved: 172662 records (94216 exact, 78446 lower-bound only), 171801 distinct sets, 7 MB of member data
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Assembly time: 13.864s
+    Proof claims: 56270 (base 0, capacity 35472, expansion 20798, assumed 0); tree-node claims 53; max depth 2
+    Check volume: 46469425855 response reads (4.65e10)
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n1000.cert (844069 bytes)
+  == SP_n500.log
+    Syncing to user@pc01 (commit b9989cb)...
+    certify: candidates=500 guesses=14855 tree cost=1453 nodes=517 max-depth=all
+    Refutation pass: 58 nodes, 8262 guesses searched, 294340 refuted by capacity alone, states 5 guesses_evaluated 8269
+    Refutation pass time: 0.440s
+    Refutation pass detail: prefilter 0.010s wall; task time summed over threads by node depth: d0 6.17s, d1 0.00s, d2 0.00s, d3+ 0.00s
+    Refutation pass work: k-scans 7944 (4.516e9 response reads, upper bound), node scans 1.249e7 response reads
+    Calibration: solver's parallel k-scan of all guesses on the root set: 0.0011s, 6.916e9 response reads/s
+    Facts proved: 64192 records (46552 exact, 17640 lower-bound only), 64111 distinct sets, 1 MB of member data
+    Facts set aside (search cut short by the global beta): 0 (0 claimed exact)
+    Assembly time: 1.914s
+    Proof claims: 13133 (base 0, capacity 5969, expansion 7164, assumed 0); tree-node claims 19; max depth 2
+    Check volume: 6717742955 response reads (6.72e9)
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n500.cert (197014 bytes)
+  == T_base_full1.log
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 36.210s
+    States evaluated: 27754
+    Guesses evaluated: 741650
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.882s
+    States evaluated: 27715
+    Guesses evaluated: 741125
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.959s
+    States evaluated: 27787
+    Guesses evaluated: 741553
+  == T_base_full2.interrupted.log
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.954s
+    States evaluated: 27721
+    Guesses evaluated: 742377
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.926s
+    States evaluated: 27738
+    Guesses evaluated: 741694
+  == T_base_full2.log
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.446s
+    States evaluated: 27755
+    Guesses evaluated: 742199
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.585s
+    States evaluated: 27735
+    Guesses evaluated: 741945
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.628s
+    States evaluated: 27753
+    Guesses evaluated: 742728
+  == T_base_full3.log
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.952s
+    States evaluated: 27764
+    Guesses evaluated: 742665
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.949s
+    States evaluated: 27747
+    Guesses evaluated: 742257
+    Syncing to user@pc01 (commit d7654fc)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=d7654fc
+    Total cost: 8001
+    Build time: 35.906s
+    States evaluated: 27778
+    Guesses evaluated: 742265
+  == T_cert_full1.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.636s
+    States evaluated: 27694
+    Guesses evaluated: 741747
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.632s
+    States evaluated: 27743
+    Guesses evaluated: 741864
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.916s
+    States evaluated: 27742
+    Guesses evaluated: 741974
+  == T_cert_full2.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.879s
+    States evaluated: 27715
+    Guesses evaluated: 742322
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.841s
+    States evaluated: 27800
+    Guesses evaluated: 741745
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 36.345s
+    States evaluated: 27745
+    Guesses evaluated: 741900
+  == T_cert_full3.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.626s
+    States evaluated: 27683
+    Guesses evaluated: 741524
+  == T_cert_full4.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.864s
+    States evaluated: 27767
+    Guesses evaluated: 742301
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.872s
+    States evaluated: 27851
+    Guesses evaluated: 742337
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.820s
+    States evaluated: 27740
+    Guesses evaluated: 741829
+  == T_cert_n1000.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)" commit=b9989cb
+    Total cost: 3124
+    Build time: 3.813s
+    States evaluated: 1097
+    Guesses evaluated: 16633
+  == T_cert_n500.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)" commit=b9989cb
+    Total cost: 1453
+    Build time: 0.490s
+    States evaluated: 95
+    Guesses evaluated: 8433
+  == W_solve_full.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=2340 guesses=14855 selection="full list (2340 candidates, no subset, no seed)" commit=b9989cb
+    Total cost: 8001
+    Build time: 35.906s
+    States evaluated: 27765
+    Guesses evaluated: 741789
+    Solve work: k-scans 540837 (3.294e11 response reads, upper bound), node scans 6.020e9 response reads
+  == W_solve_n1000.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=1000 guesses=14855 selection="seeded subset (seed=1, size=1000 of 2340)" commit=b9989cb
+    Total cost: 3124
+    Build time: 3.847s
+    States evaluated: 1116
+    Guesses evaluated: 16798
+    Solve work: k-scans 51810 (4.118e10 response reads, upper bound), node scans 2.396e8 response reads
+  == W_solve_n500.log
+    Syncing to user@pc01 (commit b9989cb)...
+    solve: strategy=optimal candidates=500 guesses=14855 selection="seeded subset (seed=1, size=500 of 2340)" commit=b9989cb
+    Total cost: 1453
+    Build time: 0.502s
+    States evaluated: 148
+    Guesses evaluated: 8534
+    Solve work: k-scans 8180 (4.565e9 response reads, upper bound), node scans 3.626e7 response reads
+  
+  # Series 4 (2026-10-17 evening, uncommitted tree on 3d3aa39, checker/assembler pruning):
+  == S_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Total cost: 3124
+    Build time: 3.820s
+  == C_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 3.666s
+    Assembly time: 13.954s
+    Proof claims: 56126 (base 0, capacity 35462, expansion 20664, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n1000.cert (841909 bytes)
+  == K_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 56126 (base 0, capacity 35462, expansion 20664, assumed 0)
+    Check time: 11.114s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56126 (base 0, capacity 35462, expansion 20664, assumed 0)
+    Check time: 10.978s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56126 (base 0, capacity 35462, expansion 20664, assumed 0)
+    Check time: 11.050s
+    CERTIFICATE VALID: the tree is optimal
+  == S_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Total cost: 8001
+    Build time: 35.793s
+  == C_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 36.589s
+    Assembly time: 227.795s
+    Proof claims: 619766 (base 0, capacity 435968, expansion 183798, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9296509 bytes)
+  == K_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 619766 (base 0, capacity 435968, expansion 183798, assumed 0)
+    Check time: 197.983s
+    CERTIFICATE VALID: the tree is optimal
+  == C2_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 36.969s
+    Assembly time: 214.361s
+    Proof claims: 616545 (base 0, capacity 433918, expansion 182627, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9248194 bytes)
+  == K2_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 616545 (base 0, capacity 433918, expansion 182627, assumed 0)
+    Check time: 195.501s
+    CERTIFICATE VALID: the tree is optimal
+  
+  # Series 5 (2026-10-18, uncommitted tree on 3d3aa39: candidate-major scans, one pass, capacity filter):
+  == S_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Total cost: 3124
+    Build time: 3.817s
+  == C_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 3.660s
+    Assembly time: 10.276s
+    Proof claims: 56189 (base 0, capacity 35474, expansion 20715, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n1000.cert (842854 bytes)
+  == K_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 56189 (base 0, capacity 35474, expansion 20715, assumed 0)
+    Check time: 9.308s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56189 (base 0, capacity 35474, expansion 20715, assumed 0)
+    Check time: 9.183s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56189 (base 0, capacity 35474, expansion 20715, assumed 0)
+    Check time: 9.193s
+    CERTIFICATE VALID: the tree is optimal
+  == S_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Total cost: 8001
+    Build time: 35.638s
+  == C_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 36.563s
+    Assembly time: 92.532s
+    Proof claims: 617555 (base 0, capacity 434158, expansion 183397, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9263344 bytes)
+  == K_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 617555 (base 0, capacity 434158, expansion 183397, assumed 0)
+    Check time: 103.214s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 617555 (base 0, capacity 434158, expansion 183397, assumed 0)
+    Check time: 103.314s
+    CERTIFICATE VALID: the tree is optimal
+  == C2_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 3.676s
+    Assembly time: 9.502s
+    Proof claims: 56215 (base 0, capacity 35487, expansion 20728, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n1000.cert (843244 bytes)
+  == K2_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 56215 (base 0, capacity 35487, expansion 20728, assumed 0)
+    Check time: 7.305s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56215 (base 0, capacity 35487, expansion 20728, assumed 0)
+    Check time: 7.524s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56215 (base 0, capacity 35487, expansion 20728, assumed 0)
+    Check time: 7.534s
+    CERTIFICATE VALID: the tree is optimal
+  == C2_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 36.398s
+    Assembly time: 87.735s
+    Proof claims: 617078 (base 0, capacity 433711, expansion 183367, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9256189 bytes)
+  == K2_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 617078 (base 0, capacity 433711, expansion 183367, assumed 0)
+    Check time: 65.538s
+    CERTIFICATE VALID: the tree is optimal
+  == C3_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 3.664s
+    Assembly time: 9.354s
+    Proof claims: 56156 (base 0, capacity 35474, expansion 20682, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n1000.cert (842359 bytes)
+  == C3_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 36.297s
+    Assembly time: 100.965s
+    Proof claims: 619075 (base 0, capacity 435705, expansion 183370, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9286144 bytes)
+  == AO3_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Total cost: 8001
+    Build time: 36.353s
+    Assembly time: 1.436s
+    Proof claims: 1 (base 0, capacity 0, expansion 0, assumed 1); tree-node claims 1; max depth 0
+    Assembly failures: 1
+    Gap fill round 1: 583 targeted refutations (0 not refuted), 990960 facts, 12.242s
+    Assembly time: 105.570s
+    Proof claims: 633993 (base 0, capacity 445320, expansion 188673, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/ao-full.cert (9509914 bytes)
+  == K3_ao_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 633993 (base 0, capacity 445320, expansion 188673, assumed 0)
+    Check time: 63.493s
+    CERTIFICATE VALID: the tree is optimal
+  == C4_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 36.401s
+    Assembly time: 78.046s
+    Proof claims: 617254 (base 0, capacity 433695, expansion 183559, assumed 0); tree-node claims 149; max depth 4
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-full.cert (9258829 bytes)
+  == K4_full.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 617254 (base 0, capacity 433695, expansion 183559, assumed 0)
+    Check time: 67.538s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 617254 (base 0, capacity 433695, expansion 183559, assumed 0)
+    Check time: 68.903s
+    CERTIFICATE VALID: the tree is optimal
+  == C5_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Refutation pass time: 3.652s
+    Assembly time: 8.844s
+    Proof claims: 56239 (base 0, capacity 35495, expansion 20744, assumed 0); tree-node claims 53; max depth 2
+    Assembly failures: 0
+    Wrote certificate: /tmp/sp-n1000.cert (843604 bytes)
+  == K5_n1000.log
+    Syncing to user@pc01 (commit 3d3aa39-dirty)...
+    Claims: 56239 (base 0, capacity 35495, expansion 20744, assumed 0)
+    Check time: 6.954s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56239 (base 0, capacity 35495, expansion 20744, assumed 0)
+    Check time: 7.468s
+    CERTIFICATE VALID: the tree is optimal
+    Claims: 56239 (base 0, capacity 35495, expansion 20744, assumed 0)
+    Check time: 6.821s
+    CERTIFICATE VALID: the tree is optimal

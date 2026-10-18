@@ -108,13 +108,17 @@ pub fn solve_parallel_depth2<'a>(
                     exact_vals[r_idx] = true;
                 }
                 global_cache.insert_set(hash, p, used_val, is_exact);
+                cert_record!(12, p, used_val, is_exact);
             } else {
+                #[cfg(feature = "certlog")]
+                crate::certlog::count_kscan(p.len() * matrix.num_guesses);
                 let k = crate::heuristic::compute_max_branching_factor_seq(matrix, p);
                 let tight_lb = crate::heuristic::tight_capacity_bound(p_len, k, max_k);
                 let used_val = tight_lb.max(cap_lb);
                 p_lbs[r_idx] = used_val;
                 lb += used_val;
                 global_cache.insert_set(hash, p, used_val, false);
+                cert_record!(13, p, used_val, false);
             }
 
             if lb >= beta.load(Ordering::Relaxed) {

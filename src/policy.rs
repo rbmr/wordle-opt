@@ -227,7 +227,7 @@ fn guess_projection(dict: &Dictionary, c_mask: u32, guess: usize) -> u32 {
 
 /// The active (non-useless), projection-deduplicated guesses for `candidates`,
 /// sorted by ascending expected-remaining then index (deterministic).
-fn active_guesses(
+pub(crate) fn active_guesses(
     matrix: &ResponseMatrix,
     dict: &Dictionary,
     candidates: &[usize],
@@ -255,6 +255,8 @@ fn active_guesses(
     };
 
     let cap_bounds = &capacity_bounds_2d[max_k];
+    #[cfg(feature = "certlog")]
+    crate::certlog::count_nodescan(surviving_guesses.len() * candidates.len());
     let mut out: Vec<(usize, u32, u32)> = if candidates.len() >= 48 {
         surviving_guesses
             .into_par_iter()
@@ -650,6 +652,7 @@ impl<'a> OptimalPolicy<'a> {
                             Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
                         if is_exact {
                             self.cache.insert_set(hash, bucket, q_val, true);
+                            cert_record!(14, bucket, q_val, true);
                             return q_val;
                         }
                     }
@@ -673,6 +676,7 @@ impl<'a> OptimalPolicy<'a> {
                     );
                     let exact_val = val.min(bucket_greedy);
                     self.cache.insert_set(hash, bucket, exact_val, true);
+                    cert_record!(15, bucket, exact_val, true);
                     exact_val
                 })
                 .sum();

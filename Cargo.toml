@@ -7,6 +7,15 @@ description = "A mathematically optimal, SIMD-parallelized Wordle solver designe
 repository = "https://github.com/rbmr/wordle-opt"
 license = "MIT"
 
+[features]
+# Logs every lower bound the search proves, for the optimality-certificate
+# investigation. Off by default: without it the hooks compile to nothing.
+certlog = []
+# Records every transposition-table write with the candidate set it is for,
+# so `tests/tt_audit.rs` can check each stored value. Off by default; it slows
+# the search down and is only for testing.
+tt-audit = []
+
 [dependencies]
 lazy_static = "1.5.0"
 fastrand = "2.0.0"
@@ -18,12 +27,6 @@ serde_json = "1.0.151"
 # does not need) while keeping the low-level column writer used for the
 # optional solve-trace export. `snap` is the codec applied to those files.
 parquet = { version = "60.0.0", default-features = false, features = ["snap"] }
-
-[features]
-# Records every transposition-table write with the candidate set it is for,
-# so `tests/tt_audit.rs` can check each stored value. Off by default; it slows
-# the search down and is only for testing.
-tt-audit = []
 
 [dev-dependencies]
 criterion = "0.5"

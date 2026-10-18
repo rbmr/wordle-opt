@@ -1,5 +1,18 @@
 #![allow(clippy::needless_range_loop)]
 
+/// Records a lower-bound fact for the certificate investigation (see
+/// `certlog`). Expands to nothing unless built with `--features certlog`.
+macro_rules! cert_record {
+    ($site:expr, $set:expr, $value:expr, $exact:expr) => {
+        #[cfg(feature = "certlog")]
+        crate::certlog::record($site, $set, $value, $exact);
+    };
+}
+
+pub mod cert;
+pub mod certcheck;
+#[cfg(feature = "certlog")]
+pub mod certlog;
 pub mod core;
 pub mod dict;
 pub mod heuristic;
@@ -413,6 +426,18 @@ fn run_solve_cli(args: &[String]) {
         observer: Some(std::sync::Arc::clone(&observer)),
         ..Default::default()
     };
+    // Always-output certificate investigation: log every bound the solve
+    // proves, then assemble a proof from the log once the tree is built.
+    let certify = flags.get("certify").map(str::to_string);
+    if certify.is_some() {
+        #[cfg(not(feature = "certlog"))]
+        {
+            eprintln!("solve: --certify needs a build with --features certlog");
+            std::process::exit(2);
+        }
+        #[cfg(feature = "certlog")]
+        crate::certlog::set_enabled(true);
+    }
     let cpu_start = process_cpu_seconds();
     let start = Instant::now();
     let (progress_thread, progress_samples) =
@@ -463,6 +488,16 @@ fn run_solve_cli(args: &[String]) {
         "Dictionary hash: {}",
         crate::policy::hash_hex(tree.dictionary_hash)
     );
+    #[cfg(feature = "certlog")]
+    crate::cert::print_work("Solve work");
+    #[cfg(feature = "certlog")]
+    if let Some(cert_out) = &certify {
+        crate::certlog::set_enabled(false);
+        let facts = crate::certlog::take_all();
+        crate::cert::print_facts(&facts);
+        let nodes = crate::cert::tree_nodes(&tree, &matrix);
+        crate::cert::write_certificate(&nodes, &matrix, &dict, facts.bound, u32::MAX, cert_out);
+    }
 
     // Serialize (readable JSON only).
     let serialized = match tree.to_readable(&dict) {
@@ -656,6 +691,8 @@ pub fn run_cli() {
     match args.get(1).map(String::as_str) {
         Some("solve") => run_solve_cli(&args[2..]),
         Some("validate") => run_validate_cli(&args[2..]),
+        Some("certify") => cert::run_certify_cli(&args[2..]),
+        Some("check-cert") => certcheck::run_cli(&args[2..]),
         Some("verify") => {
             let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
             let matrix = ResponseMatrix::new(&dict);
