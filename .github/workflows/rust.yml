@@ -35,4 +35,4 @@ jobs:
       run: cargo clippy --release -- -D warnings
 
     - name: Run fmt
-      run: cargo fmt -- --check
+      run: cargo fmt --all -- --check

@@ -1,27 +1,15 @@
 #![allow(clippy::needless_range_loop)]
+//! The `wordle-opt` command line, and one place to reach the crates it is
+//! built from: `wordle_common` (words, responses, the tree format),
+//! `wordle_solver` (the solver) and `wordle_checker` (the certificate checker).
 
-/// Records a lower-bound fact for the certificate investigation (see
-/// `certlog`). Expands to nothing unless built with `--features certlog`.
-macro_rules! cert_record {
-    ($site:expr, $set:expr, $value:expr, $exact:expr) => {
-        #[cfg(feature = "certlog")]
-        crate::certlog::record($site, $set, $value, $exact);
-    };
-}
-
-pub mod cert;
-pub mod certcheck;
-#[cfg(feature = "certlog")]
-pub mod certlog;
-pub mod core;
-pub mod dict;
-pub mod heuristic;
-pub mod matrix;
-pub mod naive;
-pub mod policy;
 pub mod policy_stats;
-pub mod solver;
-pub mod verify;
+
+pub use wordle_checker as certcheck;
+pub use wordle_common::{certfile, core, dict, matrix, tree};
+#[cfg(feature = "certlog")]
+pub use wordle_solver::certlog;
+pub use wordle_solver::{cache, cert, heuristic, naive, parallel_depth, policy, solver, verify};
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
@@ -712,8 +700,6 @@ pub fn run_cli() {
         }
     }
 }
-pub mod cache;
-pub mod parallel_depth;
 
 #[cfg(test)]
 mod tests {

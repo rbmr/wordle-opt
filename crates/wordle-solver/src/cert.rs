@@ -1,6 +1,6 @@
 //! Optimality-certificate generation: an investigation prototype.
 //!
-//! Turns a solved policy tree into a certificate that [`crate::certcheck`]
+//! Turns a solved policy tree into a certificate that `wordle_checker`
 //! verifies without trusting the solver. Two sources of lower-bound facts:
 //!
 //! * a **refutation pass** ([`refutation_pass`]): the tree is taken as given,
@@ -15,7 +15,6 @@
 //! default bound is not enough. Nothing here is trusted; a wrong fact makes
 //! the assembly fail (or the checker reject).
 
-use crate::certcheck::{self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION};
 use crate::core::Response;
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
@@ -26,6 +25,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
+use wordle_common::certfile::{
+    self, Claim, Header, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef,
+};
 
 pub type FactMap = FxHashMap<Box<[u16]>, u32>;
 
@@ -207,22 +209,6 @@ pub fn refutation_pass(
     stats
 }
 
-#[derive(Clone, Copy)]
-enum SetDef {
-    Root,
-    Child {
-        parent: u32,
-        guess: u32,
-        response: u8,
-    },
-}
-
-struct Claim {
-    def: SetDef,
-    bound: u32,
-    rule: u8,
-}
-
 struct Pending {
     target: u32,
     depth: u32,
@@ -320,7 +306,7 @@ fn justify(
 ) -> Result<(u8, Vec<ChildReq>), (String, Vec<u32>)> {
     let n = set.len();
     if n <= 2 {
-        return if target as u64 <= certcheck::l3(n, 0) {
+        return if target as u64 <= certfile::l3(n, 0) {
             Ok((RULE_BASE, Vec::new()))
         } else {
             Err(("base set claimed above its cost".into(), Vec::new()))
@@ -419,7 +405,7 @@ fn justify(
         let mut sum = n as u64;
         let mut detail = String::new();
         for (r, b) in buckets {
-            let d = certcheck::l3(b.len(), k);
+            let d = certfile::l3(b.len(), k);
             let f = fact(&b) as u64;
             if b.len() > 2 {
                 detail += &format!(" [{}: d{d} f{f}]", b.len());
@@ -588,36 +574,17 @@ pub fn assemble(
 }
 
 impl Assembly {
-    /// The certificate in the format [`certcheck`] reads.
+    /// The certificate in the format of [`certfile`].
     pub fn to_bytes(&self, dict: &Dictionary) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32 + 14 * self.claims.len());
-        out.extend_from_slice(certcheck::MAGIC);
-        let d = certcheck::digest(
-            dict.guesses.iter().map(|w| &w.0),
-            dict.candidates.iter().map(|w| &w.0),
-        );
-        out.extend_from_slice(&d.to_le_bytes());
-        out.extend_from_slice(&(dict.guesses.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(dict.candidates.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(self.claims.len() as u32).to_le_bytes());
-        for c in &self.claims {
-            match c.def {
-                SetDef::Root => out.push(0),
-                SetDef::Child {
-                    parent,
-                    guess,
-                    response,
-                } => {
-                    out.push(1);
-                    out.extend_from_slice(&parent.to_le_bytes());
-                    out.extend_from_slice(&guess.to_le_bytes());
-                    out.push(response);
-                }
-            }
-            out.extend_from_slice(&c.bound.to_le_bytes());
-            out.push(c.rule);
-        }
-        out
+        let header = Header {
+            digest: certfile::digest(
+                dict.guesses.iter().map(|w| &w.0),
+                dict.candidates.iter().map(|w| &w.0),
+            ),
+            guesses: dict.guesses.len() as u32,
+            candidates: dict.candidates.len() as u32,
+        };
+        certfile::encode(&header, &self.claims)
     }
 }
 

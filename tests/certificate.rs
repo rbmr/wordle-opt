@@ -13,9 +13,8 @@ mod common;
 
 use common::*;
 use std::collections::HashMap;
-use wordle_opt::certcheck::{
-    self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, check, l3,
-};
+use wordle_opt::certcheck::check;
+use wordle_opt::certfile::{self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, l3};
 
 fn tree_json(inst: &Instance) -> String {
     solve(inst).tree.to_json()
@@ -154,8 +153,8 @@ fn oracle_certificate(oracle: &mut GuessOracle, n: usize) -> Vec<Claim> {
 }
 
 fn encode(inst: &Instance, claims: &[Claim]) -> Vec<u8> {
-    let mut out = certcheck::MAGIC.to_vec();
-    out.extend_from_slice(&certcheck::digest(&inst.guesses, &inst.candidates).to_le_bytes());
+    let mut out = certfile::MAGIC.to_vec();
+    out.extend_from_slice(&certfile::digest(&inst.guesses, &inst.candidates).to_le_bytes());
     out.extend_from_slice(&(inst.guesses.len() as u32).to_le_bytes());
     out.extend_from_slice(&(inst.candidates.len() as u32).to_le_bytes());
     out.extend_from_slice(&(claims.len() as u32).to_le_bytes());

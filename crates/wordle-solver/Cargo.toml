@@ -1,0 +1,27 @@
+[package]
+name = "wordle-solver"
+description = "The exact branch-and-bound Wordle solver behind wordle-opt."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+# Logs every lower bound the search proves, for optimality certificates. Off
+# by default: without it the hooks compile to nothing.
+certlog = []
+# Records every transposition-table write with its candidate set, for
+# `tests/tt_audit.rs`. Off by default; only for testing.
+tt-audit = []
+
+[dependencies]
+wordle-common.workspace = true
+fastrand.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3.8.0"

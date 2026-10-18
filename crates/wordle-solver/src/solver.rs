@@ -2013,7 +2013,11 @@ mod solver_cache_tests {
     /// table must still find the optimum.
     #[test]
     fn test_global_beta_cut_leaves_no_wrong_cache_entry() {
-        let words = crate::dict::Dictionary::read_words("words/candidates.txt").unwrap();
+        let words = crate::dict::Dictionary::read_words(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../words/candidates.txt"
+        ))
+        .unwrap();
         let dict = crate::dict::Dictionary::from_words(words.clone(), words[..300].to_vec());
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let num_u64s = dict.guesses.len().div_ceil(64);

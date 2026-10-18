@@ -206,7 +206,7 @@ subsets.
 Format: `WOCERT01`, FNV-1a digest of both word lists, list sizes, claim count,
 then per claim a set definition (1 or 10 bytes), a `u32` bound and a rule byte.
 
-## The checker (`src/certcheck.rs`)
+## The checker (`crates/wordle-checker/src/lib.rs`)
 
 About 450 lines, `std` + `serde_json` + `rayon` only. It reads the readable policy
 JSON (word lists and tree) and the certificate. It has its own feedback function,
@@ -232,7 +232,7 @@ a forward parent reference, a missing root claim. `L3 <= optimum` is checked on
 every memoized subset. A feature-gated test runs the real generator end to end
 on the same 12 instances.
 
-## The generator (`src/cert.rs`, `src/certlog.rs`)
+## The generator (`crates/wordle-solver/src/cert.rs`, `crates/wordle-solver/src/certlog.rs`)
 
 Facts `(set, value, exact)` come from `cert_record!` hooks at every place the
 search stores or returns a bound. The macro expands to nothing unless built with

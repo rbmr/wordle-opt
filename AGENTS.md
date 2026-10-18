@@ -328,7 +328,7 @@ Operationally:
 ## Correctness practice
 
 - `cargo test --release` (golden regression tests plus the `verify` differential
-  fuzzer against `src/naive.rs`) must pass before and after every change that
+  fuzzer against `crates/wordle-solver/src/naive.rs`) must pass before and after every change that
   touches solver, heuristic or cache logic. A golden test failure means "figure
   out why the new number is correct" or "this change is wrong" - never "update the
   constant to match."
@@ -383,7 +383,7 @@ Operationally:
   correctness fix to `build.rs`, sat unpushed for over a day.)
 - **Always run the exact CI gates before pushing.** You must have a pre-push hook
   configured (`git config core.hooksPath .githooks`) containing:
-  `cargo fmt -- --check && cargo clippy --release -- -D warnings && cargo test --release`.
+  `cargo fmt --all -- --check && cargo clippy --release -- -D warnings && cargo test --release`.
 - Commit messages: terse and professional, describing what changed and why. No AI
   branding, no narrating your own process. The existing git history
   (`git log --oneline`) is a good model to match.

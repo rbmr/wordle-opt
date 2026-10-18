@@ -1,11 +1,13 @@
 //! Independent checker for optimality certificates.
 //!
-//! A certificate is a list of claims `LB(S) >= b` about candidate sets `S`.
-//! This module checks one against a readable policy tree using nothing from
-//! the solver: its own feedback function (written like the one in
-//! `tests/optimality_audit.rs`), its own tree walker, no transposition table,
-//! no search and no pruning shortcuts. If every claim checks and the root claim
-//! bounds the whole candidate list by the tree's cost, the tree is optimal.
+//! A certificate is a list of claims `LB(S) >= b` about candidate sets `S`
+//! (format: `wordle_common::certfile`). This crate checks one against a
+//! readable policy tree. It shares with the solver only what both must agree
+//! on - the word lists, the response table and the tree format, all in
+//! `wordle_common` - and depends on nothing else from it: no search, no
+//! transposition table, no pruning shortcuts. If every claim checks and the
+//! root claim bounds the whole candidate list by the tree's cost, the tree is
+//! optimal.
 //!
 //! Each claim names its set explicitly, as the root (every candidate) or as
 //! one bucket of an earlier claim's set (`parent`, `guess`, `response`), and
@@ -14,7 +16,8 @@
 //!
 //! * **base**: `|S| = 1` costs 1 and `|S| = 2` costs 3.
 //! * **capacity**: `b <= L3(|S|, k)`, where the checker computes `k`, the most
-//!   distinct responses any allowed guess gives on `S`. See [`l3`].
+//!   distinct responses any allowed guess gives on `S`. See
+//!   `wordle_common::certfile::l3`.
 //! * **expansion**: for *every* allowed guess `g` (the checker enumerates the
 //!   whole list itself) that splits `S`, `|S| + sum over non-win buckets B of
 //!   LB(B) >= b`, where `LB(B)` is the largest claim on exactly `B`, or the
@@ -29,100 +32,16 @@
 
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use wordle_common::certfile::{
+    self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef, l3,
+};
+use wordle_common::core::Response;
+use wordle_common::dict::Dictionary;
+use wordle_common::matrix::ResponseMatrix;
+use wordle_common::tree::ReadableTreeFile;
 
-type W = [u8; 5];
-
-/// All-green response, base 3 with green = 1 at every position.
-const WIN: u8 = 121;
-
-pub const MAGIC: &[u8; 8] = b"WOCERT01";
-
-pub const RULE_BASE: u8 = 0;
-pub const RULE_CAPACITY: u8 = 1;
-pub const RULE_EXPANSION: u8 = 2;
-pub const RULE_ASSUMED: u8 = 3;
-
-/// Per position 0 black, 1 green, 2 yellow, position 0 least significant
-/// (the policy JSON's `b`/`g`/`y` key order).
-fn feedback(guess: &W, secret: &W) -> u8 {
-    let mut marks = [0u8; 5];
-    let mut unmatched = [0u8; 256];
-    for i in 0..5 {
-        if guess[i] == secret[i] {
-            marks[i] = 1;
-        } else {
-            unmatched[secret[i] as usize] += 1;
-        }
-    }
-    for i in 0..5 {
-        let l = guess[i] as usize;
-        if marks[i] == 0 && unmatched[l] > 0 {
-            marks[i] = 2;
-            unmatched[l] -= 1;
-        }
-    }
-    marks.iter().rev().fold(0, |acc, &m| acc * 3 + m)
-}
-
-fn code_key(code: u8) -> String {
-    let mut v = code;
-    (0..5)
-        .map(|_| {
-            let c = b"bgy"[(v % 3) as usize] as char;
-            v /= 3;
-            c
-        })
-        .collect()
-}
-
-/// Lower bound on the cost of any policy for `n` candidates when no allowed
-/// guess gives more than `k` distinct responses on them.
-///
-/// Proof: the first guess wins at most one candidate (`w1 <= 1`). It leaves
-/// at most `k - 1` non-win buckets if it is a candidate and at most `k` if it
-/// is not (then `w1 = 0`); each bucket's first guess wins at most one more, so
-/// `w2 <= k - 1` (or `k`) and `w2 <= n - w1`. Everything else costs at least 3,
-/// so the cost is at least `3n - 2 w1 - w2`, minimized at
-/// `max(3n - k - 1, 2n - 1)` by the in-set case.
-///
-/// This is `heuristic::capacity_bound` truncated at depth 3. That function also
-/// charges depth 4 and beyond as if every node were a candidate, which is not a
-/// valid lower bound once `n >= k^2 - k + 3`: a non-candidate guess trades its
-/// own win for one more bucket, and from depth 4 on that extra bucket is worth
-/// more than the win (for example `n = 9, k = 3`: 24 is achievable, the
-/// formula says 25).
-pub fn l3(n: usize, k: usize) -> u64 {
-    match n {
-        0 => 0,
-        1 => 1,
-        2 => 3,
-        _ => {
-            let n = n as u64;
-            (2 * n - 1).max((3 * n).saturating_sub(k as u64 + 1))
-        }
-    }
-}
-
-/// FNV-1a over both word lists, binding a certificate to the exact lists.
-pub fn digest<'a>(
-    guesses: impl IntoIterator<Item = &'a [u8; 5]>,
-    candidates: impl IntoIterator<Item = &'a [u8; 5]>,
-) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    let mut eat = |b: u8| {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    };
-    eat(b'G');
-    for w in guesses {
-        w.iter().for_each(|&b| eat(b));
-    }
-    eat(b'C');
-    for w in candidates {
-        w.iter().for_each(|&b| eat(b));
-    }
-    h
-}
+/// The all-green response.
+const WIN: u8 = Response::WIN.0;
 
 #[derive(Debug, Default)]
 pub struct Report {
@@ -146,83 +65,27 @@ impl Report {
 }
 
 struct Lists {
-    guesses: Vec<W>,
-    candidates: Vec<W>,
-    /// Feedback of guess `g` on candidate `c` at `g * candidates.len() + c`.
-    fb: Vec<u8>,
-    /// The same table candidate-major: `c * guesses.len() + g`.
-    fb_by_candidate: Vec<u8>,
+    dict: Dictionary,
+    matrix: ResponseMatrix,
 }
 
 impl Lists {
-    fn row(&self, g: usize) -> &[u8] {
-        let n = self.candidates.len();
-        &self.fb[g * n..(g + 1) * n]
+    fn guesses(&self) -> usize {
+        self.dict.guesses.len()
     }
-    fn column(&self, c: usize) -> &[u8] {
-        let n = self.guesses.len();
-        &self.fb_by_candidate[c * n..(c + 1) * n]
+    fn candidates(&self) -> usize {
+        self.dict.candidates.len()
     }
-}
-
-fn to_word(v: &serde_json::Value) -> Result<W, String> {
-    let s = v.as_str().ok_or("word is not a string")?;
-    s.as_bytes()
-        .try_into()
-        .map_err(|_| format!("{s:?} is not a 5-byte word"))
-}
-
-fn words(file: &serde_json::Value, key: &str) -> Result<Vec<W>, String> {
-    file.get(key)
-        .and_then(|v| v.as_array())
-        .ok_or(format!("tree has no {key} list"))?
-        .iter()
-        .map(to_word)
-        .collect()
-}
-
-/// Walks the tree, checking that every node plays an allowed guess, that its
-/// children are exactly its possible non-win responses, and that each
-/// candidate is won exactly once (implied by partitioning). Returns the cost.
-fn walk(
-    node: &serde_json::Value,
-    set: &[u16],
-    lists: &Lists,
-    index: &HashMap<W, usize>,
-    path: &str,
-) -> Result<u64, String> {
-    let guess = to_word(node.get("guess").ok_or(format!("{path}: no guess"))?)?;
-    let &g = index
-        .get(&guess)
-        .ok_or(format!("{path}: guess is not allowed"))?;
-    let row = lists.row(g);
-    let mut buckets: HashMap<u8, Vec<u16>> = HashMap::new();
-    for &c in set {
-        buckets.entry(row[c as usize]).or_default().push(c);
+    /// Responses of guess `g` to every candidate.
+    fn row(&self, g: usize) -> &[Response] {
+        let n = self.candidates();
+        &self.matrix.data[g * n..(g + 1) * n]
     }
-    buckets.remove(&WIN);
-    let empty = serde_json::Map::new();
-    let children = match node.get("children") {
-        None => &empty,
-        Some(v) => v.as_object().ok_or(format!("{path}: children not a map"))?,
-    };
-    let mut want: Vec<String> = buckets.keys().map(|&r| code_key(r)).collect();
-    want.sort_unstable();
-    let mut have: Vec<String> = children.keys().cloned().collect();
-    have.sort_unstable();
-    if want != have {
-        return Err(format!("{path}: children are not the possible responses"));
+    /// Responses of every guess to candidate `c`.
+    fn column(&self, c: usize) -> &[Response] {
+        let n = self.guesses();
+        &self.matrix.data_c_g[c * n..(c + 1) * n]
     }
-    if buckets.len() == 1 && buckets.values().next().unwrap().len() == set.len() {
-        return Err(format!("{path}: guess does not split its set"));
-    }
-    let mut cost = set.len() as u64;
-    for (r, bucket) in buckets {
-        let key = code_key(r);
-        let child_path = format!("{path}/{key}");
-        cost += walk(&children[&key], &bucket, lists, index, &child_path)?;
-    }
-    Ok(cost)
 }
 
 struct ClaimRec {
@@ -231,49 +94,33 @@ struct ClaimRec {
     rule: u8,
 }
 
-struct Reader<'a>(&'a [u8]);
-
-impl Reader<'_> {
-    fn take(&mut self, n: usize) -> Result<&[u8], String> {
-        if self.0.len() < n {
-            return Err("certificate is truncated".into());
-        }
-        let (a, b) = self.0.split_at(n);
-        self.0 = b;
-        Ok(a)
-    }
-    fn u8(&mut self) -> Result<u8, String> {
-        Ok(self.take(1)?[0])
-    }
-    fn u32(&mut self) -> Result<u32, String> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
-    }
-    fn u64(&mut self) -> Result<u64, String> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
-    }
-}
-
+/// Decodes `cert`, checks that it is for these lists, and recomputes each
+/// claim's set from its definition.
 fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
-    let mut r = Reader(cert);
-    if r.take(8)? != MAGIC {
-        return Err("not a certificate (bad magic)".into());
-    }
-    if r.u64()? != digest(&lists.guesses, &lists.candidates) {
+    let (header, raw) = certfile::decode(cert)?;
+    let digest = certfile::digest(
+        lists.dict.guesses.iter().map(|w| &w.0),
+        lists.dict.candidates.iter().map(|w| &w.0),
+    );
+    if header.digest != digest {
         return Err("certificate is for different word lists".into());
     }
-    if r.u32()? as usize != lists.guesses.len() || r.u32()? as usize != lists.candidates.len() {
+    if header.guesses as usize != lists.guesses()
+        || header.candidates as usize != lists.candidates()
+    {
         return Err("certificate list sizes differ from the tree's".into());
     }
-    let count = r.u32()? as usize;
-    let mut claims: Vec<ClaimRec> = Vec::with_capacity(count);
-    for i in 0..count {
-        let set = match r.u8()? {
-            0 => (0..lists.candidates.len() as u16).collect(),
-            1 => {
-                let parent = r.u32()? as usize;
-                let g = r.u32()? as usize;
-                let resp = r.u8()?;
-                if parent >= i || g >= lists.guesses.len() || resp >= 243 || resp == WIN {
+    let mut claims: Vec<ClaimRec> = Vec::with_capacity(raw.len());
+    for (i, c) in raw.iter().enumerate() {
+        let set = match c.def {
+            SetDef::Root => (0..lists.candidates() as u16).collect(),
+            SetDef::Child {
+                parent,
+                guess,
+                response,
+            } => {
+                let (parent, g) = (parent as usize, guess as usize);
+                if parent >= i || g >= lists.guesses() || response >= 243 || response == WIN {
                     return Err(format!("claim {i}: bad set definition"));
                 }
                 let row = lists.row(g);
@@ -281,24 +128,19 @@ fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
                     .set
                     .iter()
                     .copied()
-                    .filter(|&c| row[c as usize] == resp)
+                    .filter(|&c| row[c as usize].0 == response)
                     .collect();
                 if set.is_empty() {
                     return Err(format!("claim {i}: empty set"));
                 }
                 set
             }
-            t => return Err(format!("claim {i}: unknown set tag {t}")),
         };
-        let bound = r.u32()? as u64;
-        let rule = r.u8()?;
-        if rule > RULE_ASSUMED {
-            return Err(format!("claim {i}: unknown rule {rule}"));
-        }
-        claims.push(ClaimRec { set, bound, rule });
-    }
-    if !r.0.is_empty() {
-        return Err("trailing bytes after the last claim".into());
+        claims.push(ClaimRec {
+            set,
+            bound: c.bound as u64,
+            rule: c.rule,
+        });
     }
     Ok(claims)
 }
@@ -314,13 +156,14 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
     }
     let mut present = [false; 256];
     for &c in set {
-        for &b in &lists.candidates[c as usize] {
+        for &b in &lists.dict.candidates[c as usize].0 {
             present[b as usize] = true;
         }
     }
-    let risky: Vec<usize> = (0..lists.guesses.len())
+    let risky: Vec<usize> = (0..lists.guesses())
         .filter(|&g| {
-            let v = lists.guesses[g]
+            let v = lists.dict.guesses[g]
+                .0
                 .iter()
                 .filter(|&&b| present[b as usize])
                 .count();
@@ -334,7 +177,7 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
         for &c in set {
             let column = lists.column(c as usize);
             for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = column[g];
+                let r = column[g].0;
                 s[(r >> 6) as usize] |= 1 << (r & 63);
             }
         }
@@ -346,10 +189,6 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
         }
     }
     true
-}
-
-fn default_bound(n: usize, k: usize) -> u64 {
-    l3(n, k)
 }
 
 /// Checks one expansion claim; `Err` names the first guess that beats it.
@@ -366,7 +205,7 @@ fn check_expansion(
     // buckets m of any guess, so only buckets larger than m can contribute the
     // second term: those are kept until `k` is known.
     const CHUNK: usize = 256;
-    let ng = lists.guesses.len();
+    let ng = lists.guesses();
     let mut counts = vec![0u16; CHUNK * 243];
     let mut used: Vec<Vec<u8>> = (0..CHUNK).map(|_| Vec::new()).collect();
     // Per guess: splits it, base sum n + sum(2b - 1), and its large buckets.
@@ -377,7 +216,8 @@ fn check_expansion(
     for start in (0..ng).step_by(CHUNK) {
         let end = (start + CHUNK).min(ng);
         for &c in set {
-            for (j, &r) in lists.column(c as usize)[start..end].iter().enumerate() {
+            for (j, r) in lists.column(c as usize)[start..end].iter().enumerate() {
+                let r = r.0;
                 let slot = &mut counts[j * 243 + r as usize];
                 if *slot == 0 {
                     used[j].push(r);
@@ -426,27 +266,26 @@ fn check_expansion(
     for g in short {
         let row = lists.row(g);
         // Defaults are not enough: use the claims on this guess's buckets.
-        let key: Vec<u8> = set.iter().map(|&c| row[c as usize]).collect();
+        let key: Vec<u8> = set.iter().map(|&c| row[c as usize].0).collect();
         if !seen_rows.insert(key) {
             continue; // identical partition, already checked
         }
         let mut buckets: HashMap<u8, Vec<u16>> = HashMap::new();
         for &c in set {
-            let r = row[c as usize];
+            let r = row[c as usize].0;
             if r != WIN {
                 buckets.entry(r).or_default().push(c);
             }
         }
         let mut sum = n as u64;
         for b in buckets.values() {
-            let d = default_bound(b.len(), k);
+            let d = l3(b.len(), k);
             sum += best.get(b.as_slice()).map_or(d, |&v| v.max(d));
         }
         if sum < bound {
-            let w = lists.guesses[g];
             return Err(format!(
                 "guess {} gives only {sum} < {bound}",
-                String::from_utf8_lossy(&w)
+                lists.dict.guesses[g]
             ));
         }
     }
@@ -455,37 +294,21 @@ fn check_expansion(
 
 /// Checks `cert` against the readable policy tree `tree_json`.
 pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
-    let file: serde_json::Value =
-        serde_json::from_str(tree_json).map_err(|e| format!("tree is not JSON: {e}"))?;
-    let guesses = words(&file, "guesses")?;
-    let candidates = words(&file, "candidates")?;
-    if candidates.is_empty() || candidates.len() > u16::MAX as usize {
+    let file = ReadableTreeFile::from_json(tree_json).map_err(|e| format!("tree: {e}"))?;
+    let dict = file
+        .embedded_dictionary()
+        .map_err(|e| format!("tree: {e}"))?;
+    let n = dict.candidates.len();
+    if n == 0 || n > u16::MAX as usize {
         return Err("unsupported candidate count".into());
     }
-    let n = candidates.len();
-    let fb: Vec<u8> = guesses
-        .par_iter()
-        .flat_map_iter(|g| candidates.iter().map(move |c| feedback(g, c)))
-        .collect();
-    let fb_by_candidate: Vec<u8> = candidates
-        .par_iter()
-        .flat_map_iter(|c| guesses.iter().map(move |g| feedback(g, c)))
-        .collect();
-    let lists = Lists {
-        guesses,
-        candidates,
-        fb,
-        fb_by_candidate,
-    };
-    let index: HashMap<W, usize> = lists
-        .guesses
-        .iter()
-        .enumerate()
-        .map(|(i, &w)| (w, i))
-        .collect();
-    let all: Vec<u16> = (0..n as u16).collect();
-    let root = file.get("root").ok_or("tree has no root")?;
-    let tree_cost = walk(root, &all, &lists, &index, "")?;
+    let tree = file.to_tree().map_err(|e| format!("tree: {e}"))?;
+    let matrix = ResponseMatrix::new(&dict);
+    let tree_cost = tree
+        .validate(&matrix, &dict)
+        .map_err(|e| format!("tree is not a valid strategy: {e}"))?
+        .total_cost;
+    let lists = Lists { dict, matrix };
 
     let claims = parse_claims(cert, &lists)?;
     let mut report = Report {
@@ -496,7 +319,7 @@ pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
     let mut best: HashMap<&[u16], u64> = HashMap::new();
     for c in &claims {
         report.by_rule[c.rule as usize] += 1;
-        let g = lists.guesses.len() as u64;
+        let g = lists.guesses() as u64;
         report.lookups += match c.rule {
             RULE_CAPACITY => g * c.set.len() as u64,
             RULE_EXPANSION => 2 * g * c.set.len() as u64,
