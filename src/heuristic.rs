@@ -270,36 +270,126 @@ pub fn compute_max_branching_factor_seq(
     compute_max_branching_factor_seq_with_target(matrix, candidates, 0, candidates.len().min(243))
 }
 
-/// Computes the absolute minimum total cost to solve a subset of size `n`
-/// assuming a maximum branching factor `k`.
+/// Lower bound on the total cost of solving `n` candidates when no guess
+/// splits them, or any subset of them, into more than `k` responses.
 ///
-/// This mathematically models the exact capacity of a uniform tree with degree `k-1`
-/// (since 1 branch is reserved for the 'WIN' response).
+/// See [`forest_bound`] for the argument; this is the case of a single root.
 pub fn capacity_bound(n: usize, k: usize) -> u32 {
-    if n == 0 {
+    match n {
+        0 => return 0,
+        1 => return 1,
+        2 => return 3,
+        _ => {}
+    }
+    if k <= 1 {
+        panic!("no strategy separates {n} candidates with branching factor {k}");
+    }
+    saturate(forest_bound(n as u64, 1, k as u64))
+}
+
+fn saturate(cost: u64) -> u32 {
+    cost.min(u32::MAX as u64) as u32
+}
+
+/// Lower bound on the summed depths of `m` candidates solved by a forest of at
+/// most `roots` decision trees whose roots sit at depth 1, where no guess has
+/// more than `k >= 2` responses on any set it is asked about.
+///
+/// A guess that is one of the remaining candidates spends one of its `k`
+/// responses on the win, so it has at most `k - 1` children; any other guess
+/// solves nothing at its own depth but may have `k` children. With `a_d`
+/// candidates solved at depth `d` and `m_d` nodes there, `m_1 <= roots`,
+/// `a_d <= m_d` and `m_{d+1} <= k * m_d - a_d`. Unrolling,
+///
+/// ```text
+/// A_D = a_1 + ... + a_D <= roots * k^(D-1) - sum_{d <= D-2} (k^(D-1-d) - 1) * a_d,
+/// ```
+///
+/// and dropping every `a_d` but `a_1` (their coefficients are not negative)
+/// leaves `A_D <= U_D(a_1) = roots * k^(D-1) - (k^(D-2) - 1) * a_1` for
+/// `D >= 2`, with `A_1 = a_1`. The cost is the number of unsolved candidates
+/// summed over depths, at least
+///
+/// ```text
+/// g(a_1) = m + (m - a_1) + sum_{D >= 2} max(0, m - U_D(a_1)),
+/// ```
+///
+/// so the bound is the minimum of `g` over `0 <= a_1 <= min(roots, m)`. `g` is
+/// convex and piecewise linear, so that minimum is at an end of the range or
+/// next to a kink.
+///
+/// When every node is a candidate the counting is exact (depth `d` then holds
+/// `roots * (k-1)^(d-1)` candidates), but only up to
+/// `m = roots * (k^2 - k + 1) + 1`. Past that, guesses outside the set pay for
+/// themselves: one solved candidate moves a level down in exchange for a whole
+/// extra subtree one level below, so the all-candidates fill overestimates.
+/// Up to that point the minimum of `g` equals the all-candidates fill, which
+/// is computed directly because it is cheaper.
+pub fn forest_bound(m: u64, roots: u64, k: u64) -> u64 {
+    if m == 0 {
         return 0;
     }
-    if n == 1 {
-        return 1;
+    if roots == 0 {
+        return u64::MAX;
     }
-    if n == 2 {
-        return 3;
+    if m <= roots {
+        return m;
     }
+    debug_assert!(k >= 2);
+    if m <= roots * (k * k - k + 1) + 1 {
+        return all_candidates_fill(m, roots, k);
+    }
+    let hi = roots.min(m);
+    let mut best = forest_g(m, roots, k, 0).min(forest_g(m, roots, k, hi));
+    // Kinks of g, one per depth whose term can become active in [0, hi].
+    let mut pow = k; // k^(D-2) for D = 3
+    loop {
+        let coeff = pow - 1;
+        let cap = roots.saturating_mul(pow.saturating_mul(k)); // roots * k^(D-1)
+        if cap.saturating_sub(coeff.saturating_mul(hi)) >= m {
+            break;
+        }
+        if cap >= m {
+            let kink = (cap - m) / coeff;
+            for a in [kink, kink + 1] {
+                if a <= hi {
+                    best = best.min(forest_g(m, roots, k, a));
+                }
+            }
+        }
+        pow = pow.saturating_mul(k);
+    }
+    best
+}
 
-    let mut remaining = n as u32;
+/// `g(a_1)` from [`forest_bound`].
+fn forest_g(m: u64, roots: u64, k: u64, a1: u64) -> u64 {
+    let mut cost = m + (m - a1);
+    let mut pow = 1u64; // k^(D-2) for D = 2
+    loop {
+        let cap = roots.saturating_mul(pow.saturating_mul(k));
+        let used = (pow - 1).saturating_mul(a1);
+        let reach = cap.saturating_sub(used);
+        if reach >= m {
+            return cost;
+        }
+        cost += m - reach;
+        pow = pow.saturating_mul(k);
+    }
+}
+
+/// Summed depths when depth `d` holds `roots * (k-1)^(d-1)` candidates.
+fn all_candidates_fill(m: u64, roots: u64, k: u64) -> u64 {
+    let mut remaining = m;
     let mut cost = 0;
     let mut depth = 1;
-    if k <= 1 {
-        panic!("Infinite loop: n={}, k={}", n, k);
-    }
-    let mut capacity_at_depth = 1u32;
-
+    let mut capacity_at_depth = roots;
     while remaining > 0 {
         let take = remaining.min(capacity_at_depth);
         cost += take * depth;
         remaining -= take;
         depth += 1;
-        capacity_at_depth = capacity_at_depth.saturating_mul(k as u32 - 1);
+        capacity_at_depth = capacity_at_depth.saturating_mul(k - 1);
     }
     cost
 }
@@ -370,13 +460,12 @@ mod expected_remaining_tests {
     }
 }
 
-/// Computes a lower bound on the cost when the root guess is a Phase 2 guess
-/// (i.e. not in the remaining candidate set).
+/// Lower bound on the cost of `n` candidates when the first guess is not one
+/// of them and has at most `root_k` responses, and no later guess has more
+/// than `max_k`.
 ///
-/// A Phase 2 guess cannot possibly hit the correct word at depth 1.
-/// Thus, all `n` candidates must be resolved at depth 2 or deeper.
-/// `root_k` is the maximum branching factor of the root guess,
-/// while `max_k` is the maximum branching factor for all subsequent depths.
+/// The first guess solves nothing, so every candidate is at depth 2 or deeper,
+/// below a forest of at most `root_k` subtrees (see [`forest_bound`]).
 pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if n == 0 {
         return 0;
@@ -384,63 +473,192 @@ pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if root_k <= 1 || max_k <= 1 {
         return capacity_bound(n, max_k);
     }
-    let mut remaining = n as u32;
-    let mut cost = 0;
-    let mut depth = 2; // Phase 2 guess means no WIN at depth 1
-
-    let mut capacity_at_depth = root_k as u32;
-
-    while remaining > 0 {
-        let take = remaining.min(capacity_at_depth);
-        cost += take * depth;
-        remaining -= take;
-        depth += 1;
-        capacity_at_depth = capacity_at_depth.saturating_mul(max_k as u32 - 1);
-    }
-    cost
+    saturate(n as u64 + forest_bound(n as u64, root_k as u64, max_k as u64))
 }
 
-/// Computes a lower bound for a Phase 1 guess where the root branching factor
-/// (`root_k`) is restricted compared to the global max branching factor (`max_k`).
+/// Lower bound on the cost of `n` candidates when the first guess is one of
+/// them and has at most `root_k` responses, and no later guess has more than
+/// `max_k`.
 ///
-/// Since it is a Phase 1 guess, 1 candidate can be a WIN at depth 1.
-/// The remaining branches at depth 1 are at most `root_k - 1`.
-/// All deeper levels have branching factor `max_k - 1`.
+/// The first guess solves one candidate at depth 1 and leaves the other
+/// `n - 1` below a forest of at most `root_k - 1` subtrees (see
+/// [`forest_bound`]).
 pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
-    if n == 0 {
-        return 0;
+    match n {
+        0 => return 0,
+        1 => return 1,
+        2 => return 3,
+        _ => {}
     }
-    if n == 1 {
-        return 1;
-    }
-    if n == 2 {
-        return 3;
-    }
-
-    let mut remaining = n as u32;
-    let mut cost = 0;
-    let mut depth = 1;
     if root_k <= 1 || max_k <= 1 {
-        // If max_k <= 1 or root_k <= 1 and we have n > 2, it's impossible to solve
-        // but we return a large finite cost to let alpha-beta prune it.
+        // No guess separates the candidates; the caller prunes on the result.
         return capacity_bound(n, max_k);
     }
+    saturate(n as u64 + forest_bound(n as u64 - 1, root_k as u64 - 1, max_k as u64))
+}
 
-    let take = remaining.min(1);
-    cost += take * depth;
-    remaining -= take;
-    depth += 1;
+#[cfg(test)]
+mod forest_bound_tests {
+    use super::*;
 
-    let mut capacity_at_depth = (root_k as u32).saturating_sub(1);
-
-    while remaining > 0 {
-        let take = remaining.min(capacity_at_depth);
-        cost += take * depth;
-        remaining -= take;
-        depth += 1;
-        capacity_at_depth = capacity_at_depth.saturating_mul(max_k as u32 - 1);
+    /// Exact minima over abstract trees, by dynamic programming over every
+    /// way to split a set: `f[n]` for one root, `p[j][m]` for at most `j`
+    /// roots sharing `m` candidates. A node that is a candidate solves it and
+    /// splits the rest into at most `k - 1` parts; any other node splits all
+    /// of them into between 2 and `k` parts.
+    fn exact(max_n: usize, k: usize) -> (Vec<u64>, Vec<Vec<u64>>) {
+        let inf = u64::MAX / 4;
+        let mut f = vec![0u64; max_n + 1];
+        let mut p = vec![vec![inf; max_n + 1]; k + 1];
+        for row in p.iter_mut() {
+            row[0] = 0;
+        }
+        for m in 1..=max_n {
+            if m == 1 {
+                f[1] = 1;
+            } else {
+                let solve_one = p[k - 1][m - 1];
+                let split = (1..m).map(|x| f[x] + p[k - 1][m - x]).min().unwrap();
+                f[m] = m as u64 + solve_one.min(split);
+            }
+            for j in 1..=k {
+                let best = (1..=m).map(|x| f[x] + p[j - 1][m - x]).min().unwrap();
+                p[j][m] = p[j - 1][m].min(best);
+            }
+        }
+        (f, p)
     }
-    cost
+
+    /// `forest_bound` without the shortcut, minimizing `g` over every `a_1`.
+    fn brute_g_min(m: u64, roots: u64, k: u64) -> u64 {
+        if m == 0 {
+            return 0;
+        }
+        if m <= roots {
+            return m;
+        }
+        (0..=roots.min(m))
+            .map(|a| forest_g(m, roots, k, a))
+            .min()
+            .unwrap()
+    }
+
+    #[test]
+    fn never_exceeds_the_exact_minimum() {
+        for k in 2..=7usize {
+            let max_n = (k * k * k + 40).min(260);
+            let (f, p) = exact(max_n, k);
+            for n in 0..=max_n {
+                assert!(
+                    capacity_bound(n, k) as u64 <= f[n],
+                    "capacity_bound({n}, {k}) = {} > exact {}",
+                    capacity_bound(n, k),
+                    f[n]
+                );
+            }
+            for roots in 1..=k {
+                for m in 0..=max_n {
+                    let lb = forest_bound(m as u64, roots as u64, k as u64);
+                    assert!(
+                        lb <= p[roots][m],
+                        "forest_bound({m}, {roots}, {k}) = {lb} > exact {}",
+                        p[roots][m]
+                    );
+                }
+            }
+            for root_k in 2..=k {
+                for n in 3..=max_n {
+                    // Candidate root: one solved, the rest under root_k - 1 subtrees.
+                    let tight = n as u64 + p[root_k - 1][n - 1];
+                    assert!(tight_capacity_bound(n, root_k, k) as u64 <= tight);
+                    // Other root: everything under root_k subtrees.
+                    let phase2 = n as u64 + p[root_k][n];
+                    assert!(phase2_capacity_bound(n, root_k, k) as u64 <= phase2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_old_fill_overestimates_from_k_squared_minus_k_plus_3() {
+        for k in 2..=7usize {
+            let n = k * k - k + 3;
+            let (f, _) = exact(n, k);
+            assert!(all_candidates_fill(n as u64, 1, k as u64) > f[n]);
+            assert_eq!(all_candidates_fill(n as u64 - 1, 1, k as u64), f[n - 1]);
+        }
+    }
+
+    #[test]
+    fn shortcut_and_kinks_match_the_full_minimum() {
+        for k in 2..=40u64 {
+            for roots in [1u64, 2, 3, 5, k - 1, k] {
+                let limit = roots * (k * k - k + 1) + 3 * k + 10;
+                for m in 0..=limit.min(5000) {
+                    assert_eq!(
+                        forest_bound(m, roots, k),
+                        brute_g_min(m, roots, k),
+                        "m={m} roots={roots} k={k}"
+                    );
+                }
+            }
+        }
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..20_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let k = 2 + x % 242;
+            let roots = 1 + (x >> 8) % k;
+            let m = (x >> 20) % 200_000;
+            assert_eq!(
+                forest_bound(m, roots, k),
+                brute_g_min(m, roots, k),
+                "m={m} roots={roots} k={k}"
+            );
+        }
+    }
+
+    /// The bounds as they were before guesses outside the set were accounted
+    /// for: every node below the first guess spends a response on a win.
+    fn old_tight(n: u64, root_k: u64, max_k: u64) -> u64 {
+        1 + (n - 1) + all_candidates_fill(n - 1, root_k - 1, max_k)
+    }
+
+    fn old_phase2(n: u64, root_k: u64, max_k: u64) -> u64 {
+        n + all_candidates_fill(n, root_k, max_k)
+    }
+
+    #[test]
+    fn unchanged_wherever_the_old_fill_was_valid() {
+        for k in 2..=243u64 {
+            for n in 0..=(k * k - k + 2).min(20_000) {
+                let old = all_candidates_fill(n, 1, k);
+                assert_eq!(capacity_bound(n as usize, k as usize) as u64, old);
+            }
+        }
+        for max_k in (2..=243u64).step_by(7).chain([3, 4, 5, 243]) {
+            for root_k in (2..=max_k).step_by(5).chain([2, max_k]) {
+                let valid = |m: u64, roots: u64| m <= roots * (max_k * max_k - max_k + 1) + 1;
+                for n in 3..=6000u64 {
+                    if valid(n - 1, root_k - 1) {
+                        assert_eq!(
+                            tight_capacity_bound(n as usize, root_k as usize, max_k as usize)
+                                as u64,
+                            old_tight(n, root_k, max_k)
+                        );
+                    }
+                    if valid(n, root_k) {
+                        assert_eq!(
+                            phase2_capacity_bound(n as usize, root_k as usize, max_k as usize)
+                                as u64,
+                            old_phase2(n, root_k, max_k)
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

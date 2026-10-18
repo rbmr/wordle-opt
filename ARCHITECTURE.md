@@ -31,12 +31,22 @@ in `src/cache.rs`.
 ## 2. Capacity Bounds (`src/heuristic.rs::capacity_bound`)
 
 Rather than a single global bound, the solver computes a per-subtree lower
-bound: the minimum possible total cost to solve `n` remaining candidates
-given the maximum observed branching factor `k` at that node (an
-information-theoretic packing argument - see the doc comment on
-`capacity_bound` and its tests for the exact recurrence). A guess whose
-lower bound already exceeds the current best cannot possibly improve on it
-and is discarded before its subtree is ever expanded.
+bound on the total cost of solving `n` remaining candidates when no guess
+has more than `k` responses on them. A guess that is one of the candidates
+spends one response on the win and has at most `k - 1` subtrees; any other
+guess solves nothing at its own depth but can have `k`. Counting how many
+nodes, and so how many solved candidates, each depth can hold gives the
+bound (see `forest_bound` in `src/heuristic.rs` for the argument).
+
+Counting only trees made of candidate guesses is not enough: from
+`n = k^2 - k + 3` on, a first guess outside the set can be cheaper, because
+it gives up one candidate at depth 1 for a whole extra subtree at depth 2.
+The bound accounts for both kinds of guess, and equals the simpler
+all-candidates count wherever that count is still a valid bound. The tests
+in `src/heuristic.rs` check it against exact minima computed by brute force.
+
+A guess whose lower bound already exceeds the current best cannot possibly
+improve on it and is discarded before its subtree is ever expanded.
 
 ## 3. Initial Upper Bound (`src/solver.rs::greedy_solve`)
 
