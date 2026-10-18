@@ -28,6 +28,7 @@ use std::time::Instant;
 use wordle_common::certfile::{
     self, Claim, Header, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef,
 };
+use wordle_common::profile::SetProfile;
 
 pub type FactMap = FxHashMap<Box<[u16]>, u32>;
 
@@ -256,22 +257,10 @@ fn branching_at_most(
     if set.len() <= limit {
         return true;
     }
-    let mut present = [false; 256];
-    for &c in set {
-        for &b in &dict.candidates[c as usize].0 {
-            present[b as usize] = true;
-        }
-    }
+    let profile = SetProfile::new(set.iter().map(|&c| &dict.candidates[c as usize].0));
     let ng = matrix.num_guesses;
     let risky: Vec<usize> = (0..ng)
-        .filter(|&g| {
-            let v = dict.guesses[g]
-                .0
-                .iter()
-                .filter(|&&b| present[b as usize])
-                .count();
-            3usize.pow(v as u32) > limit
-        })
+        .filter(|&g| profile.max_responses(&dict.guesses[g].0) > limit)
         .collect();
     let mut seen = [[0u64; 4]; 256];
     for chunk in risky.chunks(256) {
@@ -292,6 +281,28 @@ fn branching_at_most(
         }
     }
     true
+}
+
+/// The most distinct responses any of `guesses` gives on `set`.
+fn max_branching(matrix: &ResponseMatrix, set: &[u16], guesses: &[usize]) -> usize {
+    let ng = matrix.num_guesses;
+    let mut k = 0;
+    let mut seen = [[0u64; 4]; 256];
+    for chunk in guesses.chunks(256) {
+        let seen = &mut seen[..chunk.len()];
+        seen.fill([0; 4]);
+        for &c in set {
+            let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
+            for (s, &g) in seen.iter_mut().zip(chunk) {
+                let r = col[g].0;
+                s[(r >> 6) as usize] |= 1 << (r & 63);
+            }
+        }
+        for s in seen.iter() {
+            k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+        }
+    }
+    k
 }
 
 /// Picks the rule for `LB(set) >= target` and, for an expansion, the bucket
@@ -324,11 +335,31 @@ fn justify(
     let win = Response::WIN.0;
     let nc = matrix.num_candidates;
     let ng = matrix.num_guesses;
-    // One pass over the candidate-major table in chunks of guesses finds `k`
-    // and every guess's default sum: a bucket of size b defaults to
-    // (2b - 1) + max(0, b - k), and only buckets larger than the guess's own
-    // bucket count can exceed k, so those are kept until `k` is known (the
-    // checker does the same). Only guesses left short are looked at again.
+    // Only guesses whose smallest possible default sum (at most `caps[g]`
+    // buckets, k at most the largest cap) falls short of the target are read
+    // for their sums; the checker skips the same ones.
+    let profile = SetProfile::new(set.iter().map(|&c| &dict.candidates[c as usize].0));
+    let caps: Vec<usize> = (0..ng)
+        .map(|g| profile.max_responses(&dict.guesses[g].0))
+        .collect();
+    let k_up = caps.iter().copied().max().unwrap_or(0) as u64;
+    let mut in_set = vec![false; ng];
+    for &c in set {
+        in_set[dict.candidate_to_guess[c as usize]] = true;
+    }
+    let n64 = n as u64;
+    let summed: Vec<usize> = (0..ng)
+        .filter(|&g| {
+            let (w, m) = (in_set[g] as u64, caps[g] as u64);
+            let low = (3 * n64 - 2 * w).saturating_sub(m) + (n64 - w).saturating_sub(m * k_up);
+            low < target as u64
+        })
+        .collect();
+    // One pass over the candidate-major table in chunks of those guesses finds
+    // their default sums: a bucket of size b defaults to (2b - 1) + max(0, b - k),
+    // and only buckets larger than the guess's own bucket count can exceed k,
+    // so those are kept until `k` is known (the checker does the same). Only
+    // guesses left short are looked at again.
     const CHUNK: usize = 256;
     let mut counts = vec![0u16; CHUNK * 243];
     let mut used: Vec<Vec<u8>> = (0..CHUNK).map(|_| Vec::new()).collect();
@@ -336,11 +367,11 @@ fn justify(
     // can need the max(0, b - k) terms, so only their large buckets are kept.
     let mut pending: Vec<(usize, u64, Vec<u16>)> = Vec::new();
     let mut k = 0;
-    for start in (0..ng).step_by(CHUNK) {
-        let end = (start + CHUNK).min(ng);
+    for chunk in summed.chunks(CHUNK) {
         for &c in set {
-            let col = &matrix.data_c_g[c as usize * ng + start..c as usize * ng + end];
-            for (j, r) in col.iter().enumerate() {
+            let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
+            for (j, &g) in chunk.iter().enumerate() {
+                let r = col[g];
                 let slot = &mut counts[j * 243 + r.0 as usize];
                 if *slot == 0 {
                     used[j].push(r.0);
@@ -348,7 +379,7 @@ fn justify(
                 *slot += 1;
             }
         }
-        for (j, u) in used[..end - start].iter_mut().enumerate() {
+        for (j, u) in used[..chunk.len()].iter_mut().enumerate() {
             let m = u.len();
             k = k.max(m);
             let splits = m > 1 || u[0] == win;
@@ -367,10 +398,16 @@ fn justify(
             }
             u.clear();
             if splits && sum < target as u64 {
-                pending.push((start + j, sum, big));
+                pending.push((chunk[j], sum, big));
             }
         }
     }
+    // The exact k also needs every unread guess that could beat it.
+    let unread: Vec<usize> = (0..ng)
+        .filter(|&g| caps[g] > k)
+        .filter(|g| summed.binary_search(g).is_err())
+        .collect();
+    k = k.max(max_branching(matrix, set, &unread));
     let short: Vec<usize> = pending
         .into_iter()
         .filter(|(_, sum, big)| {

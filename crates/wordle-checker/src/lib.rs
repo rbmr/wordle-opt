@@ -32,12 +32,14 @@
 
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 use wordle_common::certfile::{
     self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef, l3,
 };
 use wordle_common::core::Response;
 use wordle_common::dict::Dictionary;
 use wordle_common::matrix::ResponseMatrix;
+use wordle_common::profile::SetProfile;
 use wordle_common::tree::ReadableTreeFile;
 
 /// The all-green response.
@@ -55,6 +57,10 @@ pub struct Report {
     pub lookups: u64,
     /// Every failed check. Empty means the certificate is valid.
     pub failures: Vec<String>,
+    /// Wall-clock seconds: reading the tree and building the response
+    /// table, decoding the claims, checking capacity claims, checking
+    /// expansion claims.
+    pub seconds: [f64; 4],
 }
 
 impl Report {
@@ -146,29 +152,15 @@ fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
 }
 
 /// Whether no allowed guess gives more than `limit` distinct responses on
-/// `set`. A guess position whose letter occurs in no word of `set` is gray for
-/// every candidate in it, so a guess with `v` other positions gives at most
-/// `min(3^v, |set|)` responses; only guesses where that exceeds `limit` are
-/// read, from the candidate-major table.
+/// `set`. Only guesses whose [`SetProfile`] bound exceeds `limit` are read,
+/// from the candidate-major table.
 fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
     if set.len() <= limit {
         return true;
     }
-    let mut present = [false; 256];
-    for &c in set {
-        for &b in &lists.dict.candidates[c as usize].0 {
-            present[b as usize] = true;
-        }
-    }
+    let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize].0));
     let risky: Vec<usize> = (0..lists.guesses())
-        .filter(|&g| {
-            let v = lists.dict.guesses[g]
-                .0
-                .iter()
-                .filter(|&&b| present[b as usize])
-                .count();
-            3usize.pow(v as u32) > limit
-        })
+        .filter(|&g| profile.max_responses(&lists.dict.guesses[g].0) > limit)
         .collect();
     let mut seen = [[0u64; 4]; 256];
     for chunk in risky.chunks(256) {
@@ -191,6 +183,27 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
     true
 }
 
+/// The most distinct responses any of `guesses` gives on `set`.
+fn max_branching(set: &[u16], lists: &Lists, guesses: &[usize]) -> usize {
+    let mut k = 0;
+    let mut seen = [[0u64; 4]; 256];
+    for chunk in guesses.chunks(256) {
+        let seen = &mut seen[..chunk.len()];
+        seen.fill([0; 4]);
+        for &c in set {
+            let column = lists.column(c as usize);
+            for (s, &g) in seen.iter_mut().zip(chunk) {
+                let r = column[g].0;
+                s[(r >> 6) as usize] |= 1 << (r & 63);
+            }
+        }
+        for s in seen.iter() {
+            k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+        }
+    }
+    k
+}
+
 /// Checks one expansion claim; `Err` names the first guess that beats it.
 fn check_expansion(
     set: &[u16],
@@ -199,25 +212,46 @@ fn check_expansion(
     best: &HashMap<&[u16], u64>,
 ) -> Result<(), String> {
     let n = set.len();
-    // One pass over the candidate-major table, in chunks of guesses, finds both
-    // `k` and every guess's default sum. A bucket of size b >= 1 defaults to
-    // L3(b, k) = (2b - 1) + max(0, b - k), and k is at least the number of
+    let ng = lists.guesses();
+    // Which guesses can matter. A bucket of size b >= 1 defaults to
+    // L3(b, k) = (2b - 1) + max(0, b - k). A guess with at most m buckets, w of
+    // them the win, then has a default sum of at least
+    // n + 2(n - w) - m + max(0, n - w - m k) >= that with k replaced by any
+    // upper bound on k. If even that reaches `bound`, its buckets are never
+    // read for the sum.
+    let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize].0));
+    let caps: Vec<usize> = (0..ng)
+        .map(|g| profile.max_responses(&lists.dict.guesses[g].0))
+        .collect();
+    let k_up = caps.iter().copied().max().unwrap_or(0) as u64;
+    let mut in_set = vec![false; ng];
+    for &c in set {
+        in_set[lists.dict.candidate_to_guess[c as usize]] = true;
+    }
+    let n64 = n as u64;
+    let summed: Vec<usize> = (0..ng)
+        .filter(|&g| {
+            let (w, m) = (in_set[g] as u64, caps[g] as u64);
+            let low = (3 * n64 - 2 * w).saturating_sub(m) + (n64 - w).saturating_sub(m * k_up);
+            low < bound
+        })
+        .collect();
+    // One pass over the candidate-major table, in chunks of those guesses,
+    // finds their bucket counts and default sums. k is at least the number of
     // buckets m of any guess, so only buckets larger than m can contribute the
     // second term: those are kept until `k` is known.
     const CHUNK: usize = 256;
-    let ng = lists.guesses();
     let mut counts = vec![0u16; CHUNK * 243];
     let mut used: Vec<Vec<u8>> = (0..CHUNK).map(|_| Vec::new()).collect();
-    // Per guess: splits it, base sum n + sum(2b - 1), and its large buckets.
     // Guesses whose base sum n + sum(2b - 1) falls short of the bound: only they
     // can need the max(0, b - k) terms, so only their large buckets are kept.
     let mut pending: Vec<(usize, u64, Vec<u16>)> = Vec::new();
     let mut k = 0;
-    for start in (0..ng).step_by(CHUNK) {
-        let end = (start + CHUNK).min(ng);
+    for chunk in summed.chunks(CHUNK) {
         for &c in set {
-            for (j, r) in lists.column(c as usize)[start..end].iter().enumerate() {
-                let r = r.0;
+            let column = lists.column(c as usize);
+            for (j, &g) in chunk.iter().enumerate() {
+                let r = column[g].0;
                 let slot = &mut counts[j * 243 + r as usize];
                 if *slot == 0 {
                     used[j].push(r);
@@ -225,7 +259,7 @@ fn check_expansion(
                 *slot += 1;
             }
         }
-        for (j, u) in used[..end - start].iter_mut().enumerate() {
+        for (j, u) in used[..chunk.len()].iter_mut().enumerate() {
             let m = u.len();
             k = k.max(m);
             let splits = m > 1 || u[0] == WIN;
@@ -244,10 +278,17 @@ fn check_expansion(
             }
             u.clear();
             if splits && sum < bound {
-                pending.push((start + j, sum, big));
+                pending.push((chunk[j], sum, big));
             }
         }
     }
+    // The exact k also needs every unread guess that could give more
+    // responses than the most seen so far.
+    let unread: Vec<usize> = (0..ng)
+        .filter(|&g| caps[g] > k)
+        .filter(|g| summed.binary_search(g).is_err())
+        .collect();
+    k = k.max(max_branching(set, lists, &unread));
     // A guess that does not split the set is never useful. Only guesses whose
     // default sum falls short of `bound` are looked at again, with the claims
     // on their buckets.
@@ -294,6 +335,7 @@ fn check_expansion(
 
 /// Checks `cert` against the readable policy tree `tree_json`.
 pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
+    let start = Instant::now();
     let file = ReadableTreeFile::from_json(tree_json).map_err(|e| format!("tree: {e}"))?;
     let dict = file
         .embedded_dictionary()
@@ -309,6 +351,8 @@ pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
         .map_err(|e| format!("tree is not a valid strategy: {e}"))?
         .total_cost;
     let lists = Lists { dict, matrix };
+    let setup = start.elapsed().as_secs_f64();
+    let start = Instant::now();
 
     let claims = parse_claims(cert, &lists)?;
     let mut report = Report {
@@ -316,6 +360,8 @@ pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
         claims: claims.len(),
         ..Default::default()
     };
+    report.seconds[0] = setup;
+    report.seconds[1] = start.elapsed().as_secs_f64();
     let mut best: HashMap<&[u16], u64> = HashMap::new();
     for c in &claims {
         report.by_rule[c.rule as usize] += 1;
@@ -332,34 +378,49 @@ pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
         }
     }
 
-    let failures: Vec<String> = claims
-        .par_iter()
-        .enumerate()
-        .filter_map(|(i, c)| {
-            let size = c.set.len();
-            let res = match c.rule {
-                RULE_BASE => match size {
-                    1 | 2 if c.bound <= l3(size, 0) => Ok(()),
-                    _ => Err("base rule needs |S| <= 2 and b <= 1 or 3".to_string()),
-                },
-                RULE_CAPACITY => {
-                    // b <= L3(n, k) = max(2n - 1, 3n - k - 1): either b <= 2n - 1,
-                    // or no guess may give more than 3n - 1 - b responses.
-                    let n = size as u64;
-                    let limit = (3 * n).saturating_sub(1 + c.bound) as usize;
-                    if c.bound < 2 * n || branching_at_most(&c.set, &lists, limit) {
-                        Ok(())
-                    } else {
-                        Err(format!("some guess gives more than {limit} responses"))
-                    }
+    let check_one = |i: usize, c: &ClaimRec| -> Option<String> {
+        let size = c.set.len();
+        let res = match c.rule {
+            RULE_BASE => match size {
+                1 | 2 if c.bound <= l3(size, 0) => Ok(()),
+                _ => Err("base rule needs |S| <= 2 and b <= 1 or 3".to_string()),
+            },
+            RULE_CAPACITY => {
+                // b <= L3(n, k) = max(2n - 1, 3n - k - 1): either b <= 2n - 1,
+                // or no guess may give more than 3n - 1 - b responses.
+                let n = size as u64;
+                let limit = (3 * n).saturating_sub(1 + c.bound) as usize;
+                if c.bound < 2 * n || branching_at_most(&c.set, &lists, limit) {
+                    Ok(())
+                } else {
+                    Err(format!("some guess gives more than {limit} responses"))
                 }
-                RULE_EXPANSION => check_expansion(&c.set, c.bound, &lists, &best),
-                _ => Ok(()),
-            };
-            res.err()
-                .map(|e| format!("claim {i} (|S| = {size}, b = {}): {e}", c.bound))
-        })
-        .collect();
+            }
+            RULE_EXPANSION => check_expansion(&c.set, c.bound, &lists, &best),
+            _ => Ok(()),
+        };
+        res.err()
+            .map(|e| format!("claim {i} (|S| = {size}, b = {}): {e}", c.bound))
+    };
+    // Expansions after everything else, so each phase can be timed.
+    let mut failures = Vec::new();
+    for (phase, expansion) in [(2, false), (3, true)] {
+        let start = Instant::now();
+        failures.extend(
+            claims
+                .par_iter()
+                .enumerate()
+                .filter(|(_, c)| (c.rule == RULE_EXPANSION) == expansion)
+                .filter_map(|(i, c)| check_one(i, c))
+                .collect::<Vec<_>>(),
+        );
+        report.seconds[phase] = start.elapsed().as_secs_f64();
+    }
+    failures.sort_by_key(|f| {
+        f.strip_prefix("claim ")
+            .and_then(|r| r.split(' ').next())
+            .and_then(|n| n.parse::<usize>().ok())
+    });
     report.failures = failures;
 
     match claims.first() {
@@ -407,7 +468,14 @@ pub fn run_cli(args: &[String]) {
                 "Check volume: {} response reads ({:.2e})",
                 r.lookups, r.lookups as f64
             );
-            println!("Check time: {:.3}s", start.elapsed().as_secs_f64());
+            println!(
+                "Check time: {:.3}s (tree and table {:.3}s, claims {:.3}s, capacity {:.3}s, expansion {:.3}s)",
+                start.elapsed().as_secs_f64(),
+                r.seconds[0],
+                r.seconds[1],
+                r.seconds[2],
+                r.seconds[3]
+            );
             for f in r.failures.iter().take(20) {
                 println!("FAIL: {f}");
             }
