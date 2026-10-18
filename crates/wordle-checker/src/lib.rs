@@ -159,28 +159,60 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
         return true;
     }
     let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize].0));
-    let risky: Vec<usize> = (0..lists.guesses())
-        .filter(|&g| profile.max_responses(&lists.dict.guesses[g].0) > limit)
-        .collect();
-    let mut seen = [[0u64; 4]; 256];
-    for chunk in risky.chunks(256) {
-        let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 4]);
-        for &c in set {
-            let column = lists.column(c as usize);
-            for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = column[g].0;
-                s[(r >> 6) as usize] |= 1 << (r & 63);
-            }
+    let ng = lists.guesses();
+    let mut words = [[0u64; BLOCK]; 4];
+    let mut sparse: Vec<usize> = Vec::new();
+    for start in (0..ng).step_by(BLOCK) {
+        let end = (start + BLOCK).min(ng);
+        let risky: Vec<bool> = (start..end)
+            .map(|g| profile.max_responses(&lists.dict.guesses[g].0) > limit)
+            .collect();
+        let count = risky.iter().filter(|&&r| r).count();
+        if count < BLOCK / 4 {
+            // Few guesses here could exceed the limit: read just those.
+            sparse.extend(
+                (start..end)
+                    .zip(&risky)
+                    .filter(|(_, r)| **r)
+                    .map(|(g, _)| g),
+            );
+            continue;
         }
-        if seen
-            .iter()
-            .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
-        {
+        seen_block(set, lists, start, end, &mut words);
+        let over = (0..end - start).any(|j| {
+            risky[j]
+                && words
+                    .iter()
+                    .map(|w| w[j].count_ones() as usize)
+                    .sum::<usize>()
+                    > limit
+        });
+        if over {
             return false;
         }
     }
-    true
+    max_branching(set, lists, &sparse) <= limit
+}
+
+/// Guesses read together by [`seen_block`].
+const BLOCK: usize = 256;
+
+/// Which responses each guess in `start..end` gives on `set`: response `r`
+/// of guess `start + j` sets bit `r % 64` of `words[r / 64][j]`. The loop is
+/// written without branches or indexing by response so that it vectorizes.
+fn seen_block(set: &[u16], lists: &Lists, start: usize, end: usize, words: &mut [[u64; BLOCK]; 4]) {
+    let len = end - start;
+    for w in words.iter_mut() {
+        w[..len].fill(0);
+    }
+    for &c in set {
+        let column = &lists.column(c as usize)[start..end];
+        for (w, word) in words.iter_mut().enumerate() {
+            for (bits, r) in word[..len].iter_mut().zip(column) {
+                *bits |= (((r.0 >> 6) as usize == w) as u64) << (r.0 & 63);
+            }
+        }
+    }
 }
 
 /// The most distinct responses any of `guesses` gives on `set`.
@@ -496,6 +528,72 @@ pub fn run_cli(args: &[String]) {
         Err(e) => {
             eprintln!("check-cert: {e}");
             std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wordle_common::core::Word;
+
+    fn lists(n_guesses: usize, n_candidates: usize) -> Lists {
+        let all = Dictionary::load_default();
+        let guesses: Vec<Word> = all
+            .guesses
+            .iter()
+            .step_by(all.guesses.len() / n_guesses)
+            .copied()
+            .collect();
+        let candidates: Vec<Word> = all
+            .candidates
+            .iter()
+            .step_by(all.candidates.len() / n_candidates)
+            .copied()
+            .collect();
+        let dict = Dictionary::from_words(guesses, candidates);
+        let matrix = ResponseMatrix::new(&dict);
+        Lists { dict, matrix }
+    }
+
+    fn naive_branching(set: &[u16], lists: &Lists, g: usize) -> usize {
+        let row = lists.row(g);
+        set.iter()
+            .map(|&c| row[c as usize].0)
+            .collect::<HashSet<_>>()
+            .len()
+    }
+
+    #[test]
+    fn branching_scans_match_naive_counting() {
+        let l = lists(1500, 400);
+        let n = l.candidates() as u64;
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |m: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % m
+        };
+        for _ in 0..200 {
+            let size = 1 + next(120) as usize;
+            let mut set: Vec<u16> = (0..size).map(|_| next(n) as u16).collect();
+            set.sort_unstable();
+            set.dedup();
+            let all: Vec<usize> = (0..l.guesses()).collect();
+            let k = (0..l.guesses())
+                .map(|g| naive_branching(&set, &l, g))
+                .max()
+                .unwrap();
+            assert_eq!(max_branching(&set, &l, &all), k);
+            for limit in [k.saturating_sub(1), k, k + 1] {
+                assert_eq!(
+                    branching_at_most(&set, &l, limit),
+                    k <= limit,
+                    "size {} limit {limit} k {k}",
+                    set.len()
+                );
+            }
         }
     }
 }
