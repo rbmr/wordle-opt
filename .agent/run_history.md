@@ -377,6 +377,8 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-18 | `911a89e` | pc01 | 2340 | — | optimal | 36.258s (0.01h) | 8001 | 2478 | 28103–28173 | — | main, full list via deploy_and_bench; 3 runs 36.732 / 36.083 / 36.258s (median shown); guesses 774984–775547; validation OK |
 | 2026-10-18 | `9e072bb` | pc01 | 2340 | — | optimal | 36.158s (0.01h) | 8001 | 2478 | 28091–28109 | — | crate split (branch), full list via deploy_and_bench; 3 runs 36.029 / 36.158 / 36.164s (median shown); guesses 774453–775138; validation OK |
 | 2026-10-18 | `9e072bb` | pc01 | 2340 | — | optimal --certify | 36.195s (0.01h) | 8001 | 2478 | — | — | certlog build: 1,348,354 facts; gap fill 582 refutations 12.379s; assembly 80.782s; 634,004 claims (445,488 capacity, 188,516 expansion), 9,510,079 bytes; check-cert 74.819s, CERTIFICATE VALID; validation OK |
+| 2026-10-18 | `1386e2b` | pc01 | 2340 | — | optimal --certify | 36.294s (0.01h) | 8001 | 2478 | — | — | certlog build with guess filters from set profiles: gap fill 579 refutations 11.891s; assembly 61.809s (was 80.782s); 632,992 claims (445,041 capacity, 187,951 expansion), 9,494,899 bytes; check-cert (at 8b7b15f, same checker) 44.252 / 45.356s (was 74.819s), capacity 33.9s, expansion 9.1s, CERTIFICATE VALID; validation OK |
+| 2026-10-18 | `6f09b70` | pc01 | 2340 | — | check-cert | 94.862s | — | — | — | — | branchless per-word capacity scan, same certificate: 94.862 / 95.157s, capacity 84.7s (slower than the scalar 33.9s), CERTIFICATE VALID; reverted in c5f1ca8 |
 
 
 
