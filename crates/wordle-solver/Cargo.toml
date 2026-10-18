@@ -8,9 +8,6 @@ repository.workspace = true
 license.workspace = true
 
 [features]
-# Logs every lower bound the search proves, for optimality certificates. Off
-# by default: without it the hooks compile to nothing.
-certlog = []
 # Records every transposition-table write with its candidate set, for
 # `tests/tt_audit.rs`. Off by default; only for testing.
 tt-audit = []

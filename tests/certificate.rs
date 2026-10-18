@@ -343,7 +343,6 @@ fn malformed_certificates_are_rejected() {
 }
 
 /// End to end with the real generator: refutation pass, assembly, check.
-#[cfg(feature = "certlog")]
 #[test]
 fn generated_certificates_check() {
     use wordle_opt::cert;

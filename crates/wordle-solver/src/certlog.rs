@@ -1,10 +1,8 @@
-//! Lower-bound fact log for the optimality-certificate investigation.
+//! Lower-bound fact log for optimality certificates (`solve --certify`).
 //!
-//! Compiled only with `--features certlog`, so the default build's search
-//! code is untouched: every hook in the solver is a `cert_record!` that
-//! expands to nothing without the feature. With the feature, recording is
-//! still off until [`set_enabled`] turns it on, so one binary can time a
-//! solve with and without logging.
+//! The solver calls [`record`] wherever it proves a bound. Recording is off
+//! until [`set_enabled`] turns it on; while it is off, each call is one
+//! relaxed load of a flag, so a plain solve pays nothing measurable.
 //!
 //! A fact is `(candidate set, value, exact)`: the search proved the set's
 //! optimal cost is at least `value` (and, if `exact`, also found a policy of
@@ -12,7 +10,7 @@
 //! them into one map keeping the largest bound per set.
 
 use rustc_hash::FxHashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -58,31 +56,6 @@ thread_local! {
         REGISTRY.lock().unwrap().push(Arc::clone(&b));
         b
     };
-}
-
-static KSCAN_CALLS: AtomicU64 = AtomicU64::new(0);
-static KSCAN_LOOKUPS: AtomicU64 = AtomicU64::new(0);
-static NODESCAN_LOOKUPS: AtomicU64 = AtomicU64::new(0);
-
-/// One branching-factor scan (`k` of a bucket) of `lookups` response reads,
-/// an upper bound where the scan exits early.
-pub fn count_kscan(lookups: usize) {
-    KSCAN_CALLS.fetch_add(1, Ordering::Relaxed);
-    KSCAN_LOOKUPS.fetch_add(lookups as u64, Ordering::Relaxed);
-}
-
-/// A scan of a node's guesses (partitioning every active guess), in response reads.
-pub fn count_nodescan(lookups: usize) {
-    NODESCAN_LOOKUPS.fetch_add(lookups as u64, Ordering::Relaxed);
-}
-
-/// (k-scan calls, k-scan lookups, node-scan lookups) since the last call.
-pub fn take_work() -> (u64, u64, u64) {
-    (
-        KSCAN_CALLS.swap(0, Ordering::Relaxed),
-        KSCAN_LOOKUPS.swap(0, Ordering::Relaxed),
-        NODESCAN_LOOKUPS.swap(0, Ordering::Relaxed),
-    )
 }
 
 pub fn enabled() -> bool {

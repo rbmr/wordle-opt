@@ -1095,14 +1095,6 @@ impl<'a> Solver<'a> {
                 &heap_c_ptrs
             };
 
-            #[cfg(feature = "certlog")]
-            crate::certlog::count_nodescan(
-                active_guesses_slice
-                    .iter()
-                    .map(|b| b.count_ones() as usize)
-                    .sum::<usize>()
-                    * c_len,
-            );
             for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
                 if block == 0 {
                     continue;
@@ -1258,7 +1250,6 @@ impl<'a> Solver<'a> {
             if !cut_by_global {
                 self.cache.insert_set(hash, set, best_val, true);
             }
-            #[cfg(feature = "certlog")]
             crate::certlog::record_tagged(10, set, best_val, true, cut_by_global);
             best_val
         } else {
@@ -1269,7 +1260,6 @@ impl<'a> Solver<'a> {
             if !cut_by_global {
                 self.cache.insert_set(hash, set, final_lb, false);
             }
-            #[cfg(feature = "certlog")]
             crate::certlog::record_tagged(11, set, final_lb, false, cut_by_global);
             final_lb
         }
@@ -1717,8 +1707,6 @@ impl<'a> Solver<'a> {
                     self.cache.insert_set(hash, p, lb, false);
                     cert_record!(6, p, lb, false);
                 } else {
-                    #[cfg(feature = "certlog")]
-                    crate::certlog::count_kscan(p_len * p_len);
                     let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
                         self.matrix,
                         p,
@@ -1732,8 +1720,6 @@ impl<'a> Solver<'a> {
                         self.cache.insert_set(hash, p, lb, false);
                         cert_record!(7, p, lb, false);
                     } else {
-                        #[cfg(feature = "certlog")]
-                        crate::certlog::count_kscan(p_len * self.matrix.num_guesses);
                         let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
                             self.matrix,
                             p,

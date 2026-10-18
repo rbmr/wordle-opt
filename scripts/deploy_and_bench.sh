@@ -10,7 +10,7 @@ set -e
 #
 # Without arguments it builds an optimal tree for a seeded 250-candidate subset.
 #
-# Optional: WORDLE_OPT_FEATURES=certlog builds, tests and runs with that cargo
+# Optional: WORDLE_OPT_FEATURES=tt-audit builds, tests and runs with that cargo
 # feature; WORDLE_OPT_REPEAT=N runs the command N times in a row, so one
 # invocation yields N timings of the same build.
 #

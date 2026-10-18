@@ -112,7 +112,11 @@ Builds a policy tree, checks it, and writes it as JSON.
 | `--stats-format <fmt>` | `parquet` (default) or `ndjson`. |
 
 When it finishes, `solve` prints the total cost, the average number of guesses
-and the build time. Its `Max depth` line counts the edges from the root, so the
+and the build time.
+
+With `--certify <path>` (optimal strategy only), `solve` also writes an
+optimality certificate: a proof, checkable without the solver, that no tree
+for the same word lists costs less. See [Optimality certificates](#optimality-certificates). Its `Max depth` line counts the edges from the root, so the
 most guesses any answer needs is that number plus one.
 
 ### `validate`
@@ -131,6 +135,27 @@ answers are still possible at every node and checks that:
 It then prints the total cost. The file contains its own word lists, so no other
 files are needed.
 
+### `check-cert`
+
+```bash
+wordle-opt check-cert tree.json tree.cert
+```
+
+Checks an optimality certificate against a tree. The checker
+(`crates/wordle-checker`) shares only the word-list, response and file-format
+code with the solver, and none of its search. It prints
+`CERTIFICATE VALID: the tree is optimal` and exits with status 0 when every
+claim in the certificate holds, and exits with status 1 otherwise.
+
+### `certify`
+
+```bash
+wordle-opt certify tree.json --cert tree.cert
+```
+
+Writes a certificate for a tree you already have. It re-solves the lists to
+collect the bounds a proof needs, so it takes about as long as `solve`.
+
 ### `verify`
 
 ```bash
@@ -139,6 +164,25 @@ wordle-opt verify
 
 Compares the solver with a slow, simple reference solver (`crates/wordle-solver/src/naive.rs`) on
 random small subsets of the bundled lists.
+
+## Optimality certificates
+
+`solve` builds the cheapest tree for your lists, but you do not have to take
+that on trust. `solve --certify tree.cert` (or `certify` on an existing tree)
+writes a certificate: a list of claims of the form "every strategy for this
+set of answers costs at least `b`", each justified by a simple rule, ending
+with "every strategy for all the answers costs at least the tree's cost".
+`check-cert` verifies each claim by recomputing it from the word lists, for
+every allowed guess. If all claims hold, the tree is optimal.
+
+```bash
+wordle-opt solve --output tree.json --certify tree.cert
+wordle-opt check-cert tree.json tree.cert
+```
+
+On the bundled lists the certificate is about 9.5 MB, writing it adds about
+75 seconds to the solve on a 16-core machine, and checking it takes about
+45 seconds. On smaller lists both are fast.
 
 ## Tree format
 
@@ -260,7 +304,7 @@ run the real solver on real word lists. The main checks are:
 | `parallel_consistency.rs` | Repeated multi-threaded solves of one list must always reach the single-threaded optimum, whatever the thread timing. |
 | `tt_audit.rs` | During repeated multi-threaded solves, every value written to the transposition table must hold for its set, checked against a solve of that set alone. Needs the `tt-audit` feature. |
 | `shared_components.rs` | The response table, `Response::compute` and the tree format, which the solver and the checker share, against independent code: every pair of words over small alphabets, random words, and trees round-tripped through JSON. |
-| `certificate.rs` | The certificate checker accepts certificates built from brute force and rejects false or malformed ones; with `--features certlog`, certificates the solver writes must check. |
+| `certificate.rs` | The certificate checker accepts certificates built from brute force and rejects false or malformed ones, and certificates the solver writes must check. |
 | `cli.rs` | The binary reads word lists from files and writes and validates a tree. |
 
 `published_optima.rs` and `full_scale.rs` are skipped by default because each

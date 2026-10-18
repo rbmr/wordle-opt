@@ -112,8 +112,6 @@ pub(crate) fn active_guesses(
     };
 
     let cap_bounds = &capacity_bounds_2d[max_k];
-    #[cfg(feature = "certlog")]
-    crate::certlog::count_nodescan(surviving_guesses.len() * candidates.len());
     let mut out: Vec<(usize, u32, u32)> = if candidates.len() >= 48 {
         surviving_guesses
             .into_par_iter()

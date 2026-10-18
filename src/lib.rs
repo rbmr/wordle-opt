@@ -7,9 +7,9 @@ pub mod policy_stats;
 
 pub use wordle_checker as certcheck;
 pub use wordle_common::{certfile, core, dict, matrix, tree};
-#[cfg(feature = "certlog")]
-pub use wordle_solver::certlog;
-pub use wordle_solver::{cache, cert, heuristic, naive, parallel_depth, policy, solver, verify};
+pub use wordle_solver::{
+    cache, cert, certlog, heuristic, naive, parallel_depth, policy, solver, verify,
+};
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
@@ -414,16 +414,16 @@ fn run_solve_cli(args: &[String]) {
         observer: Some(std::sync::Arc::clone(&observer)),
         ..Default::default()
     };
-    // Always-output certificate investigation: log every bound the solve
-    // proves, then assemble a proof from the log once the tree is built.
+    // Log every bound the solve proves, then assemble a certificate from the
+    // log once the tree is built.
     let certify = flags.get("certify").map(str::to_string);
     if certify.is_some() {
-        #[cfg(not(feature = "certlog"))]
-        {
-            eprintln!("solve: --certify needs a build with --features certlog");
+        if strategy != Strategy::Optimal {
+            eprintln!(
+                "solve: --certify needs --strategy optimal (a heuristic tree is not optimal)"
+            );
             std::process::exit(2);
         }
-        #[cfg(feature = "certlog")]
         crate::certlog::set_enabled(true);
     }
     let cpu_start = process_cpu_seconds();
@@ -476,9 +476,6 @@ fn run_solve_cli(args: &[String]) {
         "Dictionary hash: {}",
         crate::policy::hash_hex(tree.dictionary_hash)
     );
-    #[cfg(feature = "certlog")]
-    crate::cert::print_work("Solve work");
-    #[cfg(feature = "certlog")]
     if let Some(cert_out) = &certify {
         crate::certlog::set_enabled(false);
         let facts = crate::certlog::take_all();
@@ -633,10 +630,14 @@ fn print_cli_usage() {
 USAGE:\n    \
 wordle-opt solve --output <path> [--strategy <optimal|min-remaining|max-freq>] [OPTIONS]\n    \
 wordle-opt validate <tree.json>\n    \
+wordle-opt certify <tree.json> --cert <certificate>\n    \
+wordle-opt check-cert <tree.json> <certificate>\n    \
 wordle-opt verify\n\n\
 SUBCOMMANDS:\n    \
 solve       Generate a decision-policy tree and write it as readable JSON\n    \
 validate    Validate a policy tree against the edge-iff-possible invariant\n    \
+certify     Write an optimality certificate for an existing tree (re-solves it)\n    \
+check-cert  Check an optimality certificate against a tree, independently of the solver\n    \
 verify      Run differential fuzzing against naive solver reference\n\n\
 Use 'wordle-opt solve --help' for options on solving word lists."
     );
@@ -658,6 +659,7 @@ OPTIONS:\n    \
 --stats <path>                  Export build progress series (Parquet or NDJSON)\n    \
 --stats-format <fmt>            Progress series format: parquet | ndjson [default: parquet]\n    \
 --no-progress                   Silence periodic stderr progress lines\n    \
+--certify <path>                Also write an optimality certificate (optimal strategy only)\n    \
 -h, --help                      Show this help message"
     );
 }

@@ -8,7 +8,7 @@
 //!   node's known exact cost, so only refutation work is redone;
 //! * the **solve itself**, logging every bound it proves (`solve --certify`).
 //!
-//! Facts come from `crate::certlog` (built with `--features certlog`).
+//! Facts come from `crate::certlog`.
 //! [`assemble`] then builds the smallest proof it can from them, top down from
 //! the root, the same way the checker will verify it: expand a claim over
 //! every allowed guess, and request a claim on a bucket only where the
@@ -96,23 +96,6 @@ fn capacity_rows(max_k: usize, n: usize) -> Vec<Vec<u32>> {
         }
     }
     caps
-}
-
-/// Response reads per second of the solver's own optimized, parallel scan
-/// (`compute_max_branching_factor` over every guess on the root set): a yardstick
-/// for what an optimized checker or assembler could reach on the same volume.
-pub fn calibrate_scan_rate(matrix: &ResponseMatrix) -> (f64, f64) {
-    let root: Vec<usize> = (0..matrix.num_candidates).collect();
-    let reps = 5;
-    let start = Instant::now();
-    for _ in 0..reps {
-        std::hint::black_box(crate::heuristic::compute_max_branching_factor(
-            matrix, &root,
-        ));
-    }
-    let t = start.elapsed().as_secs_f64() / reps as f64;
-    let lookups = (matrix.num_guesses * matrix.num_candidates) as f64;
-    (t, lookups / t)
 }
 
 #[derive(Debug, Default)]
@@ -654,7 +637,6 @@ pub fn print_assembly(a: &Assembly, elapsed: f64) {
     }
 }
 
-#[cfg(feature = "certlog")]
 pub fn print_facts(f: &crate::certlog::Facts) {
     println!(
         "Facts proved: {} records ({} exact, {} lower-bound only), {} distinct sets, {} MB of member data",
@@ -712,12 +694,10 @@ pub fn run_certify_cli(args: &[String]) {
         }
     );
 
-    #[cfg(feature = "certlog")]
     crate::certlog::set_enabled(cert_out.is_some());
     let start = Instant::now();
     let pass = refutation_pass(&nodes, &matrix, &dict, max_depth as usize, cache_entries);
     let pass_time = start.elapsed().as_secs_f64();
-    #[cfg(feature = "certlog")]
     crate::certlog::set_enabled(false);
     println!(
         "Refutation pass: {} nodes, {} guesses searched, {} refuted by capacity alone, states {} guesses_evaluated {}",
@@ -733,13 +713,6 @@ pub fn run_certify_cli(args: &[String]) {
         "Refutation pass detail: prefilter {:.3}s wall; task time summed over threads by node depth: d0 {:.2}s, d1 {:.2}s, d2 {:.2}s, d3+ {:.2}s",
         pass.prefilter_secs, t[0], t[1], t[2], t[3]
     );
-    #[cfg(feature = "certlog")]
-    print_work("Refutation pass work");
-    let (ct, rate) = calibrate_scan_rate(&matrix);
-    println!(
-        "Calibration: solver's parallel k-scan of all guesses on the root set: {:.4}s, {:.3e} response reads/s",
-        ct, rate
-    );
     for f in pass.failures.iter().take(20) {
         println!("REFUTATION FAIL: {f}");
     }
@@ -749,13 +722,6 @@ pub fn run_certify_cli(args: &[String]) {
     }
 
     let Some(cert_out) = cert_out else { return };
-    #[cfg(not(feature = "certlog"))]
-    {
-        let _ = cert_out;
-        eprintln!("certify: --cert needs a build with --features certlog");
-        std::process::exit(2);
-    }
-    #[cfg(feature = "certlog")]
     {
         let facts = crate::certlog::take_all();
         print_facts(&facts);
@@ -763,19 +729,8 @@ pub fn run_certify_cli(args: &[String]) {
     }
 }
 
-#[cfg(feature = "certlog")]
-pub fn print_work(label: &str) {
-    let (kc, kl, nl) = crate::certlog::take_work();
-    println!(
-        "{label}: k-scans {kc} ({kl:.3e} response reads, upper bound), node scans {nl:.3e} response reads",
-        kl = kl as f64,
-        nl = nl as f64
-    );
-}
-
 /// Refutes, with recording on, the guesses an assembly could not refute from
 /// the logged facts: the always-output log's gaps (see `write_certificate`).
-#[cfg(feature = "certlog")]
 fn fill_gaps(matrix: &ResponseMatrix, dict: &Dictionary, failed: &[Gap]) -> (usize, usize) {
     let n = matrix.num_candidates;
     let root: Vec<usize> = (0..n).collect();
@@ -812,7 +767,7 @@ fn fill_gaps(matrix: &ResponseMatrix, dict: &Dictionary, failed: &[Gap]) -> (usi
 
 /// Assembles a certificate from `facts` and writes it to `out`.
 ///
-/// With the `certlog` feature, an assembly that cannot refute some guess from
+/// An assembly that cannot refute some guess from
 /// the facts gets one targeted refutation of exactly that guess (recorded),
 /// and is redone, at most a few rounds. The solve's facts have such gaps where
 /// its search was cut short by the shared global beta: what it returns there is
@@ -825,9 +780,7 @@ pub fn write_certificate(
     max_depth: u32,
     out: &str,
 ) {
-    #[cfg(feature = "certlog")]
     let mut facts = facts;
-    #[cfg(feature = "certlog")]
     {
         let cut = crate::certlog::take_cut();
         println!(
@@ -843,7 +796,6 @@ pub fn write_certificate(
         a
     };
     let a = assemble_timed(&facts);
-    #[cfg(feature = "certlog")]
     let a = {
         let mut a = a;
         let mut round = 1;

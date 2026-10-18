@@ -31,10 +31,6 @@ repository.workspace = true
 license.workspace = true
 
 [features]
-# Logs every lower bound the search proves, so `solve --certify` can write an
-# optimality certificate. Off by default: without it the hooks compile to
-# nothing.
-certlog = ["wordle-solver/certlog"]
 # Records every transposition-table write with the candidate set it is for,
 # so `tests/tt_audit.rs` can check each stored value. Off by default; it slows
 # the search down and is only for testing.
