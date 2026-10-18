@@ -346,7 +346,10 @@ Operationally:
   solver, bound or cache logic:
   `cargo test --release --test published_optima --test full_scale -- --ignored`.
   A disagreement there is a correctness bug in this solver until proven
-  otherwise.
+  otherwise. After any change to the parallel scans, the global beta or what
+  goes into the transposition table, also run the ignored
+  `parallel_consistency.rs`, which repeats a multi-threaded solve that used to
+  go wrong only under some thread timings (issue #14).
 - Extend the golden and regression suite as a normal part of ongoing work, the way
   a senior engineer maintains test coverage on a codebase they own, not just when
   told to.

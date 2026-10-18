@@ -248,6 +248,7 @@ run the real solver on real word lists. The main checks are:
 | `planted_optima.rs` | Lists of up to about 240 answers built so that the optimum is known in advance. |
 | `published_optima.rs` | The published lists in `words/published/` must reach the published optima. |
 | `full_scale.rs` | Rebuilds the full bundled tree and runs the checks above on it. |
+| `parallel_consistency.rs` | Repeated multi-threaded solves of one list must always reach the single-threaded optimum, whatever the thread timing. |
 | `cli.rs` | The binary reads word lists from files and writes and validates a tree. |
 
 `published_optima.rs` and `full_scale.rs` are skipped by default because each
@@ -255,6 +256,13 @@ test solves full-size lists, which takes from seconds to minutes. Run them with:
 
 ```bash
 cargo test --release --test published_optima --test full_scale -- --ignored --nocapture
+```
+
+`parallel_consistency.rs` is skipped by default too, because it solves the
+same list a few hundred times (about a minute and a half). Run it with:
+
+```bash
+cargo test --release --test parallel_consistency -- --ignored --nocapture
 ```
 
 CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release --
