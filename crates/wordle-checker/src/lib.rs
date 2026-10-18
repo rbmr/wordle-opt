@@ -159,60 +159,28 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
         return true;
     }
     let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize].0));
-    let ng = lists.guesses();
-    let mut words = [[0u64; BLOCK]; 4];
-    let mut sparse: Vec<usize> = Vec::new();
-    for start in (0..ng).step_by(BLOCK) {
-        let end = (start + BLOCK).min(ng);
-        let risky: Vec<bool> = (start..end)
-            .map(|g| profile.max_responses(&lists.dict.guesses[g].0) > limit)
-            .collect();
-        let count = risky.iter().filter(|&&r| r).count();
-        if count < BLOCK / 4 {
-            // Few guesses here could exceed the limit: read just those.
-            sparse.extend(
-                (start..end)
-                    .zip(&risky)
-                    .filter(|(_, r)| **r)
-                    .map(|(g, _)| g),
-            );
-            continue;
+    let risky: Vec<usize> = (0..lists.guesses())
+        .filter(|&g| profile.max_responses(&lists.dict.guesses[g].0) > limit)
+        .collect();
+    let mut seen = [[0u64; 4]; 256];
+    for chunk in risky.chunks(256) {
+        let seen = &mut seen[..chunk.len()];
+        seen.fill([0; 4]);
+        for &c in set {
+            let column = lists.column(c as usize);
+            for (s, &g) in seen.iter_mut().zip(chunk) {
+                let r = column[g].0;
+                s[(r >> 6) as usize] |= 1 << (r & 63);
+            }
         }
-        seen_block(set, lists, start, end, &mut words);
-        let over = (0..end - start).any(|j| {
-            risky[j]
-                && words
-                    .iter()
-                    .map(|w| w[j].count_ones() as usize)
-                    .sum::<usize>()
-                    > limit
-        });
-        if over {
+        if seen
+            .iter()
+            .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
+        {
             return false;
         }
     }
-    max_branching(set, lists, &sparse) <= limit
-}
-
-/// Guesses read together by [`seen_block`].
-const BLOCK: usize = 256;
-
-/// Which responses each guess in `start..end` gives on `set`: response `r`
-/// of guess `start + j` sets bit `r % 64` of `words[r / 64][j]`. The loop is
-/// written without branches or indexing by response so that it vectorizes.
-fn seen_block(set: &[u16], lists: &Lists, start: usize, end: usize, words: &mut [[u64; BLOCK]; 4]) {
-    let len = end - start;
-    for w in words.iter_mut() {
-        w[..len].fill(0);
-    }
-    for &c in set {
-        let column = &lists.column(c as usize)[start..end];
-        for (w, word) in words.iter_mut().enumerate() {
-            for (bits, r) in word[..len].iter_mut().zip(column) {
-                *bits |= (((r.0 >> 6) as usize == w) as u64) << (r.0 & 63);
-            }
-        }
-    }
+    true
 }
 
 /// The most distinct responses any of `guesses` gives on `set`.
