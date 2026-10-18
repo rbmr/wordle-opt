@@ -700,6 +700,7 @@ impl<'a> Solver<'a> {
             let (val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, set);
             if is_exact {
                 self.cache.insert_set(hash, set, val, true);
+                cert_record!(1, set, val, true);
                 return val;
             }
             cached_lower_bound = cached_lower_bound.max(val);
@@ -708,6 +709,7 @@ impl<'a> Solver<'a> {
                 || self.current_cost_so_far + cached_lower_bound >= current_global_beta
             {
                 self.cache.insert_set(hash, set, cached_lower_bound, false);
+                cert_record!(2, set, cached_lower_bound, false);
                 return cached_lower_bound;
             }
         }
@@ -716,6 +718,7 @@ impl<'a> Solver<'a> {
         let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         if parent_lb >= beta || self.current_cost_so_far + parent_lb >= current_global_beta {
+            cert_record!(3, set, parent_lb, false);
             return parent_lb;
         }
 
@@ -1247,6 +1250,7 @@ impl<'a> Solver<'a> {
             if !cut_by_global {
                 self.cache.insert_set(hash, set, best_val, true);
             }
+            crate::certlog::record_tagged(10, set, best_val, true, cut_by_global);
             best_val
         } else {
             let mut final_lb = beta.max(local_lb);
@@ -1256,6 +1260,7 @@ impl<'a> Solver<'a> {
             if !cut_by_global {
                 self.cache.insert_set(hash, set, final_lb, false);
             }
+            crate::certlog::record_tagged(11, set, final_lb, false, cut_by_global);
             final_lb
         }
     }
@@ -1379,6 +1384,7 @@ impl<'a> Solver<'a> {
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
                 entry.2 = used_val;
+                cert_record!(4, unsafe { p.get_unchecked(0..p_len) }, used_val, is_exact);
 
                 if is_exact {
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -1651,6 +1657,7 @@ impl<'a> Solver<'a> {
                     num_exact += 1;
                 }
                 self.cache.insert_set(hash, p, used_val, is_exact);
+                cert_record!(5, p, used_val, is_exact);
                 unsafe {
                     *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
                 }
@@ -1698,6 +1705,7 @@ impl<'a> Solver<'a> {
                             (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
                     }
                     self.cache.insert_set(hash, p, lb, false);
+                    cert_record!(6, p, lb, false);
                 } else {
                     let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
                         self.matrix,
@@ -1710,6 +1718,7 @@ impl<'a> Solver<'a> {
                                 (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
                         }
                         self.cache.insert_set(hash, p, lb, false);
+                        cert_record!(7, p, lb, false);
                     } else {
                         let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
                             self.matrix,
@@ -1723,6 +1732,7 @@ impl<'a> Solver<'a> {
                                     (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
                             }
                             self.cache.insert_set(hash, p, lb, false);
+                            cert_record!(8, p, lb, false);
                         } else {
                             unsafe {
                                 *child_max_ks_ptr.add(r_idx) =
@@ -1736,6 +1746,7 @@ impl<'a> Solver<'a> {
                                 *p_lbs_ptr.add(r_idx) = used_val;
                             }
                             self.cache.insert_set(hash, p, used_val, false);
+                            cert_record!(9, p, used_val, false);
                         }
                     }
                 }
@@ -1988,7 +1999,11 @@ mod solver_cache_tests {
     /// table must still find the optimum.
     #[test]
     fn test_global_beta_cut_leaves_no_wrong_cache_entry() {
-        let words = crate::dict::Dictionary::read_words("words/candidates.txt").unwrap();
+        let words = crate::dict::Dictionary::read_words(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../words/candidates.txt"
+        ))
+        .unwrap();
         let dict = crate::dict::Dictionary::from_words(words.clone(), words[..300].to_vec());
         let matrix = crate::matrix::ResponseMatrix::new(&dict);
         let num_u64s = dict.guesses.len().div_ceil(64);

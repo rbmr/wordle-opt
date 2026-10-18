@@ -112,7 +112,11 @@ Builds a policy tree, checks it, and writes it as JSON.
 | `--stats-format <fmt>` | `parquet` (default) or `ndjson`. |
 
 When it finishes, `solve` prints the total cost, the average number of guesses
-and the build time. Its `Max depth` line counts the edges from the root, so the
+and the build time.
+
+With `--certify <path>` (optimal strategy only), `solve` also writes an
+optimality certificate: a proof, checkable without the solver, that no tree
+for the same word lists costs less. See [Optimality certificates](#optimality-certificates). Its `Max depth` line counts the edges from the root, so the
 most guesses any answer needs is that number plus one.
 
 ### `validate`
@@ -131,14 +135,54 @@ answers are still possible at every node and checks that:
 It then prints the total cost. The file contains its own word lists, so no other
 files are needed.
 
+### `check-cert`
+
+```bash
+wordle-opt check-cert tree.json tree.cert
+```
+
+Checks an optimality certificate against a tree. The checker
+(`crates/wordle-checker`) shares only the word-list, response and file-format
+code with the solver, and none of its search. It prints
+`CERTIFICATE VALID: the tree is optimal` and exits with status 0 when every
+claim in the certificate holds, and exits with status 1 otherwise.
+
+### `certify`
+
+```bash
+wordle-opt certify tree.json --cert tree.cert
+```
+
+Writes a certificate for a tree you already have. It re-solves the lists to
+collect the bounds a proof needs, so it takes about as long as `solve`.
+
 ### `verify`
 
 ```bash
 wordle-opt verify
 ```
 
-Compares the solver with a slow, simple reference solver (`src/naive.rs`) on
+Compares the solver with a slow, simple reference solver (`crates/wordle-solver/src/naive.rs`) on
 random small subsets of the bundled lists.
+
+## Optimality certificates
+
+`solve` builds the cheapest tree for your lists, but you do not have to take
+that on trust. `solve --certify tree.cert` (or `certify` on an existing tree)
+writes a certificate: a list of claims of the form "every strategy for this
+set of answers costs at least `b`", each justified by a simple rule, ending
+with "every strategy for all the answers costs at least the tree's cost".
+`check-cert` verifies each claim by recomputing it from the word lists, for
+every allowed guess. If all claims hold, the tree is optimal.
+
+```bash
+wordle-opt solve --output tree.json --certify tree.cert
+wordle-opt check-cert tree.json tree.cert
+```
+
+On the bundled lists the certificate is about 9.5 MB, writing it adds about
+75 seconds to the solve on a 16-core machine, and checking it takes about
+45 seconds. On smaller lists both are fast.
 
 ## Tree format
 
@@ -207,7 +251,7 @@ The cost of a strategy is the total number of guesses it uses over all
 answers. For a set of possible answers `S`, the best cost is the minimum over
 all guesses `g` of `|S|` plus the best costs of the groups that `g` splits `S`
 into. The solver evaluates this with a depth-first branch-and-bound search
-(`src/solver.rs`):
+(`crates/wordle-solver/src/solver.rs`):
 
 - **Upper bound first.** A quick greedy strategy gives an initial cost to
   beat, so most guesses can be discarded early.
@@ -218,7 +262,7 @@ into. The solver evaluates this with a depth-first branch-and-bound search
   the same groups have the same cost, so only one of them is searched.
 - **Transposition table.** Results for answer sets that have already been
   solved are stored in a shared table, so a set reached by different paths is
-  solved only once (`src/cache.rs`).
+  solved only once (`crates/wordle-solver/src/cache.rs`).
 - **Parallel search.** The first guesses are evaluated in parallel on all
   cores with `rayon`. The threads share the best cost found so far, so each
   thread can skip guesses that another thread has already beaten.
@@ -226,12 +270,21 @@ into. The solver evaluates this with a depth-first branch-and-bound search
 [`ARCHITECTURE.md`](ARCHITECTURE.md) describes each of these in more detail,
 along with how solve time grows with the number of answers.
 
+The code is split into crates:
+
+| crate | what it holds |
+|---|---|
+| `crates/wordle-common` | Words and their responses, word lists, the response table and the tree file format, shared by the other two. |
+| `crates/wordle-solver` | The solver, the strategies and the tree builder. |
+| `crates/wordle-checker` | The optimality-certificate checker. It depends only on `wordle-common`, so it cannot use the solver's search. |
+| the root (`src/`) | The `wordle-opt` command line. |
+
 ## Testing
 
 `cargo test --release` runs the test suite. Use `--release`, because the tests
 run the real solver on real word lists. The main checks are:
 
-- **Golden tests** in `src/solver.rs` fix the optimal cost for several subsets
+- **Golden tests** in `crates/wordle-solver/src/solver.rs` fix the optimal cost for several subsets
   of the bundled lists. A change that alters one of these numbers is a bug
   until shown otherwise.
 - **Tests in `tests/`**, one file per kind of check. They share helpers in
@@ -241,7 +294,7 @@ run the real solver on real word lists. The main checks are:
 
 | file | what it checks |
 |---|---|
-| `brute_force.rs` | Small word lists: the solver, `src/naive.rs` and the brute-force solver in `tests/common/` must find the same optimum. |
+| `brute_force.rs` | Small word lists: the solver, `crates/wordle-solver/src/naive.rs` and the brute-force solver in `tests/common/` must find the same optimum. |
 | `subtrees.rs` | Every part of an optimal tree must itself be optimal. Small parts of the full bundled tree and of other solved lists are checked by brute force, larger parts by solving them again from scratch. |
 | `alternative_guesses.rs` | At every step of the tree, no other guess may lead to a lower total cost. |
 | `metamorphic.rs` | Renaming letters, reordering letter positions or adding unused guesses must not change the optimum. Adding guesses must not raise it, and removing an answer must lower it. |
@@ -250,6 +303,8 @@ run the real solver on real word lists. The main checks are:
 | `full_scale.rs` | Rebuilds the full bundled tree and runs the checks above on it. |
 | `parallel_consistency.rs` | Repeated multi-threaded solves of one list must always reach the single-threaded optimum, whatever the thread timing. |
 | `tt_audit.rs` | During repeated multi-threaded solves, every value written to the transposition table must hold for its set, checked against a solve of that set alone. Needs the `tt-audit` feature. |
+| `shared_components.rs` | The response table, `Response::compute` and the tree format, which the solver and the checker share, against independent code: every pair of words over small alphabets, random words, and trees round-tripped through JSON. |
+| `certificate.rs` | The certificate checker accepts certificates built from brute force and rejects false or malformed ones, and certificates the solver writes must check. |
 | `cli.rs` | The binary reads word lists from files and writes and validates a tree. |
 
 `published_optima.rs` and `full_scale.rs` are skipped by default because each
@@ -276,5 +331,5 @@ cargo test --release --features tt-audit --test tt_audit -- --ignored --nocaptur
 ```
 
 CI (`.github/workflows/rust.yml`) runs the tests, `cargo clippy --release --
--D warnings`, `cargo fmt -- --check`, and the viewer's tests
+-D warnings`, `cargo fmt --all -- --check`, and the viewer's tests
 (`node site/policy-core.test.js`).

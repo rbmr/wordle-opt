@@ -1,0 +1,13 @@
+[package]
+name = "wordle-checker"
+description = "Independent checker for wordle-opt optimality certificates."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+wordle-common.workspace = true
+rayon.workspace = true
+serde_json.workspace = true

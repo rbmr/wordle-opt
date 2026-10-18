@@ -1,14 +1,15 @@
 #![allow(clippy::needless_range_loop)]
+//! The `wordle-opt` command line, and one place to reach the crates it is
+//! built from: `wordle_common` (words, responses, the tree format),
+//! `wordle_solver` (the solver) and `wordle_checker` (the certificate checker).
 
-pub mod core;
-pub mod dict;
-pub mod heuristic;
-pub mod matrix;
-pub mod naive;
-pub mod policy;
 pub mod policy_stats;
-pub mod solver;
-pub mod verify;
+
+pub use wordle_checker as certcheck;
+pub use wordle_common::{certfile, core, dict, matrix, tree};
+pub use wordle_solver::{
+    cache, cert, certlog, heuristic, naive, parallel_depth, policy, solver, verify,
+};
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
@@ -413,6 +414,18 @@ fn run_solve_cli(args: &[String]) {
         observer: Some(std::sync::Arc::clone(&observer)),
         ..Default::default()
     };
+    // Log every bound the solve proves, then assemble a certificate from the
+    // log once the tree is built.
+    let certify = flags.get("certify").map(str::to_string);
+    if certify.is_some() {
+        if strategy != Strategy::Optimal {
+            eprintln!(
+                "solve: --certify needs --strategy optimal (a heuristic tree is not optimal)"
+            );
+            std::process::exit(2);
+        }
+        crate::certlog::set_enabled(true);
+    }
     let cpu_start = process_cpu_seconds();
     let start = Instant::now();
     let (progress_thread, progress_samples) =
@@ -463,6 +476,13 @@ fn run_solve_cli(args: &[String]) {
         "Dictionary hash: {}",
         crate::policy::hash_hex(tree.dictionary_hash)
     );
+    if let Some(cert_out) = &certify {
+        crate::certlog::set_enabled(false);
+        let facts = crate::certlog::take_all();
+        crate::cert::print_facts(&facts);
+        let nodes = crate::cert::tree_nodes(&tree, &matrix);
+        crate::cert::write_certificate(&nodes, &matrix, &dict, facts.bound, u32::MAX, cert_out);
+    }
 
     // Serialize (readable JSON only).
     let serialized = match tree.to_readable(&dict) {
@@ -610,10 +630,14 @@ fn print_cli_usage() {
 USAGE:\n    \
 wordle-opt solve --output <path> [--strategy <optimal|min-remaining|max-freq>] [OPTIONS]\n    \
 wordle-opt validate <tree.json>\n    \
+wordle-opt certify <tree.json> --cert <certificate>\n    \
+wordle-opt check-cert <tree.json> <certificate>\n    \
 wordle-opt verify\n\n\
 SUBCOMMANDS:\n    \
 solve       Generate a decision-policy tree and write it as readable JSON\n    \
 validate    Validate a policy tree against the edge-iff-possible invariant\n    \
+certify     Write an optimality certificate for an existing tree (re-solves it)\n    \
+check-cert  Check an optimality certificate against a tree, independently of the solver\n    \
 verify      Run differential fuzzing against naive solver reference\n\n\
 Use 'wordle-opt solve --help' for options on solving word lists."
     );
@@ -635,6 +659,7 @@ OPTIONS:\n    \
 --stats <path>                  Export build progress series (Parquet or NDJSON)\n    \
 --stats-format <fmt>            Progress series format: parquet | ndjson [default: parquet]\n    \
 --no-progress                   Silence periodic stderr progress lines\n    \
+--certify <path>                Also write an optimality certificate (optimal strategy only)\n    \
 -h, --help                      Show this help message"
     );
 }
@@ -656,6 +681,8 @@ pub fn run_cli() {
     match args.get(1).map(String::as_str) {
         Some("solve") => run_solve_cli(&args[2..]),
         Some("validate") => run_validate_cli(&args[2..]),
+        Some("certify") => cert::run_certify_cli(&args[2..]),
+        Some("check-cert") => certcheck::run_cli(&args[2..]),
         Some("verify") => {
             let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
             let matrix = ResponseMatrix::new(&dict);
@@ -675,8 +702,6 @@ pub fn run_cli() {
         }
     }
 }
-pub mod cache;
-pub mod parallel_depth;
 
 #[cfg(test)]
 mod tests {

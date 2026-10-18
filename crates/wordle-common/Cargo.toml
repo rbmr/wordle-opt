@@ -1,0 +1,17 @@
+[package]
+name = "wordle-common"
+description = "Word lists, Wordle responses and the policy tree format, shared by the wordle-opt solver and checker."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+fastrand.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3.8.0"
