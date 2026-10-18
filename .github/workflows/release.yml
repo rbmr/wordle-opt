@@ -63,6 +63,10 @@ jobs:
       # Replaces the repository's `target-cpu=native`, which would tie the
       # binary to the build machine's CPU.
       RUSTFLAGS: ${{ matrix.rustflags }}
+      # The release profile keeps debug info for profiling. On Linux it would
+      # sit inside the binary (about 26 of 29 MB), while macOS and Windows keep
+      # it in separate files; strip it so every download is about the same size.
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
       WORDLE_OPT_BUILD_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
