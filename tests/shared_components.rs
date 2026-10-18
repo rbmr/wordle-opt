@@ -1,5 +1,5 @@
 //! The solver and the certificate checker share the word lists, the response
-//! table and the tree format (`wordle_common`). A bug there would reach both,
+//! table and the tree format (`core`, `dict`, `matrix` and `tree`). A bug there would reach both,
 //! so this file checks each against code written independently of it, in
 //! `tests/common/`.
 

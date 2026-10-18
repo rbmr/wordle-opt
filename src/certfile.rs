@@ -4,7 +4,7 @@
 //! A certificate is a list of claims `LB(S) >= b` about candidate sets `S`.
 //! Each claim names its set as the root (every candidate) or as one bucket of
 //! an earlier claim's set (`parent`, `guess`, `response`), and cites the rule
-//! that justifies it (see `wordle_checker` for what each rule requires).
+//! that justifies it (see `crate::certcheck` for what each rule requires).
 //!
 //! Layout, little-endian:
 //!

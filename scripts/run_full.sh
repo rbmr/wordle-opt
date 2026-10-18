@@ -12,7 +12,6 @@ set -e
 # Each run keeps its own files on the remote machine, named by the UTC date
 # and the commit:
 #   ~/full-runs/<YYYY-MM-DD>-<commit>.json              the policy tree
-#   ~/full-runs/<YYYY-MM-DD>-<commit>-progress.parquet  the progress series
 #   ~/full-runs/<YYYY-MM-DD>-<commit>.log               the output, with the summary
 cd "$(dirname "$0")/.."
 HOST="${WORDLE_OPT_COMPUTE_HOST:?set WORDLE_OPT_COMPUTE_HOST to the remote machine, for example user@host}"
@@ -53,6 +52,6 @@ echo "Starting the full solve on $HOST in the background (time limit ${TIMEOUT_S
 echo "Run: $STAMP (files in ~/$RUN_DIR/ on $HOST)"
 # The binary is started directly rather than through `cargo run`, so the saved
 # PID is the solver's own and check_full.sh can tell whether it is still alive.
-ssh "$HOST" "mkdir -p \$HOME/$RUN_DIR; cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT nohup timeout ${TIMEOUT_SECS} ./target/release/wordle-opt solve --strategy optimal --output \$HOME/$RUN_DIR/$STAMP.json --stats \$HOME/$RUN_DIR/$STAMP-progress.parquet --cache-entries $CACHE_ENTRIES > \$HOME/$RUN_DIR/$STAMP.log 2>&1 < /dev/null & echo \$! > \$HOME/$PIDFILE; echo $STAMP > \$HOME/$STAMPFILE"
+ssh "$HOST" "mkdir -p \$HOME/$RUN_DIR; cd wordle-opt && WORDLE_OPT_COMMIT=$COMMIT nohup timeout ${TIMEOUT_SECS} ./target/release/wordle-opt solve --strategy optimal --output \$HOME/$RUN_DIR/$STAMP.json --cache-entries $CACHE_ENTRIES > \$HOME/$RUN_DIR/$STAMP.log 2>&1 < /dev/null & echo \$! > \$HOME/$PIDFILE; echo $STAMP > \$HOME/$STAMPFILE"
 
 echo "Started. Check on it with: scripts/check_full.sh"

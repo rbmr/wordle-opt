@@ -1,10 +1,10 @@
 //! Independent checker for optimality certificates.
 //!
 //! A certificate is a list of claims `LB(S) >= b` about candidate sets `S`
-//! (format: `wordle_common::certfile`). This crate checks one against a
+//! (format: `crate::certfile`). This module checks one against a
 //! readable policy tree. It shares with the solver only what both must agree
-//! on - the word lists, the response table and the tree format, all in
-//! `wordle_common` - and depends on nothing else from it: no search, no
+//! on - the word lists, the response table and the file formats - and uses
+//! nothing else from it (see the note in `lib.rs`): no search, no
 //! transposition table, no pruning shortcuts. If every claim checks and the
 //! root claim bounds the whole candidate list by the tree's cost, the tree is
 //! optimal.
@@ -17,7 +17,7 @@
 //! * **base**: `|S| = 1` costs 1 and `|S| = 2` costs 3.
 //! * **capacity**: `b <= L3(|S|, k)`, where the checker computes `k`, the most
 //!   distinct responses any allowed guess gives on `S`. See
-//!   `wordle_common::certfile::l3`.
+//!   `crate::certfile::l3`.
 //! * **expansion**: for *every* allowed guess `g` (the checker enumerates the
 //!   whole list itself) that splits `S`, `|S| + sum over non-win buckets B of
 //!   LB(B) >= b`, where `LB(B)` is the largest claim on exactly `B`, or the
@@ -30,17 +30,15 @@
 //! Soundness is induction on `|S|`: the buckets an expansion uses are strict
 //! subsets, so every claim it relies on is about a smaller set.
 
+use crate::certfile::{self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef, l3};
+use crate::core::Response;
+use crate::dict::Dictionary;
+use crate::matrix::ResponseMatrix;
+use crate::profile::SetProfile;
+use crate::tree::ReadableTreeFile;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
-use wordle_common::certfile::{
-    self, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef, l3,
-};
-use wordle_common::core::Response;
-use wordle_common::dict::Dictionary;
-use wordle_common::matrix::ResponseMatrix;
-use wordle_common::profile::SetProfile;
-use wordle_common::tree::ReadableTreeFile;
 
 /// The all-green response.
 const WIN: u8 = Response::WIN.0;
@@ -440,19 +438,19 @@ pub fn check(tree_json: &str, cert: &[u8]) -> Result<Report, String> {
     Ok(report)
 }
 
-/// `wordle-opt check-cert <tree.json> <cert.bin>`
+/// `wordle-opt check <tree.json> <cert.bin>`
 pub fn run_cli(args: &[String]) {
     let (Some(tree_path), Some(cert_path)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: wordle-opt check-cert <tree.json> <certificate>");
+        eprintln!("usage: wordle-opt check <tree.json> <certificate>");
         std::process::exit(2);
     };
     let start = std::time::Instant::now();
     let tree = std::fs::read_to_string(tree_path).unwrap_or_else(|e| {
-        eprintln!("check-cert: cannot read {tree_path}: {e}");
+        eprintln!("check: cannot read {tree_path}: {e}");
         std::process::exit(1);
     });
     let cert = std::fs::read(cert_path).unwrap_or_else(|e| {
-        eprintln!("check-cert: cannot read {cert_path}: {e}");
+        eprintln!("check: cannot read {cert_path}: {e}");
         std::process::exit(1);
     });
     match check(&tree, &cert) {
@@ -494,7 +492,7 @@ pub fn run_cli(args: &[String]) {
             }
         }
         Err(e) => {
-            eprintln!("check-cert: {e}");
+            eprintln!("check: {e}");
             std::process::exit(1);
         }
     }
@@ -503,7 +501,7 @@ pub fn run_cli(args: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wordle_common::core::Word;
+    use crate::core::Word;
 
     fn lists(n_guesses: usize, n_candidates: usize) -> Lists {
         let all = Dictionary::load_default();

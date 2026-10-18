@@ -5,7 +5,7 @@ an exhaustive optimal search over the Wordle candidate set tractable, and
 where to look in the code for each one. All of these preserve exactness:
 the solver always returns the true optimal cost, never an approximation.
 
-## 1. Transposition Table (`crates/wordle-solver/src/cache.rs::GlobalCache`)
+## 1. Transposition Table (`src/cache.rs::GlobalCache`)
 
 A subset of candidates can be reached via multiple distinct guess
 sequences; the transposition table memoizes results so an already-solved
@@ -26,9 +26,9 @@ writer's update can occasionally be lost. This does not affect correctness
 are lost, since a lost entry just costs a redundant recompute, not a wrong
 answer - so the code accepts the race rather than paying for a
 compare_exchange retry loop under contention. See the comment on `insert()`
-in `crates/wordle-solver/src/cache.rs`.
+in `src/cache.rs`.
 
-## 2. Capacity Bounds (`crates/wordle-solver/src/heuristic.rs::capacity_bound`)
+## 2. Capacity Bounds (`src/heuristic.rs::capacity_bound`)
 
 Rather than a single global bound, the solver computes a per-subtree lower
 bound on the total cost of solving `n` remaining candidates when no guess
@@ -36,19 +36,19 @@ has more than `k` responses on them. A guess that is one of the candidates
 spends one response on the win and has at most `k - 1` subtrees; any other
 guess solves nothing at its own depth but can have `k`. Counting how many
 nodes, and so how many solved candidates, each depth can hold gives the
-bound (see `forest_bound` in `crates/wordle-solver/src/heuristic.rs` for the argument).
+bound (see `forest_bound` in `src/heuristic.rs` for the argument).
 
 Counting only trees made of candidate guesses is not enough: from
 `n = k^2 - k + 3` on, a first guess outside the set can be cheaper, because
 it gives up one candidate at depth 1 for a whole extra subtree at depth 2.
 The bound accounts for both kinds of guess, and equals the simpler
 all-candidates count wherever that count is still a valid bound. The tests
-in `crates/wordle-solver/src/heuristic.rs` check it against exact minima computed by brute force.
+in `src/heuristic.rs` check it against exact minima computed by brute force.
 
 A guess whose lower bound already exceeds the current best cannot possibly
 improve on it and is discarded before its subtree is ever expanded.
 
-## 3. Initial Upper Bound (`crates/wordle-solver/src/solver.rs::greedy_solve`)
+## 3. Initial Upper Bound (`src/solver.rs::greedy_solve`)
 
 Alpha-beta pruning is only as effective as its initial bound is tight. A
 fast, single-threaded greedy pre-pass (always picking the guess that
@@ -56,7 +56,7 @@ minimizes expected remaining candidates) runs first to produce a decent
 upper bound before the parallel exhaustive search begins, so early cutoffs
 in the main search have something real to prune against from the start.
 
-## 3a. Root Pre-Filter and Sorting (`crates/wordle-solver/src/solver.rs::solve`)
+## 3a. Root Pre-Filter and Sorting (`src/solver.rs::solve`)
 
 After the first root guess is evaluated exactly (tightening beta), the
 remaining root candidates are filtered by their depth-1 capacity-bound
@@ -70,7 +70,7 @@ The surviving root candidates are then sorted by their lower bound and
 expected-remaining score, so the most promising guesses are dispatched to
 `rayon` first and tighten the shared `beta` earlier.
 
-## 4. Move Ordering (`crates/wordle-solver/src/heuristic.rs::sort_guesses_by_expected_remaining`)
+## 4. Move Ordering (`src/heuristic.rs::sort_guesses_by_expected_remaining`)
 
 Guesses are evaluated in ascending order of their expected-remaining-
 candidates score (sum of squared bucket sizes over the guess's response
@@ -83,7 +83,7 @@ Guesses that partition the current candidate set identically to one
 already tried can't produce a different search outcome and are skipped.
 Each guess's partition is summarized as a projection over the active
 candidate set's letter inventory; guesses producing a projection already
-seen at this node are skipped. See `min_state_val` in `crates/wordle-solver/src/solver.rs`.
+seen at this node are skipped. See `min_state_val` in `src/solver.rs`.
 
 ## 6. Parallelism (`rayon`)
 
@@ -132,12 +132,12 @@ lookups sound (never reusing a bound that doesn't apply to a tighter
 current constraint) while still avoiding a full re-expansion when it does
 apply.
 
-## 10. Optimality Certificates (`crates/wordle-solver/src/cert.rs`, `crates/wordle-checker`)
+## 10. Optimality Certificates (`src/cert.rs`, `src/certcheck.rs`)
 
 `solve --certify` writes a proof that no tree for the same lists costs less
-than the one it built, which `check-cert` verifies without the solver.
+than the one it built, which `check` verifies without the solver.
 
-**Format** (`crates/wordle-common/src/certfile.rs`). A list of claims
+**Format** (`src/certfile.rs`). A list of claims
 `LB(S) >= b`. Each names its set as every candidate, or as the bucket of an
 earlier claim's set under one guess and response, and cites one rule:
 *base* (`|S| <= 2`), *capacity* (`b <= L3(|S|, k)`, where `k` is the most
@@ -158,11 +158,12 @@ otherwise expands the claim, requesting claims on buckets only where the
 default bound is too low. A guess the logged facts cannot refute gets one
 targeted search, and the assembly is redone.
 
-**Checking** (`crates/wordle-checker`). The checker depends only on
-`wordle-common`, so it shares the word lists, the response table and the file
-formats with the solver, and none of its search. It recomputes every set from
+**Checking** (`src/certcheck.rs`). The checker uses only the modules the
+solver and checker must agree on (see the note in `src/lib.rs`), so it shares
+the word lists, the response table and the file formats with the solver, and
+none of its search. It recomputes every set from
 its definition and every `k` and bucket from the response table. Two filters
-keep it fast without trusting anything: `wordle_common::profile` bounds how
+keep it fast without trusting anything: `profile` bounds how
 many responses a guess can give on a set from which letters occur where, so
 guesses that cannot exceed a capacity limit are not read, and an expansion
 skips guesses whose smallest possible default sum already reaches the claim,
@@ -194,7 +195,7 @@ Expect a jump at each depth the search has to cross.
 ## Verifying claims in this document
 
 Every algorithmic claim here should be checkable against the code it cites and
-against `cargo test --release`, whose golden tests in `crates/wordle-solver/src/solver.rs` fix the
+against `cargo test --release`, whose golden tests in `src/solver.rs` fix the
 exact optimal cost for several inputs. If a change makes a section here
 inaccurate, update the section.
 
@@ -213,7 +214,7 @@ Furthermore, the solver splits evaluation into **Phase 1** (candidate guesses) a
 - **Bitwise Phase Classification**: To rapidly separate Phase 1 and Phase 2 guesses inside the hot loop without branching, a thread-local `is_in_set` bitset with one bit per guess in the dictionary. By taking the bitwise AND of the `active_guesses_slice` bitset with `is_in_set[block_idx]` and `!is_in_set[block_idx]`, guesses are perfectly partitioned into `phase1_guesses` and `phase2_guesses` using only bitwise operations and `trailing_zeros()`, completely eliminating the per-guess `if is_in_set[g]` conditional branch.
 
 
-## 8. Depth-2 Parallel Alpha-Beta (`crates/wordle-solver/src/parallel_depth.rs`)
+## 8. Depth-2 Parallel Alpha-Beta (`src/parallel_depth.rs`)
 
 A few root guesses can take much longer to evaluate than the rest, which leaves cores idle at the end of a parallel root scan. To reduce this, the solver also parallelizes at depth 2 with `rayon`: `parallel_depth.rs` distributes the subtrees below the root across cores, sharing one global beta, so a single slow subtree does not hold up the whole solve.
 

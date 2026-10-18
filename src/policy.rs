@@ -1,7 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 //! Building policy trees: the strategies and the builder that captures one
 //! into a [`PolicyTree`]. The tree format and its validation are in
-//! `wordle_common::tree`, re-exported here.
+//! `crate::tree`, re-exported here.
 
 use crate::cache::GlobalCache;
 use crate::dict::Dictionary;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-pub use wordle_common::tree::*;
+pub use crate::tree::*;
 
 // ---------------------------------------------------------------------------
 // Strategies
@@ -799,19 +799,9 @@ pub struct LiveTreeStats {
 /// Options controlling a tree build.
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
-    /// Collect a cheap periodic progress time series (see [`ProgressSample`])
-    /// for the optional stats export. Off by default. Samples are taken at most
-    /// once per `sample_interval`, and only every `sample_every_nodes` nodes, so
-    /// enabling this cannot meaningfully slow a build down.
-    pub collect_samples: bool,
     /// Print periodic progress to stderr.
     pub progress: bool,
     pub progress_interval: Duration,
-    /// Minimum wall-clock gap between two [`ProgressSample`]s.
-    pub sample_interval: Duration,
-    /// Only consult the clock every this many nodes, so sampling adds no
-    /// per-node `Instant::now()` cost on the hot path.
-    pub sample_every_nodes: u64,
     /// Transposition-table size (entries; must be a power of two).
     pub cache_entries: usize,
     /// Optional caller-owned observer, updated in place while the build runs.
@@ -821,35 +811,12 @@ pub struct BuildOptions {
 impl Default for BuildOptions {
     fn default() -> Self {
         Self {
-            collect_samples: false,
             progress: true,
             progress_interval: Duration::from_secs(2),
-            sample_interval: Duration::from_secs(1),
-            sample_every_nodes: 8192,
             cache_entries: 1 << 22,
             observer: None,
         }
     }
-}
-
-/// One cheap periodic sample of build progress. This - not a per-node log - is
-/// what the optional Parquet/NDJSON export contains: a small time series
-/// suitable for plotting nodes/sec, frontier size, cache behaviour, etc.
-#[derive(Debug, Clone)]
-pub struct ProgressSample {
-    pub elapsed_s: f64,
-    pub nodes: u64,
-    pub edges: u64,
-    pub frontier: u64,
-    pub depth: u32,
-    pub leaves: u64,
-    pub pick_ms_total: f64,
-    pub states_evaluated: u64,
-    pub guesses_evaluated: u64,
-    pub cache_hits: u64,
-    pub cache_misses: u64,
-    pub pruned_by_bounds: u64,
-    pub pruned_by_equivalence: u64,
 }
 
 /// Final totals for a build.
@@ -875,9 +842,8 @@ pub struct BuildSummary {
     pub pruned_by_equivalence: u64,
 }
 
-/// Result of a build: the tree plus (if requested) a cheap progress time series.
+/// Result of a build.
 pub struct BuildStats {
-    pub samples: Vec<ProgressSample>,
     pub summary: BuildSummary,
 }
 
@@ -968,7 +934,6 @@ fn build_into(
     let metrics = &observer.metrics;
     let start = Instant::now();
     let mut stats = BuildStats {
-        samples: Vec::new(),
         summary: BuildSummary {
             nodes: 0,
             edges: 0,
@@ -986,8 +951,6 @@ fn build_into(
         },
     };
     let mut last_report = Instant::now();
-    let mut last_sample = Instant::now();
-    let mut nodes_since_sample = 0u64;
 
     let root = tree.nodes.len() as u32;
     tree.nodes.push(PolicyNode {
@@ -1128,34 +1091,6 @@ fn build_into(
                 stats.summary.pick_ms_total / 1000.0,
             );
         }
-
-        // Cheap periodic sampling: the clock is consulted at most once per
-        // `sample_every_nodes` nodes, so this cannot affect the hot path.
-        if opts.collect_samples {
-            nodes_since_sample += 1;
-            if nodes_since_sample >= opts.sample_every_nodes
-                && last_sample.elapsed() >= opts.sample_interval
-            {
-                nodes_since_sample = 0;
-                last_sample = Instant::now();
-                stats.samples.push(ProgressSample {
-                    elapsed_s: start.elapsed().as_secs_f64(),
-                    nodes: tree.nodes.len() as u64,
-                    edges: pending_edges.len() as u64,
-                    frontier: stack.len() as u64,
-                    depth: depth as u32,
-                    leaves: stats.summary.leaves,
-                    pick_ms_total: stats.summary.pick_ms_total,
-                    states_evaluated: metrics.states_evaluated.load(Ordering::Relaxed) as u64,
-                    guesses_evaluated: metrics.guesses_evaluated.load(Ordering::Relaxed) as u64,
-                    cache_hits: metrics.cache_hits.load(Ordering::Relaxed) as u64,
-                    cache_misses: metrics.cache_misses.load(Ordering::Relaxed) as u64,
-                    pruned_by_bounds: metrics.pruned_by_bounds.load(Ordering::Relaxed) as u64,
-                    pruned_by_equivalence: metrics.pruned_by_equivalence.load(Ordering::Relaxed)
-                        as u64,
-                });
-            }
-        }
     }
 
     // Canonical edge layout: contiguous per node, ascending node id then
@@ -1196,26 +1131,6 @@ fn build_into(
     m.pruned_by_bounds = metrics.pruned_by_bounds.load(Ordering::Relaxed) as u64;
     m.pruned_by_equivalence = metrics.pruned_by_equivalence.load(Ordering::Relaxed) as u64;
 
-    // Always record a final sample so even a short build yields a usable
-    // series that ends at the completed state.
-    if opts.collect_samples {
-        let summary = &stats.summary;
-        stats.samples.push(ProgressSample {
-            elapsed_s: summary.total_ms / 1000.0,
-            nodes: summary.nodes,
-            edges: summary.edges,
-            frontier: 0,
-            depth: summary.max_depth as u32,
-            leaves: summary.leaves,
-            pick_ms_total: summary.pick_ms_total,
-            states_evaluated: summary.states_evaluated,
-            guesses_evaluated: summary.guesses_evaluated,
-            cache_hits: summary.cache_hits,
-            cache_misses: 0,
-            pruned_by_bounds: summary.pruned_by_bounds,
-            pruned_by_equivalence: summary.pruned_by_equivalence,
-        });
-    }
     Ok(stats)
 }
 

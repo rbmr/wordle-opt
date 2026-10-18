@@ -274,7 +274,7 @@ rather than hidden.
 
 A full run solves the whole default candidate set end to end. There is no `full`
 subcommand: `scripts/run_full.sh` runs `solve --strategy optimal` on the bundled
-lists with a 2 GB transposition table and `--stats`. Its output is the
+lists with a 2 GB transposition table. Its output is the
 **policy tree**, not just the optimal cost. Construct the readable JSON only after
 the solve has finished: during the run keep everything in the efficient in-memory
 representation, and build the JSON once the solve completes, so serialization adds
@@ -303,7 +303,7 @@ When to run it is your judgment, not a schedule:
   changes, because the run records the commit it ran as and an uncommitted edit
   would make that record wrong.
 - Every run keeps its own artifacts, stamped with the UTC day and the commit
-  (`~/full-runs/<YYYY-MM-DD>-<commit>.{json,parquet,log}` in compute's home), so no
+  (`~/full-runs/<YYYY-MM-DD>-<commit>.{json,log}` in compute's home), so no
   run can overwrite another's data. **Add a row for each completed run to
   `.agent/run_history.md`.** That repo-side index is what makes the trend visible and what
   survives a compute rebuild.
@@ -327,8 +327,8 @@ Operationally:
 
 ## Correctness practice
 
-- `cargo test --release` (golden regression tests plus the `verify` differential
-  fuzzer against `crates/wordle-solver/src/naive.rs`) must pass before and after every change that
+- `cargo test --release` (golden regression tests plus the brute-force
+  comparisons against `src/naive.rs`) must pass before and after every change that
   touches solver, heuristic or cache logic. A golden test failure means "figure
   out why the new number is correct" or "this change is wrong" - never "update the
   constant to match."
@@ -354,8 +354,8 @@ Operationally:
   answer: with the issue #14 guard removed it flagged 33 of 600 runs, against
   6 of 600 with a wrong answer.
 - Optimality certificates are a further, independent audit: `solve --certify`
-  writes one and `check-cert` verifies it with a checker that shares no search
-  code with the solver (`crates/wordle-checker`). After a change to solver,
+  writes one and `check` verifies it with a checker that shares no search
+  code with the solver (`src/certcheck.rs`). After a change to solver,
   bound or cache logic, certify a full run now and then and check it, as with
   the ignored full-scale tests. A rejected certificate for a tree the solver
   called optimal is a correctness bug until proven otherwise.

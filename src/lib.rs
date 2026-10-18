@@ -1,15 +1,34 @@
 #![allow(clippy::needless_range_loop)]
-//! The `wordle-opt` command line, and one place to reach the crates it is
-//! built from: `wordle_common` (words, responses, the tree format),
-//! `wordle_solver` (the solver) and `wordle_checker` (the certificate checker).
+//! The exact Wordle solver and its command line.
+//!
+//! The certificate checker, `certcheck`, is meant to stay independent of the
+//! search: it should use only what the solver and the checker must agree on
+//! (`core`, `dict`, `matrix`, `tree`, `certfile` and `profile`) and nothing
+//! from `solver`, `heuristic`, `cache`, `parallel_depth`, `policy` or `cert`.
+//! Nothing enforces this; keep it that way when changing either side.
 
-pub mod policy_stats;
+/// Records a lower-bound fact for an optimality certificate (see `certlog`).
+macro_rules! cert_record {
+    ($site:expr, $set:expr, $value:expr, $exact:expr) => {
+        crate::certlog::record($site, $set, $value, $exact);
+    };
+}
 
-pub use wordle_checker as certcheck;
-pub use wordle_common::{certfile, core, dict, matrix, tree};
-pub use wordle_solver::{
-    cache, cert, certlog, heuristic, naive, parallel_depth, policy, solver, verify,
-};
+pub mod cache;
+pub mod cert;
+pub mod certcheck;
+pub mod certfile;
+pub mod certlog;
+pub mod core;
+pub mod dict;
+pub mod heuristic;
+pub mod matrix;
+pub mod naive;
+pub mod parallel_depth;
+pub mod policy;
+pub mod profile;
+pub mod solver;
+pub mod tree;
 
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
@@ -248,32 +267,24 @@ fn apply_memory_bounds() {
     crate::solver::set_equiv_cache_cap(cap);
 }
 
-/// Spawns a thread that reports a build's live counters every `interval`, to
-/// stderr and as [`crate::policy::ProgressSample`]s. The builder only samples
-/// at node boundaries, so without this a long node evaluation (the root scan
-/// can run for hours) produces no output and no time series at all.
+/// Spawns a thread that reports a build's live counters to stderr every
+/// `interval`. The builder only reports at node boundaries, so without this a
+/// long node evaluation (the root scan can run for hours) prints nothing.
 ///
-/// The caller sets `done` when the build returns, joins the thread, and merges
-/// the returned samples into the build's own series with
-/// [`merge_progress_samples`].
+/// The caller sets `done` when the build returns and joins the thread.
 fn spawn_build_progress(
     observer: &std::sync::Arc<crate::policy::BuildObserver>,
     interval: std::time::Duration,
     start: Instant,
     done: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> (
-    std::thread::JoinHandle<()>,
-    std::sync::Arc<std::sync::Mutex<Vec<crate::policy::ProgressSample>>>,
-) {
+) -> std::thread::JoinHandle<()> {
     use std::sync::atomic::Ordering;
 
     let observer = std::sync::Arc::clone(observer);
     let done = std::sync::Arc::clone(done);
-    let samples = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let thread_samples = std::sync::Arc::clone(&samples);
-    let handle = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         // Wake in short ticks so the caller's join returns promptly, but only
-        // record a sample once per `interval`. A short interval shortens the
+        // report once per `interval`. A short interval shortens the
         // tick with it, so the cadence is honored exactly.
         let tick = interval.min(std::time::Duration::from_millis(250));
         // Previous (wall seconds, cpu seconds), for the per-interval average
@@ -291,71 +302,32 @@ fn spawn_build_progress(
             }
             let m = &observer.metrics;
             let t = &observer.tree;
-            let sample = crate::policy::ProgressSample {
-                elapsed_s: start.elapsed().as_secs_f64(),
-                nodes: t.nodes.load(Ordering::Relaxed) as u64,
-                edges: t.edges.load(Ordering::Relaxed) as u64,
-                frontier: t.frontier.load(Ordering::Relaxed) as u64,
-                depth: t.depth.load(Ordering::Relaxed) as u32,
-                leaves: t.leaves.load(Ordering::Relaxed) as u64,
-                // Only the builder's node-boundary samples carry a pick-time
-                // total; it is not tracked live.
-                pick_ms_total: 0.0,
-                states_evaluated: m.states_evaluated.load(Ordering::Relaxed) as u64,
-                guesses_evaluated: m.guesses_evaluated.load(Ordering::Relaxed) as u64,
-                cache_hits: m.cache_hits.load(Ordering::Relaxed) as u64,
-                cache_misses: m.cache_misses.load(Ordering::Relaxed) as u64,
-                pruned_by_bounds: m.pruned_by_bounds.load(Ordering::Relaxed) as u64,
-                pruned_by_equivalence: m.pruned_by_equivalence.load(Ordering::Relaxed) as u64,
-            };
+            let elapsed_s = start.elapsed().as_secs_f64();
             let cpu_now = process_cpu_seconds();
             let busy_cores = match (prev_cpu, cpu_now) {
-                (Some(p), Some(c)) if sample.elapsed_s > prev_wall => {
-                    format!("{:.1}", (c - p) / (sample.elapsed_s - prev_wall))
+                (Some(p), Some(c)) if elapsed_s > prev_wall => {
+                    format!("{:.1}", (c - p) / (elapsed_s - prev_wall))
                 }
                 _ => "?".into(),
             };
-            prev_wall = sample.elapsed_s;
+            prev_wall = elapsed_s;
             prev_cpu = cpu_now;
             eprintln!(
                 "[progress] elapsed={:.0}s nodes={} states={} guesses={} root_guesses={} cache_hits={} bounds_pruned={} busy_cores={} rss_mb={}",
-                sample.elapsed_s,
-                sample.nodes,
-                sample.states_evaluated,
-                sample.guesses_evaluated,
+                elapsed_s,
+                t.nodes.load(Ordering::Relaxed),
+                m.states_evaluated.load(Ordering::Relaxed),
+                m.guesses_evaluated.load(Ordering::Relaxed),
                 m.root_guesses_done.load(Ordering::Relaxed),
-                sample.cache_hits,
-                sample.pruned_by_bounds,
+                m.cache_hits.load(Ordering::Relaxed),
+                m.pruned_by_bounds.load(Ordering::Relaxed),
                 busy_cores,
                 rss_mb()
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "?".into())
             );
-            thread_samples
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(sample);
         }
-    });
-    (handle, samples)
-}
-
-/// Merges a progress thread's samples into a build's own series in time
-/// order, so an exported series covers the whole run rather than only its
-/// node-boundary phase.
-fn merge_progress_samples(
-    stats: &mut crate::policy::BuildStats,
-    extra: &std::sync::Arc<std::sync::Mutex<Vec<crate::policy::ProgressSample>>>,
-) {
-    let mut all = std::mem::take(&mut stats.samples);
-    let extra = extra.lock().unwrap_or_else(|e| e.into_inner());
-    all.extend(extra.iter().cloned());
-    all.sort_by(|a, b| {
-        a.elapsed_s
-            .partial_cmp(&b.elapsed_s)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    stats.samples = all;
+    })
 }
 
 /// `wordle-opt solve` - capture a fully determined policy tree for the chosen
@@ -395,8 +367,6 @@ fn run_solve_cli(args: &[String]) {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1 << 22);
     let progress = !flags.values.contains_key("no-progress");
-    let collect_samples = flags.get("stats").is_some();
-    let stats_format = flags.get_or("stats-format", "parquet");
 
     let (dict, selection) = load_dict_from_flags(&flags, max_candidates);
     let n = dict.candidates.len();
@@ -417,7 +387,6 @@ fn run_solve_cli(args: &[String]) {
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     apply_memory_bounds();
     let opts = BuildOptions {
-        collect_samples,
         progress,
         cache_entries,
         observer: Some(std::sync::Arc::clone(&observer)),
@@ -437,7 +406,7 @@ fn run_solve_cli(args: &[String]) {
     }
     let cpu_start = process_cpu_seconds();
     let start = Instant::now();
-    let (progress_thread, progress_samples) =
+    let progress_thread =
         spawn_build_progress(&observer, std::time::Duration::from_secs(15), start, &done);
     let (tree, stats) =
         match crate::policy::build_policy_tree(&matrix, &dict, strategy, &root, &opts) {
@@ -450,8 +419,6 @@ fn run_solve_cli(args: &[String]) {
     let elapsed = start.elapsed();
     done.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = progress_thread.join();
-    let mut stats = stats;
-    merge_progress_samples(&mut stats, &progress_samples);
 
     // Report the build's own numbers before touching the filesystem: a write
     // failure must not discard the result of a long build.
@@ -523,39 +490,6 @@ fn run_solve_cli(args: &[String]) {
     }
     println!("Wrote: {output} ({} bytes)", serialized.len());
     println!("Validation: OK (edge iff possible at every node)");
-
-    if let Some(stats_path) = flags.get("stats") {
-        let meta = crate::policy_stats::StatsMeta {
-            strategy: strategy.name().to_string(),
-            dictionary_hash: crate::policy::hash_hex(tree.dictionary_hash),
-            commit: git_commit_hash(),
-            num_guesses: dict.guesses.len() as u32,
-            num_candidates: n as u32,
-            root_candidates: n as u32,
-        };
-        let res = match stats_format {
-            "ndjson" | "json" => {
-                crate::policy_stats::write_ndjson(std::path::Path::new(stats_path), &stats, &meta)
-            }
-            "parquet" => {
-                crate::policy_stats::write_parquet(std::path::Path::new(stats_path), &stats, &meta)
-            }
-            other => {
-                eprintln!("solve: --stats-format must be 'parquet' or 'ndjson' (got {other})");
-                std::process::exit(2);
-            }
-        };
-        match res {
-            Ok(()) => println!(
-                "Stats: wrote {} progress sample(s) to {stats_path} ({stats_format})",
-                stats.samples.len()
-            ),
-            Err(e) => {
-                eprintln!("solve: failed to write stats: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
 }
 
 /// Parses `bytes` as a readable policy tree and validates it. The dictionary is
@@ -640,14 +574,12 @@ USAGE:\n    \
 wordle-opt solve --output <path> [--strategy <optimal|min-remaining|max-freq>] [OPTIONS]\n    \
 wordle-opt validate <tree.json>\n    \
 wordle-opt certify <tree.json> --cert <certificate>\n    \
-wordle-opt check-cert <tree.json> <certificate>\n    \
-wordle-opt verify\n\n\
+wordle-opt check <tree.json> <certificate>\n\n\
 SUBCOMMANDS:\n    \
 solve       Generate a decision-policy tree and write it as readable JSON\n    \
 validate    Validate a policy tree against the edge-iff-possible invariant\n    \
 certify     Write an optimality certificate for an existing tree (re-solves it)\n    \
-check-cert  Check an optimality certificate against a tree, independently of the solver\n    \
-verify      Run differential fuzzing against naive solver reference\n\n\
+check       Check an optimality certificate against a tree, independently of the solver\n\n\
 Use 'wordle-opt solve --help' for options on solving word lists."
     );
 }
@@ -665,8 +597,6 @@ OPTIONS:\n    \
 --max-candidates <N>            Solve for the first N candidates only\n    \
 --sample-seed <seed>            Draw a reproducible, representative N-candidate subset with this seed\n    \
 --cache-entries <N>             Transposition table size (power of two) [default: 4194304]\n    \
---stats <path>                  Export build progress series (Parquet or NDJSON)\n    \
---stats-format <fmt>            Progress series format: parquet | ndjson [default: parquet]\n    \
 --no-progress                   Silence periodic stderr progress lines\n    \
 --certify <path>                Also write an optimality certificate (optimal strategy only)\n    \
 -h, --help                      Show this help message"
@@ -691,16 +621,7 @@ pub fn run_cli() {
         Some("solve") => run_solve_cli(&args[2..]),
         Some("validate") => run_validate_cli(&args[2..]),
         Some("certify") => cert::run_certify_cli(&args[2..]),
-        Some("check-cert") => certcheck::run_cli(&args[2..]),
-        Some("verify") => {
-            let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
-            let matrix = ResponseMatrix::new(&dict);
-            let fuzz_ok = verify::run_verification(&dict, &matrix, 50, 4);
-            let stress_ok = verify::run_stress_test(&dict, &matrix);
-            if !fuzz_ok || !stress_ok {
-                std::process::exit(1);
-            }
-        }
+        Some("check") => certcheck::run_cli(&args[2..]),
         Some("--help" | "-h" | "help") | None => {
             print_cli_usage();
         }
@@ -715,48 +636,6 @@ pub fn run_cli() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
-
-    /// The progress thread must record samples while a build is in flight and
-    /// stop promptly once the build is done, so a caller can merge them into
-    /// the build's own series.
-    #[test]
-    fn progress_thread_records_samples_and_stops() {
-        let observer = Arc::new(crate::policy::BuildObserver::default());
-        observer
-            .metrics
-            .states_evaluated
-            .store(1234, Ordering::Relaxed);
-        observer.tree.nodes.store(7, Ordering::Relaxed);
-
-        let done = Arc::new(AtomicBool::new(false));
-        let start = Instant::now();
-        let (handle, samples): (
-            std::thread::JoinHandle<()>,
-            Arc<Mutex<Vec<crate::policy::ProgressSample>>>,
-        ) = spawn_build_progress(&observer, std::time::Duration::from_millis(1), start, &done);
-
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while std::time::Instant::now() < deadline {
-            if !samples.lock().unwrap().is_empty() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        done.store(true, Ordering::Relaxed);
-        handle.join().expect("progress thread must not panic");
-
-        let samples = samples.lock().unwrap_or_else(|e| e.into_inner());
-        assert!(
-            !samples.is_empty(),
-            "expected at least one progress sample while the build ran"
-        );
-        let last = samples.last().unwrap();
-        assert_eq!(last.nodes, 7);
-        assert_eq!(last.states_evaluated, 1234);
-        assert!(last.elapsed_s > 0.0);
-    }
 
     /// Process CPU time is readable here (Linux) and grows when CPU is burned,
     /// so a busy-cores figure derived from it is meaningful.
@@ -806,78 +685,5 @@ mod tests {
             d.contains("full list"),
             "the full list must be described: {d}"
         );
-    }
-
-    /// Samples from the progress thread and the builder must come out in time
-    /// order, whichever source they came from.
-    #[test]
-    fn merged_progress_samples_are_time_ordered() {
-        let mut stats = crate::policy::BuildStats {
-            samples: vec![crate::policy::ProgressSample {
-                elapsed_s: 10.0,
-                nodes: 1,
-                edges: 0,
-                frontier: 0,
-                depth: 0,
-                leaves: 0,
-                pick_ms_total: 0.0,
-                states_evaluated: 0,
-                guesses_evaluated: 0,
-                cache_hits: 0,
-                cache_misses: 0,
-                pruned_by_bounds: 0,
-                pruned_by_equivalence: 0,
-            }],
-            summary: crate::policy::BuildSummary {
-                nodes: 0,
-                edges: 0,
-                leaves: 0,
-                wins: 0,
-                max_depth: 0,
-                total_cost: 0,
-                total_ms: 0.0,
-                pick_ms_total: 0.0,
-                states_evaluated: 0,
-                guesses_evaluated: 0,
-                cache_hits: 0,
-                pruned_by_bounds: 0,
-                pruned_by_equivalence: 0,
-            },
-        };
-        let extra = Arc::new(Mutex::new(vec![
-            crate::policy::ProgressSample {
-                elapsed_s: 20.0,
-                nodes: 2,
-                edges: 1,
-                frontier: 1,
-                depth: 1,
-                leaves: 0,
-                pick_ms_total: 0.0,
-                states_evaluated: 5,
-                guesses_evaluated: 5,
-                cache_hits: 0,
-                cache_misses: 0,
-                pruned_by_bounds: 0,
-                pruned_by_equivalence: 0,
-            },
-            crate::policy::ProgressSample {
-                elapsed_s: 5.0,
-                nodes: 1,
-                edges: 0,
-                frontier: 0,
-                depth: 0,
-                leaves: 0,
-                pick_ms_total: 0.0,
-                states_evaluated: 1,
-                guesses_evaluated: 1,
-                cache_hits: 0,
-                cache_misses: 0,
-                pruned_by_bounds: 0,
-                pruned_by_equivalence: 0,
-            },
-        ]));
-        merge_progress_samples(&mut stats, &extra);
-        let times: Vec<f64> = stats.samples.iter().map(|s| s.elapsed_s).collect();
-        assert_eq!(times, vec![5.0, 10.0, 20.0]);
     }
 }

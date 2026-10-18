@@ -49,8 +49,8 @@ pub fn letter_index<'a>(words: impl IntoIterator<Item = &'a Word>) -> Option<[u8
     Some(index)
 }
 
-pub const DEFAULT_GUESSES: &str = include_str!("../../../words/guesses.txt");
-pub const DEFAULT_CANDIDATES: &str = include_str!("../../../words/candidates.txt");
+pub const DEFAULT_GUESSES: &str = include_str!("../words/guesses.txt");
+pub const DEFAULT_CANDIDATES: &str = include_str!("../words/candidates.txt");
 
 impl Dictionary {
     /// Loads a wordle dictionary from two text files containing words separated by newlines.
