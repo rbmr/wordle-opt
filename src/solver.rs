@@ -603,8 +603,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
         let should_cache_equiv = set.len() >= 10 && set.len() < 40;
         let shard_idx = (set_hash as usize) % 1024;
-        let mut active_bits_scratch =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
+        let mut active_bits_scratch: Option<Vec<u64>> = None;
         let rc_opt = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
             if let Some(cached) = cache.get(&set_hash) {
@@ -627,9 +626,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             slice_ptr = rc.as_slice() as *const _;
             None
         } else {
+            let mut bits =
+                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
             let num_u64s = self.dict.guesses.len().div_ceil(64);
-            active_bits_scratch.clear();
-            active_bits_scratch.resize(num_u64s, 0);
+            bits.clear();
+            bits.resize(num_u64s, 0);
 
             let scratch_ref = self.scratch.as_mut().unwrap();
             let table = &mut scratch_ref.scratch_hash_table[depth];
@@ -639,6 +640,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let num_guesses = self.dict.guesses.len();
 
             let projs = &mut scratch_ref.scratch_projs[depth];
+            let projs_raw_ptr = projs.as_ptr();
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
             let table_size = (((active_count + R as u32) * 2).next_power_of_two() as usize)
@@ -649,6 +651,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
+
+            let mut c_vals = [0usize; 40];
+            let mut z_vals = [0u64; 40];
+            for c_idx in 0..c_len {
+                let c = unsafe { *set_ptr.add(c_idx) };
+                c_vals[c_idx] = c;
+                z_vals[c_idx] = unsafe { *zobrist_ptr.add(c) };
+            }
+
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
@@ -670,9 +681,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let chunk_len = chunk_end - chunk_start;
                 let projs_ptr = projs_chunk.as_mut_ptr();
                 for c_idx in 0..c_len {
-                    let c = unsafe { *set_ptr.add(c_idx) };
+                    let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                    let z = unsafe { *z_vals.get_unchecked(c_idx) };
                     let c_off = c * num_guesses + chunk_start;
-                    let z = unsafe { *zobrist_ptr.add(c) };
                     let c_ptr = unsafe { data_cg_ptr.add(c_off) };
                     for i in 0..chunk_len {
                         let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
@@ -687,8 +698,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut p = 0u64;
                 let m = r as u64 + 1;
                 for c_idx in 0..c_len {
-                    let c = unsafe { *set_ptr.add(c_idx) };
-                    p ^= unsafe { *zobrist_ptr.add(c) }.wrapping_mul(m);
+                    let z = unsafe { *z_vals.get_unchecked(c_idx) };
+                    p ^= z.wrapping_mul(m);
                 }
                 if p == 0 {
                     p = 1;
@@ -711,6 +722,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            let bits_ptr = bits.as_mut_ptr();
             for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
                 if block == 0 {
                     continue;
@@ -722,7 +734,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let g = block_idx * 64 + tz as usize;
                     b &= b - 1;
 
-                    let proj = unsafe { *projs.get_unchecked(g) };
+                    let proj = unsafe { *projs_raw_ptr.add(g) };
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                     loop {
                         let slot = unsafe { *table_ptr.add(idx) };
@@ -741,12 +753,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 unsafe {
-                    *active_bits_scratch.get_unchecked_mut(block_idx) = kept_mask;
+                    *bits_ptr.add(block_idx) = kept_mask;
                 }
             }
 
-            for &idx in added_indices.iter() {
+            let added_len = added_indices.len();
+            let added_ptr = added_indices.as_ptr();
+            for i in 0..added_len {
                 unsafe {
+                    let idx = *added_ptr.add(i);
                     *table_ptr.add(idx) = 0;
                 }
             }
@@ -759,7 +774,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Some(std::sync::Arc::clone(cached))
                 } else {
-                    let rc = std::sync::Arc::new(active_bits_scratch.clone());
+                    let rc = std::sync::Arc::new(bits.clone());
                     self.metrics
                         .equiv_cache_misses
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -786,10 +801,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 self.metrics.pruned_by_equivalence.fetch_add(
                     self.dict.guesses.len()
-                        - active_bits_scratch
-                            .iter()
-                            .map(|b| b.count_ones() as usize)
-                            .sum::<usize>(),
+                        - bits.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
                     std::sync::atomic::Ordering::Relaxed,
                 );
                 None
@@ -798,13 +810,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if let Some(rc_val) = &rc_new {
                 slice_ptr = rc_val.as_slice() as *const _;
             } else {
-                slice_ptr = active_bits_scratch.as_slice() as *const _;
+                slice_ptr = bits.as_slice() as *const _;
             }
+            active_bits_scratch = Some(bits);
             rc_new
         };
 
         let active_guesses_slice = unsafe { &*slice_ptr };
-        self.scratch.as_mut().unwrap().scratch_active_bits[depth] = active_bits_scratch;
+        if let Some(bits) = active_bits_scratch {
+            self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+        }
 
         let mut local_lb = parent_lb.max(cached_lower_bound);
         let counts_ptr = self
@@ -830,10 +845,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let mut valid_phase1_k = 0;
         let mut min_val_found = u32::MAX;
 
+        let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+        let active_guesses_ptr = active_guesses_slice.as_ptr();
         let set_ptr = set.as_ptr();
         for (cand_idx, &cand) in set.iter().enumerate() {
-            let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(cand) };
-            if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
+            let g = unsafe { *cand_to_guess_ptr.add(cand) };
+            if (unsafe { *active_guesses_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
                 continue;
             }
             let mut num_non_empty = 0;
@@ -1111,6 +1128,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 heap_c_ptrs.as_ref().unwrap()
             };
 
+            let c_ptrs_ptr = c_ptrs.as_ptr();
             for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
                 if block == 0 {
                     continue;
@@ -1128,7 +1146,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
 
                     let mut num_non_empty = 0;
-                    for &c_base in c_ptrs {
+                    for c_idx in 0..c_len {
+                        let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                         let r = unsafe { (*c_base.add(g)).to_usize() };
                         unsafe {
                             let cnt_ptr = counts_ptr.add(r);
