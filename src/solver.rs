@@ -258,25 +258,27 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             1 => (1, true),
             2 => (3, true),
             3 => {
-                let c0 = unsafe { *bucket.get_unchecked(0) };
-                let c1 = unsafe { *bucket.get_unchecked(1) };
-                let c2 = unsafe { *bucket.get_unchecked(2) };
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
                 let num_cand = matrix.num_candidates;
                 let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
 
-                let g0 = unsafe { *dict.candidate_to_guess.get_unchecked(c0) };
+                let g0 = unsafe { *cand_to_guess_ptr.add(c0) };
                 let g0_ptr = unsafe { data_ptr.add(g0 * num_cand) };
                 if unsafe { *g0_ptr.add(c1) != *g0_ptr.add(c2) } {
                     return (5, true);
                 }
 
-                let g1 = unsafe { *dict.candidate_to_guess.get_unchecked(c1) };
+                let g1 = unsafe { *cand_to_guess_ptr.add(c1) };
                 let g1_ptr = unsafe { data_ptr.add(g1 * num_cand) };
                 if unsafe { *g1_ptr.add(c0) != *g1_ptr.add(c2) } {
                     return (5, true);
                 }
 
-                let g2 = unsafe { *dict.candidate_to_guess.get_unchecked(c2) };
+                let g2 = unsafe { *cand_to_guess_ptr.add(c2) };
                 let g2_ptr = unsafe { data_ptr.add(g2 * num_cand) };
                 if unsafe { *g2_ptr.add(c0) != *g2_ptr.add(c1) } {
                     return (5, true);
@@ -285,19 +287,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 (6, true)
             }
             4 => {
-                let c0 = unsafe { *bucket.get_unchecked(0) };
-                let c1 = unsafe { *bucket.get_unchecked(1) };
-                let c2 = unsafe { *bucket.get_unchecked(2) };
-                let c3 = unsafe { *bucket.get_unchecked(3) };
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
                 let num_cand = matrix.num_candidates;
                 let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
 
                 const ROT4: [[usize; 3]; 4] = [[1, 2, 3], [2, 3, 0], [3, 0, 1], [0, 1, 2]];
                 let c = [c0, c1, c2, c3];
                 let mut best_inside = u32::MAX;
 
                 for i in 0..4 {
-                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(c[i]) };
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
                     let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
 
                     let [ia, ib, ic] = ROT4[i];
@@ -313,11 +317,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         return (7, true);
                     }
 
-                    if best_inside != 8 {
-                        let coll = (ra == rb) as u32 + (ra == rc) as u32 + (rb == rc) as u32;
-                        if coll == 1 {
-                            best_inside = 8;
-                        }
+                    if best_inside != 8 && (ra != rb || rb != rc) {
+                        best_inside = 8;
                     }
                 }
 
@@ -328,13 +329,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
             5 => {
-                let c0 = unsafe { *bucket.get_unchecked(0) };
-                let c1 = unsafe { *bucket.get_unchecked(1) };
-                let c2 = unsafe { *bucket.get_unchecked(2) };
-                let c3 = unsafe { *bucket.get_unchecked(3) };
-                let c4 = unsafe { *bucket.get_unchecked(4) };
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
                 let num_cand = matrix.num_candidates;
                 let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
 
                 const ROT5: [[usize; 4]; 5] = [
                     [1, 2, 3, 4],
@@ -347,7 +350,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut best_inside = u32::MAX;
 
                 for i in 0..5 {
-                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(c[i]) };
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
                     let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
 
                     let [ia, ib, ic, id] = ROT5[i];
@@ -396,11 +399,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
 
                     let bucket_ptr = bucket.as_ptr();
+                    let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
                     for (ci_idx, &ci) in bucket.iter().enumerate() {
-                        let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
+                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                         let mut seen_mask = init_seen_mask;
+                        let seen_ptr = seen_mask.as_mut_ptr();
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
@@ -410,7 +415,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
-                            let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                            let word = unsafe { &mut *seen_ptr.add(word_idx) };
                             if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions >= max_collisions {
@@ -427,7 +432,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                                 let word_idx = r >> 6;
                                 let bit = 1u64 << (r & 63);
-                                let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                                let word = unsafe { &mut *seen_ptr.add(word_idx) };
                                 if (*word & bit) != 0 {
                                     collisions += 1;
                                     if collisions >= max_collisions {
