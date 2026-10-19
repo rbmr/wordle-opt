@@ -377,9 +377,7 @@ download.
 Two rules:
 
 1. **Every change to `main` goes through a pull request.** GitHub branch
-   protection enforces this, so a direct push or force-push is rejected. Work
-   on a branch cut from the current `main`, push it regularly, and keep a draft
-   pull request open so CI runs on every push.
+   protection enforces this, so a direct push or force-push is rejected.
 2. **Never merge a pull request yourself.** Only the maintainer merges, after
    reviewing it or explicitly saying to go ahead. This is a rule to keep, not
    something the repository enforces.
@@ -387,8 +385,20 @@ Two rules:
 Also: never push tags, never create, edit or delete releases, and never run the
 "Prebuilt binaries" workflow by hand.
 
-Rebase on `main` when it moves. Before marking a PR ready for review, run these
-and report the results in the PR description:
+### One long-lived pull request
+
+Performance work, and generalising beyond five-letter words, all belongs in
+**one** pull request that stays open: keep committing to its branch and pushing
+as you go. Do not open a separate PR for each experiment or micro-optimisation.
+The maintainer reviews that PR when it is ready, and CI runs then; you do not
+need a PR (or a CI run) per push.
+
+Cut a second branch only for work that is genuinely separate from performance
+and generalisation, and say in its PR why it is not part of the main one.
+
+Rebase on `main` when it moves, so the long-lived branch stays reviewable. Before
+marking the PR ready for review, run these and report the results in the PR
+description:
 
 - `cargo test --release`;
 - the ignored tests:
@@ -401,7 +411,9 @@ and report the results in the PR description:
 
 Every performance claim needs timing evidence: interleaved runs against `main`,
 with the seeds recorded in `.agent/run_history.md`, and the command and its
-captured output quoted in the PR.
+captured output quoted in the PR. A difference smaller than the run-to-run
+spread is not a speedup; quote the runs you compared rather than calling it a
+record.
 
 Progress goes to the single open "Agent progress log" issue (#1), not to a new
 issue per update. Review requests are pull requests. (Issue #9 is closed; do not
