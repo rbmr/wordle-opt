@@ -977,7 +977,6 @@ impl<'a> Solver<'a> {
             }
 
             let rc_new = if should_cache_equiv {
-                let rc = std::sync::Arc::new(active_bits_scratch.clone());
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
                 if let Some(cached) = cache_mut.get(&set_hash) {
                     self.metrics
@@ -985,6 +984,7 @@ impl<'a> Solver<'a> {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Some(std::sync::Arc::clone(cached))
                 } else {
+                    let rc = std::sync::Arc::new(active_bits_scratch.clone());
                     self.metrics
                         .equiv_cache_misses
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1368,7 +1368,36 @@ impl<'a> Solver<'a> {
         set: &[usize],
         active_guesses_slice: &[u64],
         guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        if self.matrix.num_responses <= 256 {
+            self.min_guess_val_impl::<4>(
+                set,
+                active_guesses_slice,
+                guess,
+                beta,
+                depth,
+                parent_max_k,
+            )
+        } else {
+            self.min_guess_val_impl::<36>(
+                set,
+                active_guesses_slice,
+                guess,
+                beta,
+                depth,
+                parent_max_k,
+            )
+        }
+    }
 
+    fn min_guess_val_impl<const M: usize>(
+        &mut self,
+        set: &[usize],
+        active_guesses_slice: &[u64],
+        guess: usize,
         beta: u32,
         depth: usize,
         parent_max_k: usize,
@@ -1390,55 +1419,27 @@ impl<'a> Solver<'a> {
             let mut local_counts = [(0u16, 0u8, 0u32); 16];
             let mut c_responses = [0u16; 16];
             let mut num_non_empty = 0;
-            if self.matrix.num_responses <= 256 {
-                let mut seen_mask = [0u64; 4];
-                for (cand_idx, &c) in set.iter().enumerate() {
-                    let r = unsafe { (*g_ptr.add(c)).0 };
-                    unsafe {
-                        *c_responses.get_unchecked_mut(cand_idx) = r;
-                    }
-                    let word_idx = (r >> 6) as usize;
-                    let bit = 1u64 << (r & 63);
-                    let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
-                    if (*word & bit) == 0 {
-                        *word |= bit;
-                        unsafe {
-                            *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
-                        }
-                        num_non_empty += 1;
-                    } else {
-                        for i in 0..num_non_empty {
-                            let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                            if entry.0 == r {
-                                entry.1 += 1;
-                                break;
-                            }
-                        }
-                    }
+            let mut seen_mask = [0u64; M];
+            for (cand_idx, &c) in set.iter().enumerate() {
+                let r = unsafe { (*g_ptr.add(c)).0 };
+                unsafe {
+                    *c_responses.get_unchecked_mut(cand_idx) = r;
                 }
-            } else {
-                let mut seen_mask = [0u64; 36];
-                for (cand_idx, &c) in set.iter().enumerate() {
-                    let r = unsafe { (*g_ptr.add(c)).0 };
+                let word_idx = (r >> 6) as usize;
+                let bit = 1u64 << (r & 63);
+                let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                if (*word & bit) == 0 {
+                    *word |= bit;
                     unsafe {
-                        *c_responses.get_unchecked_mut(cand_idx) = r;
+                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
                     }
-                    let word_idx = (r >> 6) as usize;
-                    let bit = 1u64 << (r & 63);
-                    let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
-                    if (*word & bit) == 0 {
-                        *word |= bit;
-                        unsafe {
-                            *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
-                        }
-                        num_non_empty += 1;
-                    } else {
-                        for i in 0..num_non_empty {
-                            let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                            if entry.0 == r {
-                                entry.1 += 1;
-                                break;
-                            }
+                    num_non_empty += 1;
+                } else {
+                    for i in 0..num_non_empty {
+                        let entry = unsafe { local_counts.get_unchecked_mut(i) };
+                        if entry.0 == r {
+                            entry.1 += 1;
+                            break;
                         }
                     }
                 }
@@ -1686,8 +1687,8 @@ impl<'a> Solver<'a> {
             // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
             // If cached bounds alone push cost >= beta or current_cost_so_far + cost >= current_global_beta,
             // we prune immediately without spending time on counting sort or scratch buffer partitioning.
-            let mut exact_mask = [0u64; 36];
-            let mut cached_mask = [0u64; 36];
+            let mut exact_mask = [0u64; M];
+            let mut cached_mask = [0u64; M];
             let mut num_exact = 0;
 
             for i in 0..num_eval {
