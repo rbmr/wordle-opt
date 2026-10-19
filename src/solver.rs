@@ -390,18 +390,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let data_ptr = matrix.data_ptr::<Elem>();
 
                 if M <= 4 {
-                    let win_word = WIN >> 6;
-                    let win_bit = 1u64 << (WIN & 63);
+                    let mut init_seen_mask = [0u64; M];
+                    if WIN >> 6 < M {
+                        init_seen_mask[WIN >> 6] = 1u64 << (WIN & 63);
+                    }
 
                     let bucket_ptr = bucket.as_ptr();
                     for (ci_idx, &ci) in bucket.iter().enumerate() {
                         let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                        let mut seen_mask = [0u64; M];
-                        if win_word < M {
-                            seen_mask[win_word] = win_bit;
-                        }
+                        let mut seen_mask = init_seen_mask;
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
@@ -967,7 +966,39 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             phase1_tuples[0] = t0;
             phase1_tuples[1] = t1;
             phase1_tuples[2] = t2;
-        } else if phase1_tuples.len() > 3 {
+        } else if phase1_tuples.len() == 4 {
+            let mut t0 = phase1_tuples[0];
+            let mut t1 = phase1_tuples[1];
+            let mut t2 = phase1_tuples[2];
+            let mut t3 = phase1_tuples[3];
+            let mut k0 = (t0.2, t0.1, t0.0);
+            let mut k1 = (t1.2, t1.1, t1.0);
+            let mut k2 = (t2.2, t2.1, t2.0);
+            let mut k3 = (t3.2, t3.1, t3.0);
+            if k0 > k1 {
+                std::mem::swap(&mut t0, &mut t1);
+                std::mem::swap(&mut k0, &mut k1);
+            }
+            if k2 > k3 {
+                std::mem::swap(&mut t2, &mut t3);
+                std::mem::swap(&mut k2, &mut k3);
+            }
+            if k0 > k2 {
+                std::mem::swap(&mut t0, &mut t2);
+                std::mem::swap(&mut k0, &mut k2);
+            }
+            if k1 > k3 {
+                std::mem::swap(&mut t1, &mut t3);
+                std::mem::swap(&mut k1, &mut k3);
+            }
+            if k1 > k2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+            phase1_tuples[0] = t0;
+            phase1_tuples[1] = t1;
+            phase1_tuples[2] = t2;
+            phase1_tuples[3] = t3;
+        } else if phase1_tuples.len() > 4 {
             phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
         }
 
@@ -1250,7 +1281,39 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     phase2_tuples[0] = t0;
                     phase2_tuples[1] = t1;
                     phase2_tuples[2] = t2;
-                } else if phase2_tuples.len() > 3 {
+                } else if phase2_tuples.len() == 4 {
+                    let mut t0 = phase2_tuples[0];
+                    let mut t1 = phase2_tuples[1];
+                    let mut t2 = phase2_tuples[2];
+                    let mut t3 = phase2_tuples[3];
+                    let mut k0 = (t0.2, t0.1, t0.0);
+                    let mut k1 = (t1.2, t1.1, t1.0);
+                    let mut k2 = (t2.2, t2.1, t2.0);
+                    let mut k3 = (t3.2, t3.1, t3.0);
+                    if k0 > k1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                        std::mem::swap(&mut k0, &mut k1);
+                    }
+                    if k2 > k3 {
+                        std::mem::swap(&mut t2, &mut t3);
+                        std::mem::swap(&mut k2, &mut k3);
+                    }
+                    if k0 > k2 {
+                        std::mem::swap(&mut t0, &mut t2);
+                        std::mem::swap(&mut k0, &mut k2);
+                    }
+                    if k1 > k3 {
+                        std::mem::swap(&mut t1, &mut t3);
+                        std::mem::swap(&mut k1, &mut k3);
+                    }
+                    if k1 > k2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                    }
+                    phase2_tuples[0] = t0;
+                    phase2_tuples[1] = t1;
+                    phase2_tuples[2] = t2;
+                    phase2_tuples[3] = t3;
+                } else if phase2_tuples.len() > 4 {
                     phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
                 }
 
@@ -1443,7 +1506,33 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *local_counts_ptr.add(1) = e1;
                     *local_counts_ptr.add(2) = e2;
                 }
-            } else if num_non_empty > 3 {
+            } else if num_non_empty == 4 {
+                let mut e0 = unsafe { *local_counts_ptr };
+                let mut e1 = unsafe { *local_counts_ptr.add(1) };
+                let mut e2 = unsafe { *local_counts_ptr.add(2) };
+                let mut e3 = unsafe { *local_counts_ptr.add(3) };
+                if e0.1 < e1.1 {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e2.1 < e3.1 {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.1 < e2.1 {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.1 < e3.1 {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.1 < e2.1 {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                unsafe {
+                    *local_counts_ptr = e0;
+                    *local_counts_ptr.add(1) = e1;
+                    *local_counts_ptr.add(2) = e2;
+                    *local_counts_ptr.add(3) = e3;
+                }
+            } else if num_non_empty > 4 {
                 let local_counts_slice =
                     unsafe { std::slice::from_raw_parts_mut(local_counts_ptr, num_non_empty) };
                 local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
@@ -1690,6 +1779,54 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if c0 > 15 {
                     if c1 > 15 {
                         if c2 > 15 { 3 } else { 2 }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 4 {
+                let mut r0 = unsafe { *eval_indices_ptr };
+                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
+                let mut r2 = unsafe { *eval_indices_ptr.add(2) };
+                let mut r3 = unsafe { *eval_indices_ptr.add(3) };
+                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                let mut c2 = unsafe { *counts_ptr.add(r2 as usize) };
+                let mut c3 = unsafe { *counts_ptr.add(r3 as usize) };
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                }
+                if c2 < c3 || (c2 == c3 && r2 > r3) {
+                    std::mem::swap(&mut r2, &mut r3);
+                    std::mem::swap(&mut c2, &mut c3);
+                }
+                if c0 < c2 || (c0 == c2 && r0 > r2) {
+                    std::mem::swap(&mut r0, &mut r2);
+                    std::mem::swap(&mut c0, &mut c2);
+                }
+                if c1 < c3 || (c1 == c3 && r1 > r3) {
+                    std::mem::swap(&mut r1, &mut r3);
+                    std::mem::swap(&mut c1, &mut c3);
+                }
+                if c1 < c2 || (c1 == c2 && r1 > r2) {
+                    std::mem::swap(&mut r1, &mut r2);
+                    std::mem::swap(&mut c1, &mut c2);
+                }
+                unsafe {
+                    *eval_indices_ptr = r0;
+                    *eval_indices_ptr.add(1) = r1;
+                    *eval_indices_ptr.add(2) = r2;
+                    *eval_indices_ptr.add(3) = r3;
+                }
+                if c0 > 15 {
+                    if c1 > 15 {
+                        if c2 > 15 {
+                            if c3 > 15 { 4 } else { 3 }
+                        } else {
+                            2
+                        }
                     } else {
                         1
                     }
