@@ -625,6 +625,33 @@ impl<'a> Solver<'a> {
             0 => (0, true),
             1 => (1, true),
             2 => (3, true),
+            3 => {
+                let c0 = unsafe { *bucket.get_unchecked(0) };
+                let c1 = unsafe { *bucket.get_unchecked(1) };
+                let c2 = unsafe { *bucket.get_unchecked(2) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data.as_ptr();
+
+                let g0 = unsafe { *dict.candidate_to_guess.get_unchecked(c0) };
+                let g0_ptr = unsafe { data_ptr.add(g0 * num_cand) };
+                if unsafe { (*g0_ptr.add(c1)).0 != (*g0_ptr.add(c2)).0 } {
+                    return (5, true);
+                }
+
+                let g1 = unsafe { *dict.candidate_to_guess.get_unchecked(c1) };
+                let g1_ptr = unsafe { data_ptr.add(g1 * num_cand) };
+                if unsafe { (*g1_ptr.add(c0)).0 != (*g1_ptr.add(c2)).0 } {
+                    return (5, true);
+                }
+
+                let g2 = unsafe { *dict.candidate_to_guess.get_unchecked(c2) };
+                let g2_ptr = unsafe { data_ptr.add(g2 * num_cand) };
+                if unsafe { (*g2_ptr.add(c0)).0 != (*g2_ptr.add(c1)).0 } {
+                    return (5, true);
+                }
+
+                (6, true)
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -650,13 +677,14 @@ impl<'a> Solver<'a> {
                             let r = unsafe { (*g_ptr.add(c)).0 as usize };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
-                            if (seen_mask[word_idx] & bit) != 0 {
+                            let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                            if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions >= max_collisions {
                                     break;
                                 }
                             } else {
-                                seen_mask[word_idx] |= bit;
+                                *word |= bit;
                             }
                         }
 
