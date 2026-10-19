@@ -292,12 +292,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let num_cand = matrix.num_candidates;
                 let data_ptr = matrix.data_ptr::<Elem>();
 
-                const ROT4: [[usize; 3]; 4] = [
-                    [1, 2, 3],
-                    [2, 3, 0],
-                    [3, 0, 1],
-                    [0, 1, 2],
-                ];
+                const ROT4: [[usize; 3]; 4] = [[1, 2, 3], [2, 3, 0], [3, 0, 1], [0, 1, 2]];
                 let c = [c0, c1, c2, c3];
                 let mut best_inside = u32::MAX;
 
