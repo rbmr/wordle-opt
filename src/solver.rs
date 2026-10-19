@@ -1585,23 +1585,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 self.cache.insert_set(hash, p, used_val, is_exact);
                 cert_record!(5, p, used_val, is_exact);
-                unsafe {
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                    break;
+                    self.metrics
+                        .pruned_by_bounds
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
                 }
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
             }
 
             if num_exact == num_eval {
@@ -1678,17 +1669,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                    break;
+                    self.metrics
+                        .pruned_by_bounds
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
                 }
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
             }
 
             for i in 0..num_eval {
