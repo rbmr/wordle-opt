@@ -859,7 +859,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 phase1_tuples[0] = t1;
                 phase1_tuples[1] = t0;
             }
-        } else if phase1_tuples.len() > 2 {
+        } else if phase1_tuples.len() == 3 {
+            let mut t0 = phase1_tuples[0];
+            let mut t1 = phase1_tuples[1];
+            let mut t2 = phase1_tuples[2];
+            let mut k0 = (t0.2, t0.1, t0.0);
+            let mut k1 = (t1.2, t1.1, t1.0);
+            let mut k2 = (t2.2, t2.1, t2.0);
+            if k0 > k1 {
+                std::mem::swap(&mut t0, &mut t1);
+                std::mem::swap(&mut k0, &mut k1);
+            }
+            if k1 > k2 {
+                std::mem::swap(&mut t1, &mut t2);
+                std::mem::swap(&mut k1, &mut k2);
+            }
+            if k0 > k1 {
+                std::mem::swap(&mut t0, &mut t1);
+            }
+            phase1_tuples[0] = t0;
+            phase1_tuples[1] = t1;
+            phase1_tuples[2] = t2;
+        } else if phase1_tuples.len() > 3 {
             phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
         }
 
@@ -1077,7 +1098,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         phase2_tuples[0] = t1;
                         phase2_tuples[1] = t0;
                     }
-                } else if phase2_tuples.len() > 2 {
+                } else if phase2_tuples.len() == 3 {
+                    let mut t0 = phase2_tuples[0];
+                    let mut t1 = phase2_tuples[1];
+                    let mut t2 = phase2_tuples[2];
+                    let mut k0 = (t0.2, t0.1, t0.0);
+                    let mut k1 = (t1.2, t1.1, t1.0);
+                    let mut k2 = (t2.2, t2.1, t2.0);
+                    if k0 > k1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                        std::mem::swap(&mut k0, &mut k1);
+                    }
+                    if k1 > k2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                        std::mem::swap(&mut k1, &mut k2);
+                    }
+                    if k0 > k1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                    }
+                    phase2_tuples[0] = t0;
+                    phase2_tuples[1] = t1;
+                    phase2_tuples[2] = t2;
+                } else if phase2_tuples.len() > 3 {
                     phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
                 }
 
@@ -1252,7 +1294,25 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *local_counts_ptr.add(1) = e0;
                     }
                 }
-            } else if num_non_empty > 2 {
+            } else if num_non_empty == 3 {
+                let mut e0 = unsafe { *local_counts_ptr };
+                let mut e1 = unsafe { *local_counts_ptr.add(1) };
+                let mut e2 = unsafe { *local_counts_ptr.add(2) };
+                if e0.1 < e1.1 {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e1.1 < e2.1 {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                if e0.1 < e1.1 {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                unsafe {
+                    *local_counts_ptr = e0;
+                    *local_counts_ptr.add(1) = e1;
+                    *local_counts_ptr.add(2) = e2;
+                }
+            } else if num_non_empty > 3 {
                 local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
             }
 
@@ -1266,13 +1326,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
                 let p_ptr = p.as_mut_ptr() as *mut usize;
                 let mut p_idx = 0;
-                for (cand_idx, &c) in set.iter().enumerate() {
+                let set_ptr = set.as_ptr();
+                for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) as usize };
                     if r == r_idx {
                         unsafe {
-                            *p_ptr.add(p_idx) = c;
+                            *p_ptr.add(p_idx) = *set_ptr.add(cand_idx);
                         }
                         p_idx += 1;
+                        if p_idx == p_len {
+                            break;
+                        }
                     }
                 }
 
@@ -1445,22 +1509,53 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     0
                 }
             } else if num_eval == 2 {
-                let r0 = unsafe { *eval_indices_ptr };
-                let r1 = unsafe { *eval_indices_ptr.add(1) };
-                let c0 = unsafe { *counts_ptr.add(r0 as usize) };
-                let c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                let mut r0 = unsafe { *eval_indices_ptr };
+                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
+                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
                 if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
                     unsafe {
-                        *eval_indices_ptr = r1;
-                        *eval_indices_ptr.add(1) = r0;
+                        *eval_indices_ptr = r0;
+                        *eval_indices_ptr.add(1) = r1;
                     }
-                    if c1 > 15 {
-                        if c0 > 15 { 2 } else { 1 }
-                    } else {
-                        0
-                    }
-                } else if c0 > 15 {
+                }
+                if c0 > 15 {
                     if c1 > 15 { 2 } else { 1 }
+                } else {
+                    0
+                }
+            } else if num_eval == 3 {
+                let mut r0 = unsafe { *eval_indices_ptr };
+                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
+                let mut r2 = unsafe { *eval_indices_ptr.add(2) };
+                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                let mut c2 = unsafe { *counts_ptr.add(r2 as usize) };
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                }
+                if c1 < c2 || (c1 == c2 && r1 > r2) {
+                    std::mem::swap(&mut r1, &mut r2);
+                    std::mem::swap(&mut c1, &mut c2);
+                }
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                }
+                unsafe {
+                    *eval_indices_ptr = r0;
+                    *eval_indices_ptr.add(1) = r1;
+                    *eval_indices_ptr.add(2) = r2;
+                }
+                if c0 > 15 {
+                    if c1 > 15 {
+                        if c2 > 15 { 3 } else { 2 }
+                    } else {
+                        1
+                    }
                 } else {
                     0
                 }
