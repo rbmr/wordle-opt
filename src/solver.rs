@@ -364,20 +364,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
 
-                    if ra != rb && ra != rc && ra != rd && rb != rc && rb != rd && rc != rd {
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_ad = ra == rd;
+                    let eq_bc = rb == rc;
+                    let eq_bd = rb == rd;
+                    let eq_cd = rc == rd;
+
+                    let coll_mask = (eq_ab as u8)
+                        | ((eq_ac as u8) << 1)
+                        | ((eq_ad as u8) << 2)
+                        | ((eq_bc as u8) << 3)
+                        | ((eq_bd as u8) << 4)
+                        | ((eq_cd as u8) << 5);
+
+                    if coll_mask == 0 {
                         return (9, true);
                     }
 
-                    if best_inside != 10 {
-                        let coll = (ra == rb) as u32
-                            + (ra == rc) as u32
-                            + (ra == rd) as u32
-                            + (rb == rc) as u32
-                            + (rb == rd) as u32
-                            + (rc == rd) as u32;
-                        if coll == 1 {
-                            best_inside = 10;
-                        }
+                    if best_inside != 10 && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside = 10;
                     }
                 }
 
