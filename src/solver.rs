@@ -827,6 +827,25 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
                         + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) },
                 )
+            } else if num_non_empty == 3 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                }
+                let count2 = (c_len as u32 - 1) - count0 - count1;
+                (
+                    1 + count0 * count0 + count1 * count1 + count2 * count2,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) },
+                )
             } else {
                 let mut exp = 1u32;
                 let mut lb = c_len as u32;
@@ -1023,6 +1042,38 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 valid_phase2_k = 2;
                             }
                             phase2_tuples.push((g, expected_rem, lb_cost, 2));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
+                        }
+                        continue;
+                    }
+                    if num_non_empty == 3 {
+                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                        let count0 = unsafe { *counts_ptr.add(r0) };
+                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                        let count1 = unsafe { *counts_ptr.add(r1) };
+                        let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                        unsafe {
+                            *counts_ptr.add(r0) = 0;
+                            *counts_ptr.add(r1) = 0;
+                            *counts_ptr.add(r2) = 0;
+                        }
+                        let c0 = count0 as u32;
+                        let c1 = count1 as u32;
+                        let c2 = (c_len as u32) - c0 - c1;
+                        let expected_rem = c0 * c0 + c1 * c1 + c2 * c2;
+                        let lb_cost = (c_len as u32)
+                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) };
+                        if 3 > local_max_k {
+                            local_max_k = 3;
+                        }
+                        if lb_cost < best_val {
+                            if 3 > valid_phase2_k {
+                                valid_phase2_k = 3;
+                            }
+                            phase2_tuples.push((g, expected_rem, lb_cost, 3));
                         } else {
                             min_val_found = min_val_found.min(lb_cost);
                         }
@@ -1625,6 +1676,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if sorted_set.len() < set.len() {
                 sorted_set.resize(set.len(), 0);
             }
+            let sorted_set_ptr = sorted_set.as_mut_ptr();
 
             let mut offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let offsets_ptr = offsets.as_mut_ptr() as *mut u16;
@@ -1646,7 +1698,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
                 let pos = unsafe { *pos_ptr as usize };
                 unsafe {
-                    *sorted_set.get_unchecked_mut(pos) = c;
+                    *sorted_set_ptr.add(pos) = c;
                     *pos_ptr += 1;
                 }
             }
@@ -1660,8 +1712,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let start = unsafe { *offsets_ptr.add(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
 
                 let (quick_val, is_exact) =
@@ -1704,8 +1755,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let start = unsafe { *offsets_ptr.add(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
 
                 let lb = unsafe { *p_lbs_ptr.add(r_idx) };
@@ -1788,8 +1838,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let start = unsafe { *offsets_ptr.add(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
 
                 let b = cost - unsafe { *p_lbs_ptr.add(r_idx) };
                 let new_beta = beta - b;
@@ -1811,12 +1860,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     (unsafe { *child_max_ks_ptr.add(r_idx) } as usize).max(2),
                 );
                 self.current_cost_so_far -= b;
-                if b + val >= beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return b + val;
-                }
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + b + val >= current_global_beta {
+                if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return b + val;
                 }
