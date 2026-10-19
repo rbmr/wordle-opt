@@ -471,8 +471,13 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-19 | `a4a1891` | pc01 | 500 | 1 | optimal | 0.505s | 1453 | 517 | 96 | — | fuse eval_indices bounds initialization and Pass 2a cache probe; validation OK |
 | 2026-10-19 | `a4a1891` | pc01 | 1000 | 1 | optimal | 3.836s | 3124 | 1049 | 1102 | — | fuse eval_indices bounds initialization and Pass 2a cache probe; pick time 3.7s; states down to 1102; validation OK |
 | 2026-10-19 | `a4a1891` | pc01 | 2340 | — | optimal | 37.507s (0.01h) | 8001 | 2478 | 27936 | ~2.5GB | full N=2340 run (2026-10-19-a4a1891); fuse eval_indices bounds initialization and Pass 2a cache probe; pick time 35.8s; states 27936; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-19 | `de74b73` | pc01 | 500 | 1 | optimal | 0.521s | 1453 | 517 | 158 | — | optimize candidate counting and fast-path small tuple sorts in min_state_val and OptimalPolicy; validation OK |
+| 2026-10-19 | `de74b73` | pc01 | 1000 | 1 | optimal | 3.854s | 3124 | 1049 | 1142 | — | optimize candidate counting and fast-path small tuple sorts in min_state_val and OptimalPolicy; pick time 3.7s; validation OK |
+| 2026-10-19 | `de74b73` | pc01 | 2340 | — | optimal | 37.747s (0.01h) | 8001 | 2478 | 27972 | ~2.5GB | full N=2340 run (2026-10-19-de74b73); optimize candidate counting and fast-path small tuple sorts in min_state_val and OptimalPolicy; pick time 36.1s; states 27972; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `de74b73` rows demonstrated that eliminating redundant stores to `non_empty_indices_ptr` in `SpecializedSolver::min_state_val` (Phase 1 and Phase 2), fast-pathing $\le 2$ element tuple sorts in `min_state_val` and `local_counts_slice`, and precomputing the root row pointer in `OptimalPolicy::scan` maintained top performance and exactness across all scales. The full N=2340 solve completed in **37.747s** (pick time 36.1s) with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
 - The `a4a1891` rows demonstrated that fusing `eval_indices` lower bound and child branching factor initialization into the Pass 2a cache probe loop in `SpecializedSolver::min_guess_val` (eliminating an entire separate loop pass over `0..num_eval` and avoiding redundant memory stores and re-loads) reduced explored states at N=500 from 139 down to **96** (build time down to **0.505s**) and at N=1000 down to **1,102** (guesses evaluated down to 16,764). The full N=2340 solve completed in **37.507s** (pick time 35.8s) with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
