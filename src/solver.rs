@@ -629,40 +629,72 @@ impl<'a> Solver<'a> {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
                 let data_ptr = matrix.data.as_ptr();
-                for &ci in bucket {
-                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
-                    let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
+                if matrix.num_responses <= 256 {
+                    for &ci in bucket {
+                        let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
+                        let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                    let mut seen = [0u16; 16];
-                    let mut seen_len = 0;
-                    let mut collisions = 0;
-                    let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+                        let mut seen_mask = [0u64; 4];
+                        let mut collisions = 0;
+                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                    for &c in bucket {
-                        let r = unsafe { (*g_ptr.add(c)).0 };
-                        let mut duplicate = false;
-                        for &prev in &seen[..seen_len] {
-                            if prev == r {
-                                duplicate = true;
-                                break;
+                        for &c in bucket {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            let word_idx = r >> 6;
+                            let bit = 1u64 << (r & 63);
+                            if (seen_mask[word_idx] & bit) != 0 {
+                                collisions += 1;
+                                if collisions >= max_collisions {
+                                    break;
+                                }
+                            } else {
+                                seen_mask[word_idx] |= bit;
                             }
                         }
-                        if duplicate {
-                            collisions += 1;
-                            if collisions >= max_collisions {
-                                break;
-                            }
-                        } else {
-                            seen[seen_len] = r;
-                            seen_len += 1;
+
+                        if collisions == 0 {
+                            return ((2 * n - 1) as u32, true);
+                        }
+                        if collisions == 1 && max_collisions == 2 {
+                            best_inside = target_exact;
                         }
                     }
+                } else {
+                    for &ci in bucket {
+                        let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
+                        let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                    if collisions == 0 {
-                        return ((2 * n - 1) as u32, true);
-                    }
-                    if collisions == 1 && max_collisions == 2 {
-                        best_inside = target_exact;
+                        let mut seen = [0u16; 16];
+                        let mut seen_len = 0;
+                        let mut collisions = 0;
+                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+
+                        for &c in bucket {
+                            let r = unsafe { (*g_ptr.add(c)).0 };
+                            let mut duplicate = false;
+                            for &prev in &seen[..seen_len] {
+                                if prev == r {
+                                    duplicate = true;
+                                    break;
+                                }
+                            }
+                            if duplicate {
+                                collisions += 1;
+                                if collisions >= max_collisions {
+                                    break;
+                                }
+                            } else {
+                                seen[seen_len] = r;
+                                seen_len += 1;
+                            }
+                        }
+
+                        if collisions == 0 {
+                            return ((2 * n - 1) as u32, true);
+                        }
+                        if collisions == 1 && max_collisions == 2 {
+                            best_inside = target_exact;
+                        }
                     }
                 }
 
