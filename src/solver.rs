@@ -2046,10 +2046,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let lb = unsafe { *p_lbs_ptr.add(r_idx) };
                 let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
                 if target_k == 2 {
-                    unsafe {
-                        *child_max_ks_ptr.add(r_idx) =
-                            (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                    }
                     self.cache.insert_set(hash, p, lb, false);
                     cert_record!(6, p, lb, false);
                 } else {
@@ -2059,10 +2055,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         target_k,
                     );
                     if k_cand >= target_k {
-                        unsafe {
-                            *child_max_ks_ptr.add(r_idx) =
-                                (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                        }
                         self.cache.insert_set(hash, p, lb, false);
                         cert_record!(7, p, lb, false);
                     } else {
@@ -2073,16 +2065,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             target_k,
                         );
                         if k >= target_k {
-                            unsafe {
-                                *child_max_ks_ptr.add(r_idx) =
-                                    (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                            }
                             self.cache.insert_set(hash, p, lb, false);
                             cert_record!(8, p, lb, false);
                         } else {
                             unsafe {
-                                *child_max_ks_ptr.add(r_idx) =
-                                    (k as u16).min(*child_max_ks_ptr.add(r_idx));
+                                *child_max_ks_ptr.add(r_idx) = k as u16;
                             }
                             let tight_lb =
                                 crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
