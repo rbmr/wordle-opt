@@ -60,8 +60,19 @@ impl Dictionary {
         guesses_path: P1,
         candidates_path: P2,
     ) -> Result<Self, String> {
-        let guesses = Self::read_words(guesses_path)?;
-        let candidates = Self::read_words(candidates_path)?;
+        let guesses = Self::read_words(guesses_path.as_ref())?;
+        let candidates = Self::read_words(candidates_path.as_ref())?;
+        if let (Some(g), Some(c)) = (guesses.first(), candidates.first())
+            && g.len() != c.len()
+        {
+            return Err(format!(
+                "mismatched word lengths: guesses in {} has {} letters, but candidates in {} has {} letters",
+                guesses_path.as_ref().display(),
+                g.len(),
+                candidates_path.as_ref().display(),
+                c.len()
+            ));
+        }
         Ok(Self::from_words(guesses, candidates))
     }
 
@@ -180,7 +191,18 @@ impl Dictionary {
             }
             let len = word_str.len();
             match expected_len {
-                None => expected_len = Some(len),
+                None => {
+                    if len == 0 || len > 10 {
+                        return Err(format!(
+                            "invalid word length in {}: line {}: word {:?} has {} letters (must be 1 to 10)",
+                            p.display(),
+                            line_no + 1,
+                            word_str,
+                            len
+                        ));
+                    }
+                    expected_len = Some(len);
+                }
                 Some(exp) => {
                     if len != exp {
                         return Err(format!(
@@ -276,5 +298,34 @@ mod tests {
         assert_eq!(dict.candidates.len(), 2);
         assert_eq!(dict.guesses.len(), 4);
         assert_eq!(dict.guesses[0].to_string(), "apple");
+    }
+
+    #[test]
+    fn test_try_load_mismatched_file_lengths() {
+        let mut guesses_file = NamedTempFile::new().unwrap();
+        let mut candidates_file = NamedTempFile::new().unwrap();
+
+        writeln!(guesses_file, "word\nbird\n").unwrap();
+        writeln!(candidates_file, "apple\npeach\n").unwrap();
+
+        let res = Dictionary::try_load(guesses_file.path(), candidates_file.path());
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("mismatched word lengths"));
+    }
+
+    #[test]
+    fn test_try_load_word_length_out_of_bounds() {
+        let mut guesses_file = NamedTempFile::new().unwrap();
+        let mut candidates_file = NamedTempFile::new().unwrap();
+
+        writeln!(guesses_file, "supercalifragilistic").unwrap();
+        writeln!(candidates_file, "supercalifragilistic").unwrap();
+
+        let res = Dictionary::try_load(guesses_file.path(), candidates_file.path());
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("invalid word length"));
+        assert!(err.contains("must be 1 to 10"));
     }
 }
