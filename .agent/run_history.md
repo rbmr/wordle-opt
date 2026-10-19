@@ -462,8 +462,13 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-19 | `bf37f78` | pc01 | 500 | 1 | optimal | 0.510s | 1453 | 517 | 102 | — | specialize n=4 and n=5 in quick_bucket_eval_specialized; validation OK |
 | 2026-10-19 | `bf37f78` | pc01 | 1000 | 1 | optimal | 3.844s | 3124 | 1049 | 1145 | — | specialize n=4 and n=5 in quick_bucket_eval_specialized; pick time 3.7s; validation OK |
 | 2026-10-19 | `bf37f78` | pc01 | 2340 | — | optimal | 37.550s (0.01h) | 8001 | 2478 | 27904 | ~2.5GB | full N=2340 run (2026-10-19-bf37f78); specialize n=4 and n=5 in quick_bucket_eval_specialized; pick time 35.9s; states 27904; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-19 | `f8df323` | pc01 | 500 | 1 | optimal | 0.507s | 1453 | 517 | 140 | — | optimize candidate counting loop in SpecializedSolver::min_guess_val; validation OK |
+| 2026-10-19 | `f8df323` | pc01 | 1000 | 1 | optimal | 3.840s | 3124 | 1049 | 1172 | — | optimize candidate counting loop in SpecializedSolver::min_guess_val; pick time 3.7s; validation OK |
+| 2026-10-19 | `f8df323` | pc01 | 2340 | — | optimal | 37.549s (0.01h) | 8001 | 2478 | 27978 | ~2.5GB | full N=2340 run (2026-10-19-f8df323); optimize candidate counting loop in SpecializedSolver::min_guess_val; pick time 35.9s; states 27978; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `f8df323` rows demonstrated that keeping `num_non_empty_local` in a local register rather than repeatedly invoking `Cell::get`/`Cell::set` and eliminating redundant writes to `non_empty_indices_ptr` during inner candidate counting in `SpecializedSolver::min_guess_val` maintained top performance across small-N and full-scale benchmarks. In the full N=2340 solve, the policy tree finished in **37.549s** (pick time 35.9s, states evaluated 27,978) with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
 - The `bf37f78` rows demonstrated that specializing $n=4$ (4 loads, 3 comparisons per candidate) and $n=5$ (5 loads, 6 comparisons per candidate) directly in `SpecializedSolver::quick_bucket_eval_specialized` without bitmask arrays or bit shifts maintained exact parity with all true costs across test suites and benchmarks. In the full N=2340 solve, the policy tree finished in **37.550s** (pick time 35.9s, states evaluated 27,904) with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
