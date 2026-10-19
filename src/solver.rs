@@ -977,7 +977,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
             let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
             let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
-            let mut heap_c_ptrs = if c_len > 256 {
+            let heap_c_ptrs = if c_len > 256 {
                 let mut v = Vec::with_capacity(c_len);
                 let set_ptr = set.as_ptr();
                 for i in 0..c_len {
