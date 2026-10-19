@@ -384,12 +384,15 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-18 | `223000f` | pc01 | 2340 | — | optimal | 36.082s (0.01h) | 8001 | 2478 | — | — | runtime certificate hooks (branch), full list; 3 runs 36.019 / 36.082 / 36.113s (median shown); validation OK |
 | 2026-10-18 | `223000f` | pc01 | 2340 | — | optimal | 37.970s (0.01h) | 8001 | 2478 | — | — | portable build, RUSTFLAGS -C target-cpu=x86-64-v2 instead of native; 3 runs 37.849 / 37.970 / 38.097s (median shown); validation OK |
 | 2026-10-18 | `223000f` | pc01 | 2340 | — | optimal | 39.525s (0.01h) | 8001 | 2478 | — | — | portable build, RUSTFLAGS -C target-cpu=x86-64-v3; 3 runs 39.391 / 39.528 / 39.525s (median shown); validation OK |
-
-
-
-
+| 2026-10-19 | `2109c09` | pc01 | 1000 | 1 | optimal | 3.807s | 3124 | 1049 | 1197 | — | prune disjoint-letter out-of-set guesses in min_state_val Phase 2; pick time 3.7s; validation OK |
+| 2026-10-19 | `2109c09` | pc01 | 1600 | 1 | optimal | 12.169s | 5256 | 1681 | 4333 | — | prune disjoint-letter out-of-set guesses in min_state_val Phase 2; pick time 11.9s; validation OK |
+| 2026-10-19 | `2109c09` | pc01 | 2000 | 1 | optimal | 20.590s | 6723 | 2119 | 8423 | ~175MB | prune disjoint-letter out-of-set guesses in min_state_val Phase 2; pick time 20.3s; validation OK |
+| 2026-10-19 | `2109c09` | pc01 | 2200 | 1 | optimal | 30.767s | 7477 | 2331 | 23914 | ~205MB | prune disjoint-letter out-of-set guesses in min_state_val Phase 2; new all-time record N=2200 (30.767s vs 31.085s on main), pick time 30.3s; validation OK |
+| 2026-10-19 | `2109c09` | pc01 | 2340 | — | optimal | 37.183s (0.01h) | 8001 | 2478 | 27969 | ~2.2GB | full N=2340 run (2026-10-19-2109c09); prune disjoint-letter out-of-set guesses in min_state_val Phase 2; guesses 776615; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `2109c09` rows demonstrated that pruning out-of-set guesses in `min_state_val` Phase 2 that share no letters with any candidate in `set` (where `(g_mask & c_mask) == 0`, mathematically guaranteeing `num_non_empty == 1`) eliminated redundant response loads from `data_c_g` and `counts` modifications. This accelerated performance across all benchmark sizes and set a new all-time record at N=2200 of **30.767s** (pick time **30.3s**, beating main's 31.085s). The full tree was certified and independently verified with `check` (632,718 claims verified across 392.9 billion response reads in 43.552s), and tree sha256 was byte-for-byte identical to golden (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`). All runs passed policy tree validation with invariant golden costs.
 
 - The `8b45615` row is taken from that run's own output (`Build time: 40.942s`,
   `Total cost: 3124`, `Nodes: 1049`, `Validation: OK`), captured when it ran; the
