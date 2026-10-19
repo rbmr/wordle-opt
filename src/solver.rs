@@ -595,6 +595,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mask = table_size - 1;
             let shift = 64 - table_size.trailing_zeros();
 
+            let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
@@ -613,19 +614,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let projs_chunk = &mut projs[chunk_start..chunk_end];
                 projs_chunk.fill(0);
+                let chunk_len = chunk_end - chunk_start;
+                let projs_ptr = projs_chunk.as_mut_ptr();
                 for &c in set {
-                    let c_off = c * num_guesses;
+                    let c_off = c * num_guesses + chunk_start;
                     let z = unsafe { *self.matrix.zobrist.get_unchecked(c) };
-                    let c_slice = self
-                        .matrix
-                        .slice_cg::<Elem>(c_off + chunk_start, c_off + chunk_end);
-                    for (p, &r) in projs_chunk.iter_mut().zip(c_slice.iter()) {
-                        *p ^= z.wrapping_mul(r.to_usize() as u64 + 1);
+                    let c_ptr = unsafe { data_cg_ptr.add(c_off) };
+                    for i in 0..chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
+                        unsafe {
+                            *projs_ptr.add(i) ^= z.wrapping_mul(r + 1);
+                        }
                     }
                 }
             }
 
-            let useless_projs_ptr = scratch_ref.scratch_useless_projs.as_mut_ptr();
             for r in 0..R {
                 let mut p = 0u64;
                 let m = r as u64 + 1;
@@ -635,12 +638,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if p == 0 {
                     p = 1;
                 }
-                unsafe {
-                    *useless_projs_ptr.add(r) = p;
-                }
-            }
-            for r in 0..R {
-                let proj = unsafe { *useless_projs_ptr.add(r) };
+                let proj = p;
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
                     let slot = unsafe { *table.get_unchecked(idx) };
