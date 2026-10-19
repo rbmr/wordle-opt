@@ -393,6 +393,83 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     (10, false)
                 }
             }
+            6 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT6: [[usize; 5]; 6] = [
+                    [1, 2, 3, 4, 5],
+                    [2, 3, 4, 5, 0],
+                    [3, 4, 5, 0, 1],
+                    [4, 5, 0, 1, 2],
+                    [5, 0, 1, 2, 3],
+                    [0, 1, 2, 3, 4],
+                ];
+                let c = [c0, c1, c2, c3, c4, c5];
+                let mut best_inside = u32::MAX;
+
+                for i in 0..6 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id, ie] = ROT6[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+                    let ce = c[ie];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+                    let re = unsafe { *gi_ptr.add(ce) };
+
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_ad = ra == rd;
+                    let eq_ae = ra == re;
+                    let eq_bc = rb == rc;
+                    let eq_bd = rb == rd;
+                    let eq_be = rb == re;
+                    let eq_cd = rc == rd;
+                    let eq_ce = rc == re;
+                    let eq_de = rd == re;
+
+                    let coll_mask = (eq_ab as u16)
+                        | ((eq_ac as u16) << 1)
+                        | ((eq_ad as u16) << 2)
+                        | ((eq_ae as u16) << 3)
+                        | ((eq_bc as u16) << 4)
+                        | ((eq_bd as u16) << 5)
+                        | ((eq_be as u16) << 6)
+                        | ((eq_cd as u16) << 7)
+                        | ((eq_ce as u16) << 8)
+                        | ((eq_de as u16) << 9);
+
+                    if coll_mask == 0 {
+                        return (11, true);
+                    }
+
+                    if best_inside != 12 && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside = 12;
+                    }
+                }
+
+                if best_inside == 12 {
+                    (12, true)
+                } else {
+                    (12, false)
+                }
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
