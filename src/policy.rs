@@ -658,12 +658,39 @@ impl<'a> OptimalPolicy<'a> {
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let cap_bounds_ptr = cap_bounds.as_ptr();
+
+            let (first_g_u8_ptr, first_g_u16_ptr) = if self.matrix.num_responses <= 256 {
+                (
+                    unsafe {
+                        self.matrix
+                            .data_u8
+                            .as_ptr()
+                            .add(first_g * self.matrix.num_candidates)
+                    },
+                    std::ptr::null(),
+                )
+            } else {
+                (std::ptr::null(), unsafe {
+                    self.matrix
+                        .data
+                        .as_ptr()
+                        .add(first_g * self.matrix.num_candidates)
+                })
+            };
+
             for &c in candidates {
-                let r_idx = self.matrix.get(first_g, c).0 as usize;
+                let r_idx = if !first_g_u8_ptr.is_null() {
+                    unsafe { *first_g_u8_ptr.add(c) as usize }
+                } else {
+                    unsafe { (*first_g_u16_ptr.add(c)).0 as usize }
+                };
                 unsafe {
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r_idx as u16;
-                    num_non_empty += (*counts.get_unchecked(r_idx) == 0) as usize;
-                    *counts.get_unchecked_mut(r_idx) += 1;
+                    let cnt = *counts.get_unchecked(r_idx);
+                    if cnt == 0 {
+                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r_idx as u16;
+                        num_non_empty += 1;
+                    }
+                    *counts.get_unchecked_mut(r_idx) = cnt + 1;
                     *bucket_hashes.get_unchecked_mut(r_idx) ^= *zobrist_ptr.add(c);
                 }
             }
@@ -678,7 +705,11 @@ impl<'a> OptimalPolicy<'a> {
             let mut sorted_set = vec![0usize; candidates.len()];
             let mut current_offsets = offsets.clone();
             for &c in candidates {
-                let r_idx = self.matrix.get(first_g, c).0 as usize;
+                let r_idx = if !first_g_u8_ptr.is_null() {
+                    unsafe { *first_g_u8_ptr.add(c) as usize }
+                } else {
+                    unsafe { (*first_g_u16_ptr.add(c)).0 as usize }
+                };
                 let pos = unsafe { *current_offsets.get_unchecked(r_idx) };
                 unsafe {
                     *sorted_set.get_unchecked_mut(pos) = c;

@@ -791,10 +791,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
-                    let cnt = counts_ptr.add(r);
-                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                    num_non_empty += (*cnt == 0) as usize;
-                    *cnt += 1;
+                    let cnt_ptr = counts_ptr.add(r);
+                    let cnt = *cnt_ptr;
+                    if cnt == 0 {
+                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        num_non_empty += 1;
+                    }
+                    *cnt_ptr = cnt + 1;
                 }
             }
             let total_non_empty = num_non_empty + 1;
@@ -849,7 +852,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 min_val_found = min_val_found.min(lb_cost);
             }
         }
-        phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+        if phase1_tuples.len() == 2 {
+            let t0 = phase1_tuples[0];
+            let t1 = phase1_tuples[1];
+            let k0 = (t0.2, t0.1, t0.0);
+            let k1 = (t1.2, t1.1, t1.0);
+            if k0 > k1 {
+                phase1_tuples[0] = t1;
+                phase1_tuples[1] = t0;
+            }
+        } else if phase1_tuples.len() > 2 {
+            phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+        }
 
         for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -949,10 +963,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     for &c_base in c_ptrs {
                         let r = unsafe { (*c_base.add(g)).to_usize() };
                         unsafe {
-                            let cnt = counts_ptr.add(r);
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += (*cnt == 0) as usize;
-                            *cnt += 1;
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
                     }
                     if num_non_empty == 1 {
@@ -1053,7 +1070,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 cut_by_global = true;
             }
             if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
-                phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+                if phase2_tuples.len() == 2 {
+                    let t0 = phase2_tuples[0];
+                    let t1 = phase2_tuples[1];
+                    let k0 = (t0.2, t0.1, t0.0);
+                    let k1 = (t1.2, t1.1, t1.0);
+                    if k0 > k1 {
+                        phase2_tuples[0] = t1;
+                        phase2_tuples[1] = t0;
+                    }
+                } else if phase2_tuples.len() > 2 {
+                    phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+                }
 
                 for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -1217,7 +1245,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
+            if num_non_empty == 2 {
+                let e0 = unsafe { *local_counts_ptr };
+                let e1 = unsafe { *local_counts_ptr.add(1) };
+                if e0.1 < e1.1 {
+                    unsafe {
+                        *local_counts_ptr = e1;
+                        *local_counts_ptr.add(1) = e0;
+                    }
+                }
+            } else if num_non_empty > 2 {
+                local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
+            }
 
             for entry in local_counts_slice.iter_mut() {
                 let p_len = entry.1 as usize;
