@@ -1,37 +1,160 @@
 #![allow(clippy::needless_range_loop)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-/// Represents a 5-letter word in the Wordle dictionary.
-pub struct Word(pub [u8; 5]);
+#[derive(Clone, Copy)]
+/// Represents a word in the dictionary (up to 15 letters).
+pub struct Word {
+    pub len: u8,
+    pub bytes: [u8; 15],
+}
 
 impl Word {
     pub fn new(s: &str) -> Self {
-        assert_eq!(s.len(), 5);
-        let mut bytes = [0; 5];
-        bytes.copy_from_slice(s.as_bytes());
-        Word(bytes)
+        let b = s.as_bytes();
+        assert!(b.len() <= 15, "word {:?} exceeds 15 bytes", s);
+        let mut bytes = [0u8; 15];
+        bytes[..b.len()].copy_from_slice(b);
+        Word {
+            len: b.len() as u8,
+            bytes,
+        }
+    }
+
+    #[inline]
+    pub fn from_slice(b: &[u8]) -> Self {
+        assert!(b.len() <= 15, "byte slice exceeds 15 bytes");
+        let mut bytes = [0u8; 15];
+        bytes[..b.len()].copy_from_slice(b);
+        Word {
+            len: b.len() as u8,
+            bytes,
+        }
+    }
+
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len as usize]
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(self.as_bytes()).unwrap()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl<const N: usize> From<[u8; N]> for Word {
+    #[inline]
+    fn from(arr: [u8; N]) -> Self {
+        Word::from_slice(&arr)
+    }
+}
+
+impl<const N: usize> From<&[u8; N]> for Word {
+    #[inline]
+    fn from(arr: &[u8; N]) -> Self {
+        Word::from_slice(arr)
+    }
+}
+
+impl From<&str> for Word {
+    #[inline]
+    fn from(s: &str) -> Self {
+        Word::new(s)
+    }
+}
+
+impl std::ops::Deref for Word {
+    type Target = [u8];
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.as_bytes()
+    }
+}
+
+impl AsRef<[u8]> for Word {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 
 impl std::fmt::Display for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", std::str::from_utf8(&self.0).unwrap())
+        write!(f, "{}", self.as_str())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+impl std::fmt::Debug for Word {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Word({:?})", self.as_str())
+    }
+}
+
+impl PartialEq for Word {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+impl Eq for Word {}
+
+impl PartialOrd for Word {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Word {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_bytes().cmp(other.as_bytes())
+    }
+}
+
+impl std::hash::Hash for Word {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 /// Represents the feedback from a guess against a secret word, encoded as a base-3 integer.
 ///
 /// 0 = Black (letter not in secret)
 /// 1 = Green (letter in correct position)
 /// 2 = Yellow (letter in wrong position)
-pub struct Response(pub u8);
+pub struct Response(pub u16);
 
 impl Response {
     pub const WIN: Response = Response::new(1, 1, 1, 1, 1);
 
+    pub const fn win_for_len(len: usize) -> Response {
+        let mut val = 0u16;
+        let mut mul = 1u16;
+        let mut i = 0;
+        while i < len {
+            val += mul;
+            mul *= 3;
+            i += 1;
+        }
+        Response(val)
+    }
+
     // b = 0, g = 1, y = 2
     pub const fn new(r0: u8, r1: u8, r2: u8, r3: u8, r4: u8) -> Self {
-        Response(r0 + r1 * 3 + r2 * 9 + r3 * 27 + r4 * 81)
+        Response(
+            r0 as u16 + (r1 as u16) * 3 + (r2 as u16) * 9 + (r3 as u16) * 27 + (r4 as u16) * 81,
+        )
     }
 }
 
@@ -55,24 +178,33 @@ impl std::fmt::Display for Response {
 
 impl Response {
     pub fn compute(secret: &Word, guess: &Word) -> Self {
-        let mut r = [0u8; 5]; // 0 = black
-        let mut used = [false; 5];
+        let s_bytes = secret.as_bytes();
+        let g_bytes = guess.as_bytes();
+        let n = s_bytes.len();
+        debug_assert_eq!(
+            n,
+            g_bytes.len(),
+            "secret and guess must have the same length"
+        );
+
+        let mut r = [0u8; 16];
+        let mut used = [false; 16];
 
         // Pass 1: find greens
-        for i in 0..5 {
-            if guess.0[i] == secret.0[i] {
+        for i in 0..n {
+            if g_bytes[i] == s_bytes[i] {
                 r[i] = 1; // green
                 used[i] = true;
             }
         }
 
         // Pass 2: find yellows
-        for i in 0..5 {
+        for i in 0..n {
             if r[i] == 1 {
                 continue;
             }
-            for j in 0..5 {
-                if guess.0[i] == secret.0[j] && !used[j] {
+            for j in 0..n {
+                if g_bytes[i] == s_bytes[j] && !used[j] {
                     r[i] = 2; // yellow
                     used[j] = true;
                     break;
@@ -80,7 +212,14 @@ impl Response {
             }
         }
 
-        Response::new(r[0], r[1], r[2], r[3], r[4])
+        let mut val = 0u16;
+        let mut mul = 1u16;
+        for i in 0..n {
+            val += r[i] as u16 * mul;
+            mul *= 3;
+        }
+
+        Response(val)
     }
 }
 
@@ -157,16 +296,16 @@ mod extra_core_tests {
 
     #[test]
     fn test_all_responses_symmetric() {
-        let g = &Word(*b"tests");
-        let c = &Word(*b"tests");
+        let g = &Word::from(*b"tests");
+        let c = &Word::from(*b"tests");
         assert_eq!(Response::compute(g, c).0, 121); // 3^5 - 1
     }
 
     #[test]
     fn test_invalid_characters_do_not_panic() {
         // Technically solver expects a-z, but let's ensure it doesn't crash on uppercase if they slip through
-        let g = &Word(*b"HELLO");
-        let c = &Word(*b"WORLD");
+        let g = &Word::from(*b"HELLO");
+        let c = &Word::from(*b"WORLD");
         let score = Response::compute(g, c).0;
         assert!(score < 243);
     }
@@ -176,5 +315,16 @@ mod extra_core_tests {
         assert_eq!(Response::WIN.to_string(), "GGGGG");
         assert_eq!(Response::new(0, 0, 0, 0, 0).to_string(), "BBBBB");
         assert_eq!(Response::new(0, 1, 2, 0, 1).to_string(), "BGYBG");
+    }
+
+    #[test]
+    fn test_response_different_lengths() {
+        let w3 = Word::new("bad");
+        assert_eq!(Response::compute(&w3, &w3), Response::win_for_len(3));
+        assert_eq!(Response::win_for_len(3).0, 13); // 1 + 3 + 9
+
+        let w4 = Word::new("able");
+        assert_eq!(Response::compute(&w4, &w4), Response::win_for_len(4));
+        assert_eq!(Response::win_for_len(4).0, 40); // 1 + 3 + 9 + 27
     }
 }

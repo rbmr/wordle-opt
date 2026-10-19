@@ -84,6 +84,9 @@ pub fn set_equiv_cache_cap(entries_per_shard: usize) {
     EQUIV_CACHE_CAP.store(entries_per_shard.max(1024), Ordering::Relaxed);
 }
 
+/// Maximum number of ternary responses supported (3^7 = 2187).
+pub const MAX_RESPONSES: usize = 2187;
+
 pub struct SolverScratch {
     pub scratch_is_in_set: [Vec<u64>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
@@ -93,10 +96,10 @@ pub struct SolverScratch {
     pub scratch_added_indices: [Vec<usize>; 32],
     pub scratch_projs: [Vec<u64>; 32],
     pub scratch_active_bits: [Vec<u64>; 32],
-    pub scratch_guess_counts: [[u16; 243]; 32],
-    pub scratch_guess_hashes: [[u64; 243]; 32],
-    pub scratch_guess_p_lbs: [[u32; 243]; 32],
-    pub scratch_guess_child_max_ks: [[u16; 243]; 32],
+    pub scratch_guess_counts: [[u16; MAX_RESPONSES]; 32],
+    pub scratch_guess_hashes: [[u64; MAX_RESPONSES]; 32],
+    pub scratch_guess_p_lbs: [[u32; MAX_RESPONSES]; 32],
+    pub scratch_guess_child_max_ks: [[u16; MAX_RESPONSES]; 32],
 }
 
 impl SolverScratch {
@@ -111,9 +114,11 @@ impl SolverScratch {
     /// keeps that invariant.
     fn fit_dictionary(&mut self, num_guesses: usize) {
         let words = num_guesses.div_ceil(64);
-        // The projection table holds at most 243 useless-guess sentinels plus
+        // The projection table holds at most MAX_RESPONSES useless-guess sentinels plus
         // one entry per guess, and is kept at most half full.
-        let table_len = ((num_guesses + 243) * 2).next_power_of_two().max(32768);
+        let table_len = ((num_guesses + MAX_RESPONSES) * 2)
+            .next_power_of_two()
+            .max(32768);
         for d in 0..32 {
             if self.scratch_is_in_set[d].len() < words {
                 self.scratch_is_in_set[d].resize(words, 0);
@@ -185,8 +190,8 @@ impl<'a> Solver<'a> {
         let mut best_guess = usize::MAX;
         let mut min_expected_rem = u32::MAX;
 
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
+        let mut counts = vec![0u16; matrix.num_responses];
+        let mut non_empty_indices = vec![0u16; matrix.num_responses];
 
         let skip_projections = c_mask.count_ones() >= 26;
         let mut seen_projections = if skip_projections {
@@ -202,17 +207,11 @@ impl<'a> Solver<'a> {
         for g in 0..dict.guesses.len() {
             if !skip_projections {
                 let chars = &dict.guess_chars[g];
-                let mut proj = 0u32;
-                let l0 = chars[0] as u32;
-                proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-                let l1 = chars[1] as u32;
-                proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-                let l2 = chars[2] as u32;
-                proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-                let l3 = chars[3] as u32;
-                proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-                let l4 = chars[4] as u32;
-                proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
+                let mut proj = 0u64;
+                for i in 0..dict.word_len.min(8) {
+                    let li = chars[i] as u64;
+                    proj |= ((li + 1) * (((c_mask >> li) & 1) as u64)) << (i * 5);
+                }
                 if !seen_projections.insert(proj) {
                     continue;
                 }
@@ -224,7 +223,7 @@ impl<'a> Solver<'a> {
             for &c in set {
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 if counts[r] == 0 {
-                    non_empty_indices[num_non_empty] = r as u8;
+                    non_empty_indices[num_non_empty] = r as u16;
                     num_non_empty += 1;
                 }
                 counts[r] += 1;
@@ -256,18 +255,18 @@ impl<'a> Solver<'a> {
 
         let best_g_offset = best_guess * matrix.num_candidates;
         let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
-        let mut counts = [0u16; 243];
+        let mut counts = vec![0u16; matrix.num_responses];
         for &c in set {
             let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
             counts[r] += 1;
         }
 
-        let mut offsets = [0usize; 244];
-        for r_idx in 0..243 {
+        let mut offsets = vec![0usize; matrix.num_responses + 1];
+        for r_idx in 0..matrix.num_responses {
             offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
         }
         let mut sorted_set = vec![0usize; set.len()];
-        let mut current_offsets = offsets;
+        let mut current_offsets = offsets.clone();
         for &c in set {
             let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
             let pos = current_offsets[r];
@@ -276,9 +275,9 @@ impl<'a> Solver<'a> {
         }
 
         let mut cost = set.len() as u32;
-        for r_idx in 0..243 {
+        for r_idx in 0..matrix.num_responses {
             let p_len = counts[r_idx] as usize;
-            if p_len == 0 || r_idx == crate::core::Response::WIN.0 as usize {
+            if p_len == 0 || r_idx == matrix.win_response.0 as usize {
                 continue;
             }
             let start = offsets[r_idx];
@@ -334,10 +333,10 @@ impl<'a> Solver<'a> {
                     scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
                     scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
                     scratch_active_bits: std::array::from_fn(|_| vec![0u64; 233]),
-                    scratch_guess_counts: [[0u16; 243]; 32],
-                    scratch_guess_hashes: [[0u64; 243]; 32],
-                    scratch_guess_p_lbs: [[0u32; 243]; 32],
-                    scratch_guess_child_max_ks: [[0u16; 243]; 32],
+                    scratch_guess_counts: [[0u16; MAX_RESPONSES]; 32],
+                    scratch_guess_hashes: [[0u64; MAX_RESPONSES]; 32],
+                    scratch_guess_p_lbs: [[0u32; MAX_RESPONSES]; 32],
+                    scratch_guess_child_max_ks: [[0u16; MAX_RESPONSES]; 32],
                 })
             });
         scratch.fit_dictionary(dict.guesses.len());
@@ -420,25 +419,26 @@ impl<'a> Solver<'a> {
             // we parallelize its buckets! Since this is the best guess, it's very unlikely to be pruned,
             // so we don't lose much alpha-beta efficiency by evaluating buckets in parallel.
 
-            let mut counts = [0u16; 243];
-            let mut non_empty_indices = [0u8; 243];
+            let num_resp = matrix.num_responses;
+            let mut counts = vec![0u16; num_resp];
+            let mut non_empty_indices = vec![0u16; num_resp];
             let mut num_non_empty = 0;
 
             for &c in set {
                 let r_idx = matrix.get(first_g, c).0 as usize;
                 if counts[r_idx] == 0 {
-                    non_empty_indices[num_non_empty] = r_idx as u8;
+                    non_empty_indices[num_non_empty] = r_idx as u16;
                     num_non_empty += 1;
                 }
                 counts[r_idx] += 1;
             }
 
-            let mut offsets = [0usize; 244];
-            for r_idx in 0..243 {
+            let mut offsets = vec![0usize; num_resp + 1];
+            for r_idx in 0..num_resp {
                 offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
             }
             let mut sorted_set = vec![0usize; set.len()];
-            let mut current_offsets = offsets;
+            let mut current_offsets = offsets.clone();
             for &c in set {
                 let r_idx = matrix.get(first_g, c).0 as usize;
                 let pos = current_offsets[r_idx];
@@ -451,7 +451,7 @@ impl<'a> Solver<'a> {
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize {
+                if r_idx == matrix.win_response.0 as usize {
                     continue;
                 }
                 if p_len <= 2 {
@@ -504,7 +504,7 @@ impl<'a> Solver<'a> {
                 .iter()
                 .copied()
                 .filter_map(|g| {
-                    let mut counts = [0u16; 243];
+                    let mut counts = vec![0u16; matrix.num_responses];
                     for &c in set {
                         counts[matrix.get(g, c).0 as usize] += 1;
                     }
@@ -513,7 +513,7 @@ impl<'a> Solver<'a> {
                             .iter()
                             .enumerate()
                             .filter(|&(r_idx, &cnt)| {
-                                cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize
+                                cnt > 0 && r_idx != matrix.win_response.0 as usize
                             })
                             .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
                             .sum::<u32>();
@@ -584,6 +584,9 @@ impl<'a> Solver<'a> {
         bucket: &[usize],
     ) -> (u32, bool) {
         let n = bucket.len();
+        if n > 15 {
+            return (2 * n as u32, false);
+        }
         match n {
             0 => (0, true),
             1 => (1, true),
@@ -596,22 +599,28 @@ impl<'a> Solver<'a> {
                     let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                     let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                    let mut mask = [0u64; 4];
+                    let mut seen = [0u16; 16];
+                    let mut seen_len = 0;
                     let mut collisions = 0;
                     let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
                     for &c in bucket {
-                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                        let word_idx = r >> 6;
-                        let bit = 1u64 << (r & 63);
-                        let word = unsafe { mask.get_unchecked_mut(word_idx) };
-                        if (*word & bit) != 0 {
+                        let r = unsafe { (*g_ptr.add(c)).0 };
+                        let mut duplicate = false;
+                        for &prev in &seen[..seen_len] {
+                            if prev == r {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if duplicate {
                             collisions += 1;
                             if collisions >= max_collisions {
                                 break;
                             }
                         } else {
-                            *word |= bit;
+                            seen[seen_len] = r;
+                            seen_len += 1;
                         }
                     }
 
@@ -771,8 +780,9 @@ impl<'a> Solver<'a> {
             let projs = &mut scratch_ref.scratch_projs[depth];
 
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size =
-                (((active_count + 243) * 2).next_power_of_two() as usize).clamp(1024, table.len());
+            let table_size = (((active_count + self.matrix.num_responses as u32) * 2)
+                .next_power_of_two() as usize)
+                .clamp(1024, table.len());
             let mask = table_size - 1;
             let shift = 64 - table_size.trailing_zeros();
 
@@ -808,8 +818,9 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            let mut useless_projs = [0u64; 243];
-            for r in 0..243 {
+            let num_resp = self.matrix.num_responses;
+            let mut useless_projs = vec![0u64; num_resp];
+            for r in 0..num_resp {
                 let mut p = 0u64;
                 let m = r as u64 + 1;
                 for &c in set {
@@ -820,7 +831,7 @@ impl<'a> Solver<'a> {
                 }
                 useless_projs[r] = p;
             }
-            for r in 0..243 {
+            for r in 0..num_resp {
                 let proj = useless_projs[r];
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
@@ -954,8 +965,8 @@ impl<'a> Solver<'a> {
         self.scratch.as_mut().unwrap().scratch_active_bits[depth] = active_bits_scratch;
 
         let mut local_lb = parent_lb.max(cached_lower_bound);
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
+        let mut counts = [0u16; MAX_RESPONSES];
+        let mut non_empty_indices = [0u16; MAX_RESPONSES];
 
         let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
         let matrix_data_ptr = self.matrix.data.as_ptr();
@@ -983,7 +994,7 @@ impl<'a> Solver<'a> {
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
                     let cnt = counts.get_unchecked_mut(r);
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u16;
                     num_non_empty += (*cnt == 0) as usize;
                     *cnt += 1;
                 }
@@ -1007,7 +1018,7 @@ impl<'a> Solver<'a> {
                     *counts.get_unchecked_mut(r_idx) = 0;
                 }
                 expected_rem += (count as u32) * (count as u32);
-                if r_idx != Response::WIN.0 as usize {
+                if r_idx != self.matrix.win_response.0 as usize {
                     lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
                 }
             }
@@ -1118,7 +1129,7 @@ impl<'a> Solver<'a> {
                         let r = unsafe { (*c_base.add(g)).0 as usize };
                         unsafe {
                             let cnt = counts.get_unchecked_mut(r);
-                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
+                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u16;
                             num_non_empty += (*cnt == 0) as usize;
                             *cnt += 1;
                         }
@@ -1139,7 +1150,7 @@ impl<'a> Solver<'a> {
                             *counts.get_unchecked_mut(r_idx) = 0;
                         }
                         expected_rem += (count as u32) * (count as u32);
-                        debug_assert_ne!(r_idx, Response::WIN.0 as usize);
+                        debug_assert_ne!(r_idx, self.matrix.win_response.0 as usize);
                         lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
                     }
                     if num_non_empty == 2
@@ -1302,10 +1313,10 @@ impl<'a> Solver<'a> {
         let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
 
         if c_len <= 16 {
-            let mut local_counts = [(0u8, 0u8, 0u32); 16];
-            let mut c_responses = [0u8; 16];
+            let mut local_counts = [(0u16, 0u8, 0u32); 16];
+            let mut c_responses = [0u16; 16];
             let mut num_non_empty = 0;
-            let mut seen_mask = [0u64; 4];
+            let mut seen_mask = [0u64; 36];
             for (cand_idx, &c) in set.iter().enumerate() {
                 let r = unsafe { (*g_ptr.add(c)).0 };
                 unsafe {
@@ -1341,7 +1352,7 @@ impl<'a> Solver<'a> {
             for i in 0..num_non_empty {
                 let entry = unsafe { local_counts.get_unchecked_mut(i) };
                 let r_idx = entry.0 as usize;
-                if r_idx == Response::WIN.0 as usize {
+                if r_idx == self.matrix.win_response.0 as usize {
                     continue;
                 }
                 let p_len = entry.1 as usize;
@@ -1371,7 +1382,7 @@ impl<'a> Solver<'a> {
                 let entry = unsafe { local_counts.get_unchecked_mut(i) };
                 let p_len = entry.1 as usize;
                 let r_idx = entry.0 as usize;
-                if r_idx == Response::WIN.0 as usize || p_len <= 2 {
+                if r_idx == self.matrix.win_response.0 as usize || p_len <= 2 {
                     continue;
                 }
 
@@ -1446,9 +1457,9 @@ impl<'a> Solver<'a> {
                 )
             };
 
-            let mut non_empty_indices = [0u8; 243];
+            let mut non_empty_indices = [0u16; MAX_RESPONSES];
             let num_non_empty = std::cell::Cell::new(0usize);
-            let mut eval_indices = [0u8; 243];
+            let mut eval_indices = [0u16; MAX_RESPONSES];
             let mut num_eval = 0;
             let num_p_lbs = std::cell::Cell::new(0usize);
 
@@ -1457,8 +1468,8 @@ impl<'a> Solver<'a> {
                 hashes_ptr: *mut u64,
                 p_lbs_ptr: *mut u32,
                 child_max_ks_ptr: *mut u16,
-                non_empty_indices_ptr: *const u8,
-                eval_indices_ptr: *const u8,
+                non_empty_indices_ptr: *const u16,
+                eval_indices_ptr: *const u16,
                 num_non_empty: &'a std::cell::Cell<usize>,
                 num_p_lbs: &'a std::cell::Cell<usize>,
             }
@@ -1500,7 +1511,7 @@ impl<'a> Solver<'a> {
                 unsafe {
                     let cnt = counts_ptr.add(r);
                     let curr_non_empty = num_non_empty.get();
-                    *non_empty_indices.get_unchecked_mut(curr_non_empty) = r as u8;
+                    *non_empty_indices.get_unchecked_mut(curr_non_empty) = r as u16;
                     num_non_empty.set(curr_non_empty + (*cnt == 0) as usize);
                     *cnt += 1;
                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
@@ -1516,7 +1527,7 @@ impl<'a> Solver<'a> {
 
             for i in 0..num_non_empty.get() {
                 let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                if r_idx == Response::WIN.0 as usize {
+                if r_idx == self.matrix.win_response.0 as usize {
                     continue;
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
@@ -1525,7 +1536,7 @@ impl<'a> Solver<'a> {
                 }
                 if p_len > 2 {
                     unsafe {
-                        *eval_indices.get_unchecked_mut(num_eval) = r_idx as u8;
+                        *eval_indices.get_unchecked_mut(num_eval) = r_idx as u16;
                     }
                     num_eval += 1;
                 }
@@ -1569,8 +1580,8 @@ impl<'a> Solver<'a> {
             // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
             // If cached bounds alone push cost >= beta or current_cost_so_far + cost >= current_global_beta,
             // we prune immediately without spending time on counting sort or scratch buffer partitioning.
-            let mut exact_mask = [0u64; 4];
-            let mut cached_mask = [0u64; 4];
+            let mut exact_mask = [0u64; 36];
+            let mut cached_mask = [0u64; 36];
             let mut num_exact = 0;
 
             for i in 0..num_eval {
@@ -1616,7 +1627,7 @@ impl<'a> Solver<'a> {
                 std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
             sorted_set.resize(set.len(), 0);
 
-            let mut offsets = [0u16; 243];
+            let mut offsets = [0u16; MAX_RESPONSES];
             let mut curr = 0;
             let n_non_empty = num_non_empty.get();
             for i in 0..n_non_empty {

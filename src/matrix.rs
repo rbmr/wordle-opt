@@ -10,6 +10,9 @@ use crate::dict::Dictionary;
 pub struct ResponseMatrix {
     pub num_guesses: usize,
     pub num_candidates: usize,
+    pub word_len: usize,
+    pub num_responses: usize,
+    pub win_response: Response,
     pub guess_masks: Vec<u32>,
     pub candidate_masks: Vec<u32>,
     pub zobrist: Vec<u64>,
@@ -21,13 +24,16 @@ pub struct ResponseMatrix {
     /// candidates across all possible guesses.
     pub data_c_g: Vec<Response>,
     pub candidate_to_guess: Vec<usize>,
-    pub guess_chars: Vec<[u8; 5]>,
+    pub guess_chars: Vec<[u8; 8]>,
 }
 
 impl ResponseMatrix {
     pub fn new(dict: &Dictionary) -> Self {
         let num_guesses = dict.guesses.len();
         let num_candidates = dict.candidates.len();
+        let word_len = dict.word_len;
+        let num_responses = 3usize.pow(word_len.min(10) as u32);
+        let win_response = Response::win_for_len(word_len);
         let mut data = Vec::with_capacity(num_guesses * num_candidates);
         let mut guess_masks = Vec::with_capacity(num_guesses);
         let mut candidate_masks = Vec::with_capacity(num_candidates);
@@ -44,7 +50,10 @@ impl ResponseMatrix {
         // the varying-position branching bound) and never prunes wrongly.
         let index = crate::dict::letter_index(dict.guesses.iter().chain(&dict.candidates));
         let mask_of = |w: &crate::core::Word| match &index {
-            Some(ix) => w.0.iter().fold(0u32, |m, &b| m | 1 << ix[b as usize]),
+            Some(ix) => w
+                .as_bytes()
+                .iter()
+                .fold(0u32, |m, &b| m | 1 << ix[b as usize]),
             None => u32::MAX,
         };
 
@@ -88,6 +97,9 @@ impl ResponseMatrix {
         Self {
             num_guesses,
             num_candidates,
+            word_len,
+            num_responses,
+            win_response,
             guess_masks,
             candidate_masks,
             zobrist,
@@ -119,37 +131,21 @@ mod tests {
         candidates.push(Word::new("apple"));
         candidates.push(Word::new("maple"));
 
-        let dict = Dictionary {
-            guess_chars: guesses
-                .iter()
-                .map(|w| {
-                    [
-                        w.0[0] - b'a',
-                        w.0[1] - b'a',
-                        w.0[2] - b'a',
-                        w.0[3] - b'a',
-                        w.0[4] - b'a',
-                    ]
-                })
-                .collect(),
-            guesses,
-            candidates,
-            candidate_to_guess: vec![0, 1],
-        };
+        let dict = Dictionary::from_words(guesses, candidates);
 
         let matrix = ResponseMatrix::new(&dict);
-        assert_eq!(matrix.num_guesses, 2);
+        assert_eq!(matrix.num_guesses, 3); // apple, berry, maple
         assert_eq!(matrix.num_candidates, 2);
 
-        // guess 0: apple, candidate 0: apple -> WIN
-        assert_eq!(matrix.get(0, 0), Response::WIN);
+        // candidate 0 is apple. Find guess for apple
+        let apple_g = dict.guesses.binary_search(&Word::new("apple")).unwrap();
+        let apple_c = dict.candidates.binary_search(&Word::new("apple")).unwrap();
+        assert_eq!(matrix.get(apple_g, apple_c), Response::WIN);
 
-        // guess 0: apple, candidate 1: maple (secret=maple, guess=apple):
-        // a: not green, secret's only 'a' (index 1) unused -> yellow
-        // p: green (index 2) -> consumes secret's only 'p', second 'p' has none left -> black
-        // l: green, e: green
+        // guess: apple, candidate: maple (secret=maple, guess=apple):
         // => [2, 0, 1, 1, 1] -> 2 + 0*3 + 1*9 + 1*27 + 1*81 = 119
-        assert_eq!(matrix.get(0, 1), Response::new(2, 0, 1, 1, 1));
+        let maple_c = dict.candidates.binary_search(&Word::new("maple")).unwrap();
+        assert_eq!(matrix.get(apple_g, maple_c), Response::new(2, 0, 1, 1, 1));
     }
 }
 
@@ -162,23 +158,7 @@ mod extra_tests {
     fn test_transpose() {
         let guesses = vec![Word::new("abcde"), Word::new("fghij")];
         let candidates = vec![Word::new("abcde"), Word::new("xyzab"), Word::new("fghij")];
-        let dict = Dictionary {
-            guess_chars: guesses
-                .iter()
-                .map(|w| {
-                    [
-                        w.0[0] - b'a',
-                        w.0[1] - b'a',
-                        w.0[2] - b'a',
-                        w.0[3] - b'a',
-                        w.0[4] - b'a',
-                    ]
-                })
-                .collect(),
-            guesses,
-            candidates,
-            candidate_to_guess: vec![0, 2, 1],
-        };
+        let dict = Dictionary::from_words(guesses, candidates);
         let matrix = ResponseMatrix::new(&dict);
 
         for g in 0..matrix.num_guesses {

@@ -37,26 +37,27 @@ pub fn solve_parallel_depth2<'a>(
     }
 
     active_guesses.par_iter().for_each(|&g| {
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
+        let num_resp = matrix.num_responses;
+        let mut counts = vec![0u16; num_resp];
+        let mut non_empty_indices = vec![0u16; num_resp];
         let mut num_non_empty = 0;
 
         for &c in initial_candidates {
             let r_idx = matrix.get(g, c).0 as usize;
             if counts[r_idx] == 0 {
-                non_empty_indices[num_non_empty] = r_idx as u8;
+                non_empty_indices[num_non_empty] = r_idx as u16;
                 num_non_empty += 1;
             }
             counts[r_idx] += 1;
         }
 
-        let mut offsets = [0usize; 244];
-        for r_idx in 0..243 {
+        let mut offsets = vec![0usize; num_resp + 1];
+        for r_idx in 0..num_resp {
             offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
         }
 
         let mut sorted_set = vec![0usize; initial_candidates.len()];
-        let mut current_offsets = offsets;
+        let mut current_offsets = offsets.clone();
         for &c in initial_candidates {
             let r_idx = matrix.get(g, c).0 as usize;
             let pos = current_offsets[r_idx];
@@ -65,12 +66,13 @@ pub fn solve_parallel_depth2<'a>(
         }
 
         let mut lb = initial_candidates.len() as u32;
-        let mut p_lbs = [0u32; 243];
-        let mut exact_vals = [false; 243];
+        let mut p_lbs = vec![0u32; num_resp];
+        let mut exact_vals = vec![false; num_resp];
+        let win_response = matrix.win_response.0 as usize;
 
         for i in 0..num_non_empty {
             let r_idx = non_empty_indices[i] as usize;
-            if r_idx == crate::core::Response::WIN.0 as usize {
+            if r_idx == win_response {
                 continue;
             }
             let p_len = counts[r_idx] as usize;
@@ -127,7 +129,7 @@ pub fn solve_parallel_depth2<'a>(
         let mut bucket_tasks = Vec::new();
         for i in 0..num_non_empty {
             let r_idx = non_empty_indices[i] as usize;
-            if r_idx == crate::core::Response::WIN.0 as usize || exact_vals[r_idx] {
+            if r_idx == win_response || exact_vals[r_idx] {
                 continue;
             }
             let p_len = counts[r_idx] as usize;

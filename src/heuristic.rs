@@ -10,15 +10,20 @@ pub fn compute_expected_remaining(
     candidates: &[usize],
     guess: usize,
 ) -> u32 {
-    let mut counts = [0u32; 243];
+    let mut counts = [0u32; 2187];
     for &c in candidates {
         let r = matrix.get(guess, c);
         counts[r.0 as usize] += 1;
     }
 
     let mut score = 0;
-    for &count in &counts {
-        score += count * count;
+    for &c in candidates {
+        let r = matrix.get(guess, c);
+        let count = counts[r.0 as usize];
+        if count > 0 {
+            score += count * count;
+            counts[r.0 as usize] = 0;
+        }
     }
     score
 }
@@ -46,17 +51,14 @@ pub fn compute_max_branching_factor(
         .into_par_iter()
         .map(|g| {
             let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
-            let mut mask = [0u64; 4];
+            let mut mask = [0u64; 36];
             for &c in candidates {
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
                     *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                 }
             }
-            (mask[0].count_ones()
-                + mask[1].count_ones()
-                + mask[2].count_ones()
-                + mask[3].count_ones()) as usize
+            mask.iter().map(|w| w.count_ones() as usize).sum::<usize>()
         })
         .max()
         .unwrap_or(0)
@@ -72,23 +74,20 @@ pub fn compute_candidate_branching_factor_with_target(
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let effective_target = target_k.min(candidates.len()).min(243);
+    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = 0;
     let data_ptr = matrix.data.as_ptr();
     for &c in candidates {
         let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
         let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
-        let mut mask = [0u64; 4];
+        let mut mask = [0u64; 36];
         for &other in candidates {
             let r = unsafe { (*g_ptr.add(other)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
         }
-        let k = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
+        let k: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
         if k > max_k {
             max_k = k;
             if max_k >= effective_target {
@@ -104,14 +103,18 @@ pub fn compute_candidate_branching_factor(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
 ) -> usize {
-    compute_candidate_branching_factor_with_target(matrix, candidates, candidates.len().min(243))
+    compute_candidate_branching_factor_with_target(
+        matrix,
+        candidates,
+        candidates.len().min(matrix.num_responses),
+    )
 }
 
-/// Finds the smallest branching factor `k` in 2..=n.min(243) such that
+/// Finds the smallest branching factor `k` in 2..=n.min(num_responses) such that
 /// `tight_capacity_bound(n, k, max_k) <= target_bound`.
-/// If no such `k` exists (even for k = n.min(243)), returns `n.min(243) + 1`.
+/// If no such `k` exists (even for k = n.min(num_responses)), returns `n.min(num_responses) + 1`.
 pub fn min_k_for_target_bound(n: usize, max_k: usize, target_bound: u32) -> usize {
-    let max_possible_k = n.min(max_k).min(243);
+    let max_possible_k = n.min(max_k);
     let cap_lb = capacity_bound(n, max_k);
     if target_bound < cap_lb {
         return max_possible_k + 1;
@@ -145,7 +148,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let effective_target = target_k.min(candidates.len()).min(243);
+    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = initial_max_k;
     if max_k >= effective_target {
         return max_k;
@@ -206,17 +209,17 @@ pub fn compute_max_branching_factor_seq_with_target(
         let g_ones = g_mask.count_ones();
         let overlap_count = overlap.count_ones();
 
-        let var_pos = if g_ones == 5 {
+        let var_pos = if g_ones == matrix.word_len as u32 {
             overlap_count
         } else if overlap_count == g_ones {
-            5
+            matrix.word_len as u32
         } else {
-            let [c0, c1, c2, c3, c4] = unsafe { *matrix.guess_chars.get_unchecked(g) };
-            ((c_mask >> c0) & 1)
-                + ((c_mask >> c1) & 1)
-                + ((c_mask >> c2) & 1)
-                + ((c_mask >> c3) & 1)
-                + ((c_mask >> c4) & 1)
+            let chars = unsafe { matrix.guess_chars.get_unchecked(g) };
+            let mut vp = 0u32;
+            for i in 0..matrix.word_len.min(8) {
+                vp += (c_mask >> chars[i]) & 1;
+            }
+            vp
         };
 
         if (var_pos <= 1 && max_k >= 3)
@@ -227,17 +230,14 @@ pub fn compute_max_branching_factor_seq_with_target(
             continue;
         }
 
-        let mut mask = [0u64; 4];
+        let mut mask = [0u64; 36];
         for &c_base in c_half1_ptrs {
             let r = unsafe { (*c_base.add(g)).0 as usize };
             unsafe {
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
         }
-        let half_unique = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
+        let half_unique: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
         if half_unique + rem_len <= max_k {
             continue;
         }
@@ -247,10 +247,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
             }
         }
-        let k = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
+        let k: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
         if k > max_k {
             max_k = k;
             if max_k >= effective_target {
@@ -267,7 +264,12 @@ pub fn compute_max_branching_factor_seq(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
 ) -> usize {
-    compute_max_branching_factor_seq_with_target(matrix, candidates, 0, candidates.len().min(243))
+    compute_max_branching_factor_seq_with_target(
+        matrix,
+        candidates,
+        0,
+        candidates.len().min(matrix.num_responses),
+    )
 }
 
 /// Lower bound on the total cost of solving `n` candidates when no guess
@@ -441,12 +443,7 @@ mod expected_remaining_tests {
             crate::core::Word::new("abcdf"),
             crate::core::Word::new("xyzab"),
         ];
-        let dict = Dictionary {
-            guesses: words.clone(),
-            candidates: words.clone(),
-            guess_chars: vec![[0, 1, 2, 3, 4], [0, 1, 2, 3, 5], [23, 24, 25, 0, 1]],
-            candidate_to_guess: vec![0, 1, 2],
-        };
+        let dict = Dictionary::from_words(words.clone(), words.clone());
         let matrix = ResponseMatrix::new(&dict);
         let set = vec![0, 1, 2];
 
@@ -804,15 +801,15 @@ mod target_bound_tests {
                 let overlap = g_mask & c_mask;
                 let overlap_count = overlap.count_ones();
                 let g_ones = g_mask.count_ones();
-                let var_pos = if g_ones == 5 {
+                let var_pos = if g_ones == matrix.word_len as u32 {
                     overlap_count
                 } else {
-                    let [c0, c1, c2, c3, c4] = matrix.guess_chars[g];
-                    ((c_mask >> c0) & 1)
-                        + ((c_mask >> c1) & 1)
-                        + ((c_mask >> c2) & 1)
-                        + ((c_mask >> c3) & 1)
-                        + ((c_mask >> c4) & 1)
+                    let chars = &matrix.guess_chars[g];
+                    let mut vp = 0u32;
+                    for i in 0..matrix.word_len.min(8) {
+                        vp += (c_mask >> chars[i]) & 1;
+                    }
+                    vp
                 };
 
                 let mut mask = [0u64; 4];

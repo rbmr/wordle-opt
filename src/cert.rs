@@ -240,15 +240,15 @@ fn branching_at_most(
     if set.len() <= limit {
         return true;
     }
-    let profile = SetProfile::new(set.iter().map(|&c| &dict.candidates[c as usize].0));
+    let profile = SetProfile::new(set.iter().map(|&c| &dict.candidates[c as usize]));
     let ng = matrix.num_guesses;
     let risky: Vec<usize> = (0..ng)
-        .filter(|&g| profile.max_responses(&dict.guesses[g].0) > limit)
+        .filter(|&g| profile.max_responses(&dict.guesses[g]) > limit)
         .collect();
-    let mut seen = [[0u64; 4]; 256];
-    for chunk in risky.chunks(256) {
+    let mut seen = [[0u64; 36]; 64];
+    for chunk in risky.chunks(64) {
         let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 4]);
+        seen.fill([0; 36]);
         for &c in set {
             let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
             for (s, &g) in seen.iter_mut().zip(chunk) {
@@ -270,10 +270,10 @@ fn branching_at_most(
 fn max_branching(matrix: &ResponseMatrix, set: &[u16], guesses: &[usize]) -> usize {
     let ng = matrix.num_guesses;
     let mut k = 0;
-    let mut seen = [[0u64; 4]; 256];
-    for chunk in guesses.chunks(256) {
+    let mut seen = [[0u64; 36]; 64];
+    for chunk in guesses.chunks(64) {
         let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 4]);
+        seen.fill([0; 36]);
         for &c in set {
             let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
             for (s, &g) in seen.iter_mut().zip(chunk) {
@@ -321,9 +321,9 @@ fn justify(
     // Only guesses whose smallest possible default sum (at most `caps[g]`
     // buckets, k at most the largest cap) falls short of the target are read
     // for their sums; the checker skips the same ones.
-    let profile = SetProfile::new(set.iter().map(|&c| &dict.candidates[c as usize].0));
+    let profile = SetProfile::new(set.iter().map(|&c| &dict.candidates[c as usize]));
     let caps: Vec<usize> = (0..ng)
-        .map(|g| profile.max_responses(&dict.guesses[g].0))
+        .map(|g| profile.max_responses(&dict.guesses[g]))
         .collect();
     let k_up = caps.iter().copied().max().unwrap_or(0) as u64;
     let mut in_set = vec![false; ng];
@@ -344,8 +344,9 @@ fn justify(
     // so those are kept until `k` is known (the checker does the same). Only
     // guesses left short are looked at again.
     const CHUNK: usize = 256;
-    let mut counts = vec![0u16; CHUNK * 243];
-    let mut used: Vec<Vec<u8>> = (0..CHUNK).map(|_| Vec::new()).collect();
+    let nr = matrix.num_responses;
+    let mut counts = vec![0u16; CHUNK * nr];
+    let mut used: Vec<Vec<u16>> = (0..CHUNK).map(|_| Vec::new()).collect();
     // Guesses whose base sum n + sum(2b - 1) falls short of the bound: only they
     // can need the max(0, b - k) terms, so only their large buckets are kept.
     let mut pending: Vec<(usize, u64, Vec<u16>)> = Vec::new();
@@ -355,7 +356,7 @@ fn justify(
             let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
             for (j, &g) in chunk.iter().enumerate() {
                 let r = col[g];
-                let slot = &mut counts[j * 243 + r.0 as usize];
+                let slot = &mut counts[j * nr + r.0 as usize];
                 if *slot == 0 {
                     used[j].push(r.0);
                 }
@@ -369,7 +370,7 @@ fn justify(
             let mut sum = n as u64;
             let mut big: Vec<u16> = Vec::new();
             for &r in u.iter() {
-                let slot = &mut counts[j * 243 + r as usize];
+                let slot = &mut counts[j * nr + r as usize];
                 let b = *slot as usize;
                 if r != win {
                     sum += 2 * b as u64 - 1;
@@ -404,16 +405,16 @@ fn justify(
         .collect();
     let win = win as usize;
     let mut reqs: FxHashMap<Box<[u16]>, ChildReq> = FxHashMap::default();
-    let mut seen_rows: FxHashSet<Vec<u8>> = FxHashSet::default();
+    let mut seen_rows: FxHashSet<Vec<u16>> = FxHashSet::default();
     let mut unrefuted: Vec<u32> = Vec::new();
     let mut first_msg = String::new();
     for g in short {
         let row = &matrix.data[g * nc..(g + 1) * nc];
-        let key: Vec<u8> = set.iter().map(|&c| row[c as usize].0).collect();
+        let key: Vec<u16> = set.iter().map(|&c| row[c as usize].0).collect();
         if !seen_rows.insert(key) {
             continue;
         }
-        let mut buckets: BTreeMap<u8, Vec<u16>> = BTreeMap::new();
+        let mut buckets: BTreeMap<u16, Vec<u16>> = BTreeMap::new();
         for &c in set {
             let r = row[c as usize].0;
             if r as usize != win {
@@ -432,7 +433,7 @@ fn justify(
             }
             if f > d {
                 sum += f;
-                better.push((f - d, f, b, r));
+                better.push((f - d, f, b, r as u8));
             } else {
                 sum += d;
             }
@@ -597,10 +598,7 @@ impl Assembly {
     /// The certificate in the format of [`certfile`].
     pub fn to_bytes(&self, dict: &Dictionary) -> Vec<u8> {
         let header = Header {
-            digest: certfile::digest(
-                dict.guesses.iter().map(|w| &w.0),
-                dict.candidates.iter().map(|w| &w.0),
-            ),
+            digest: certfile::digest(dict.guesses.iter(), dict.candidates.iter()),
             guesses: dict.guesses.len() as u32,
             candidates: dict.candidates.len() as u32,
         };
