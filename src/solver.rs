@@ -1073,13 +1073,6 @@ impl<'a> Solver<'a> {
                     *cnt += 1;
                 }
             }
-            if num_non_empty == 1 {
-                unsafe {
-                    let r_idx = *non_empty_indices_ptr.add(0) as usize;
-                    *counts_ptr.add(r_idx) = 0;
-                }
-                continue;
-            }
             if num_non_empty > local_max_k {
                 local_max_k = num_non_empty;
             }
@@ -1220,6 +1213,18 @@ impl<'a> Solver<'a> {
                         }
                         continue;
                     }
+                    if num_non_empty == 2 {
+                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                        let count0 = unsafe { *counts_ptr.add(r0) };
+                        if count0 == 1 || count0 == (c_len as u16 - 1) {
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                            }
+                            continue;
+                        }
+                    }
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
                     for i in 0..num_non_empty {
@@ -1231,11 +1236,6 @@ impl<'a> Solver<'a> {
                         expected_rem += (count as u32) * (count as u32);
                         debug_assert_ne!(r_idx, self.matrix.win_response.0 as usize);
                         lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                    }
-                    if num_non_empty == 2
-                        && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                    {
-                        continue;
                     }
                     if num_non_empty > local_max_k {
                         local_max_k = num_non_empty;
@@ -1421,14 +1421,16 @@ impl<'a> Solver<'a> {
         let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
 
         if c_len <= 16 {
-            let mut local_counts = [(0u16, 0u8, 0u32); 16];
-            let mut c_responses = [0u16; 16];
+            let mut local_counts = std::mem::MaybeUninit::<[(u16, u8, u32); 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u8, u32);
+            let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
+            let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let mut num_non_empty = 0;
             let mut seen_mask = [0u64; M];
             for (cand_idx, &c) in set.iter().enumerate() {
                 let r = unsafe { (*g_ptr.add(c)).0 };
                 unsafe {
-                    *c_responses.get_unchecked_mut(cand_idx) = r;
+                    *c_responses_ptr.add(cand_idx) = r;
                 }
                 let word_idx = (r >> 6) as usize;
                 let bit = 1u64 << (r & 63);
@@ -1436,12 +1438,12 @@ impl<'a> Solver<'a> {
                 if (*word & bit) == 0 {
                     *word |= bit;
                     unsafe {
-                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
+                        *local_counts_ptr.add(num_non_empty) = (r, 1, 0);
                     }
                     num_non_empty += 1;
                 } else {
                     for i in 0..num_non_empty {
-                        let entry = unsafe { local_counts.get_unchecked_mut(i) };
+                        let entry = unsafe { &mut *local_counts_ptr.add(i) };
                         if entry.0 == r {
                             entry.1 += 1;
                             break;
@@ -1457,8 +1459,10 @@ impl<'a> Solver<'a> {
             let mut cost = c_len as u32;
             let mut max_p_len = 0;
 
-            for i in 0..num_non_empty {
-                let entry = unsafe { local_counts.get_unchecked_mut(i) };
+            let local_counts_slice =
+                unsafe { std::slice::from_raw_parts_mut(local_counts_ptr, num_non_empty) };
+
+            for entry in local_counts_slice.iter_mut() {
                 let r_idx = entry.0 as usize;
                 if r_idx == self.matrix.win_response.0 as usize {
                     continue;
@@ -1483,38 +1487,38 @@ impl<'a> Solver<'a> {
                 return cost;
             }
 
-            local_counts[0..num_non_empty]
+            local_counts_slice
                 .sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
 
-            for i in 0..num_non_empty {
-                let entry = unsafe { local_counts.get_unchecked_mut(i) };
+            for entry in local_counts_slice.iter_mut() {
                 let p_len = entry.1 as usize;
                 let r_idx = entry.0 as usize;
                 if r_idx == self.matrix.win_response.0 as usize || p_len <= 2 {
                     continue;
                 }
 
-                let mut p = [0usize; 16];
+                let mut p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
+                let p_ptr = p.as_mut_ptr() as *mut usize;
                 let mut p_idx = 0;
                 for (cand_idx, &c) in set.iter().enumerate() {
-                    let r = unsafe { *c_responses.get_unchecked(cand_idx) as usize };
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) as usize };
                     if r == r_idx {
                         unsafe {
-                            *p.get_unchecked_mut(p_idx) = c;
+                            *p_ptr.add(p_idx) = c;
                         }
                         p_idx += 1;
                     }
                 }
 
+                let p_slice = unsafe { std::slice::from_raw_parts(p_ptr, p_len) };
+
                 let (quick_val, is_exact) =
-                    Self::quick_bucket_eval(self.matrix, self.dict, unsafe {
-                        p.get_unchecked(0..p_len)
-                    });
+                    Self::quick_bucket_eval(self.matrix, self.dict, p_slice);
                 let lb = entry.2;
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
                 entry.2 = used_val;
-                cert_record!(4, unsafe { p.get_unchecked(0..p_len) }, used_val, is_exact);
+                cert_record!(4, p_slice, used_val, is_exact);
 
                 if is_exact {
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -1534,7 +1538,7 @@ impl<'a> Solver<'a> {
 
                 self.current_cost_so_far += b;
                 let val = self.min_state_val(
-                    &p[0..p_len],
+                    p_slice,
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
