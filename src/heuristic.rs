@@ -10,22 +10,41 @@ pub fn compute_expected_remaining(
     candidates: &[usize],
     guess: usize,
 ) -> u32 {
-    let mut counts = [0u32; 2187];
-    for &c in candidates {
-        let r = matrix.get(guess, c);
-        counts[r.0 as usize] += 1;
-    }
-
-    let mut score = 0;
-    for &c in candidates {
-        let r = matrix.get(guess, c);
-        let count = counts[r.0 as usize];
-        if count > 0 {
-            score += count * count;
-            counts[r.0 as usize] = 0;
+    if matrix.num_responses <= 256 {
+        let mut counts = [0u16; 256];
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            counts[r.0 as usize] += 1;
         }
+
+        let mut score = 0;
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            let count = counts[r.0 as usize];
+            if count > 0 {
+                score += (count as u32) * (count as u32);
+                counts[r.0 as usize] = 0;
+            }
+        }
+        score
+    } else {
+        let mut counts = [0u16; 2187];
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            counts[r.0 as usize] += 1;
+        }
+
+        let mut score = 0;
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            let count = counts[r.0 as usize];
+            if count > 0 {
+                score += (count as u32) * (count as u32);
+                counts[r.0 as usize] = 0;
+            }
+        }
+        score
     }
-    score
 }
 
 /// Sorts a slice of guesses in-place by their `expected_remaining` heuristic score.

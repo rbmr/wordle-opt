@@ -1169,15 +1169,16 @@ impl<'a> Solver<'a> {
             let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
             let num_guesses = self.dict.guesses.len();
             let data_c_g_ptr = self.matrix.data_c_g.as_ptr();
-            let mut stack_c_ptrs = [std::ptr::null::<Response>(); 256];
+            let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Response; 256]>::uninit();
+            let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Response;
             let mut heap_c_ptrs = Vec::new();
             let c_ptrs: &[*const Response] = if c_len <= 256 {
                 for (i, &c) in set.iter().enumerate() {
                     unsafe {
-                        *stack_c_ptrs.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+                        *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                     }
                 }
-                &stack_c_ptrs[..c_len]
+                unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
             } else {
                 heap_c_ptrs.reserve(c_len);
                 for &c in set {

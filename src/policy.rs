@@ -113,77 +113,218 @@ pub(crate) fn active_guesses(
 
     let cap_bounds = &capacity_bounds_2d[max_k];
     let mut out: Vec<(usize, u32, u32)> = if candidates.len() >= 48 {
-        surviving_guesses
-            .into_par_iter()
-            .filter_map(|g| {
-                let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
-                let cap_bounds_ptr = cap_bounds.as_ptr();
-                let mut counts = [0u16; 2187];
-                let mut non_empty_indices = [0u16; 2187];
+        if matrix.num_responses <= 256 {
+            surviving_guesses
+                .par_chunks(256)
+                .flat_map_iter(|chunk| {
+                    let mut counts = [0u16; 256];
+                    let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 256]>::uninit();
+                    let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+                    let cap_bounds_ptr = cap_bounds.as_ptr();
+                    let matrix_data_ptr = matrix.data.as_ptr();
+                    let mut chunk_out = Vec::with_capacity(chunk.len());
+
+                    for &g in chunk {
+                        let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
+                        let mut num_non_empty = 0;
+                        for &c in candidates {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            let cnt = unsafe { *counts.get_unchecked(r) };
+                            if cnt == 0 {
+                                unsafe {
+                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                }
+                                num_non_empty += 1;
+                            }
+                            unsafe {
+                                *counts.get_unchecked_mut(r) = cnt + 1;
+                            }
+                        }
+                        if num_non_empty <= 1 {
+                            for i in 0..num_non_empty {
+                                let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                                unsafe {
+                                    *counts.get_unchecked_mut(r) = 0;
+                                }
+                            }
+                            continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut base_lb = candidates.len() as u32;
+                        for i in 0..num_non_empty {
+                            let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                            let v = unsafe { *counts.get_unchecked(r) as usize };
+                            expected_rem += (v as u32) * (v as u32);
+                            if r != matrix.win_response.0 as usize {
+                                base_lb += unsafe { *cap_bounds_ptr.add(v) };
+                            }
+                            unsafe {
+                                *counts.get_unchecked_mut(r) = 0;
+                            }
+                        }
+                        chunk_out.push((g, expected_rem, base_lb));
+                    }
+                    chunk_out
+                })
+                .collect()
+        } else {
+            surviving_guesses
+                .par_chunks(256)
+                .flat_map_iter(|chunk| {
+                    let mut counts = [0u16; 2187];
+                    let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
+                    let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+                    let cap_bounds_ptr = cap_bounds.as_ptr();
+                    let matrix_data_ptr = matrix.data.as_ptr();
+                    let mut chunk_out = Vec::with_capacity(chunk.len());
+
+                    for &g in chunk {
+                        let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
+                        let mut num_non_empty = 0;
+                        for &c in candidates {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            let cnt = unsafe { *counts.get_unchecked(r) };
+                            if cnt == 0 {
+                                unsafe {
+                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                }
+                                num_non_empty += 1;
+                            }
+                            unsafe {
+                                *counts.get_unchecked_mut(r) = cnt + 1;
+                            }
+                        }
+                        if num_non_empty <= 1 {
+                            for i in 0..num_non_empty {
+                                let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                                unsafe {
+                                    *counts.get_unchecked_mut(r) = 0;
+                                }
+                            }
+                            continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut base_lb = candidates.len() as u32;
+                        for i in 0..num_non_empty {
+                            let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                            let v = unsafe { *counts.get_unchecked(r) as usize };
+                            expected_rem += (v as u32) * (v as u32);
+                            if r != matrix.win_response.0 as usize {
+                                base_lb += unsafe { *cap_bounds_ptr.add(v) };
+                            }
+                            unsafe {
+                                *counts.get_unchecked_mut(r) = 0;
+                            }
+                        }
+                        chunk_out.push((g, expected_rem, base_lb));
+                    }
+                    chunk_out
+                })
+                .collect()
+        }
+    } else {
+        let mut out = Vec::with_capacity(surviving_guesses.len());
+        let cap_bounds_ptr = cap_bounds.as_ptr();
+        let num_guesses = matrix.num_guesses;
+        let data_c_g_ptr = matrix.data_c_g.as_ptr();
+        let mut stack_c_ptrs =
+            std::mem::MaybeUninit::<[*const crate::core::Response; 48]>::uninit();
+        let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
+        for (i, &c) in candidates.iter().enumerate() {
+            unsafe {
+                *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+            }
+        }
+        let c_ptrs = unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, candidates.len()) };
+
+        if matrix.num_responses <= 256 {
+            let mut counts = [0u16; 256];
+            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 256]>::uninit();
+            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+
+            for g in surviving_guesses {
                 let mut num_non_empty = 0;
-                for &c in candidates {
-                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                    non_empty_indices[num_non_empty] = r as u16;
-                    num_non_empty += (counts[r] == 0) as usize;
-                    counts[r] += 1;
+                for &c_base in c_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
+                    let cnt = unsafe { *counts.get_unchecked(r) };
+                    if cnt == 0 {
+                        unsafe {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        }
+                        num_non_empty += 1;
+                    }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = cnt + 1;
+                    }
                 }
                 if num_non_empty <= 1 {
-                    return None;
+                    for i in 0..num_non_empty {
+                        let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                        unsafe {
+                            *counts.get_unchecked_mut(r) = 0;
+                        }
+                    }
+                    continue;
                 }
                 let mut expected_rem = 0u32;
                 let mut base_lb = candidates.len() as u32;
                 for i in 0..num_non_empty {
-                    let r = non_empty_indices[i] as usize;
-                    let v = counts[r] as usize;
+                    let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                    let v = unsafe { *counts.get_unchecked(r) as usize };
                     expected_rem += (v as u32) * (v as u32);
                     if r != matrix.win_response.0 as usize {
                         base_lb += unsafe { *cap_bounds_ptr.add(v) };
                     }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = 0;
+                    }
                 }
-                Some((g, expected_rem, base_lb))
-            })
-            .collect()
-    } else {
-        let mut out = Vec::with_capacity(surviving_guesses.len());
-        let mut counts = [0u16; 2187];
-        let mut non_empty_indices = [0u16; 2187];
-        let cap_bounds_ptr = cap_bounds.as_ptr();
-        let num_guesses = matrix.num_guesses;
-        let data_c_g_ptr = matrix.data_c_g.as_ptr();
-        let mut stack_c_ptrs = [std::ptr::null::<crate::core::Response>(); 48];
-        for (i, &c) in candidates.iter().enumerate() {
-            unsafe {
-                *stack_c_ptrs.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+                out.push((g, expected_rem, base_lb));
             }
-        }
-        let c_ptrs = &stack_c_ptrs[..candidates.len()];
+        } else {
+            let mut counts = [0u16; 2187];
+            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
+            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
 
-        for g in surviving_guesses {
-            let mut num_non_empty = 0;
-            for &c_base in c_ptrs {
-                let r = unsafe { (*c_base.add(g)).0 as usize };
-                non_empty_indices[num_non_empty] = r as u16;
-                num_non_empty += (counts[r] == 0) as usize;
-                counts[r] += 1;
-            }
-            if num_non_empty <= 1 {
+            for g in surviving_guesses {
+                let mut num_non_empty = 0;
+                for &c_base in c_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
+                    let cnt = unsafe { *counts.get_unchecked(r) };
+                    if cnt == 0 {
+                        unsafe {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        }
+                        num_non_empty += 1;
+                    }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = cnt + 1;
+                    }
+                }
+                if num_non_empty <= 1 {
+                    for i in 0..num_non_empty {
+                        let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                        unsafe {
+                            *counts.get_unchecked_mut(r) = 0;
+                        }
+                    }
+                    continue;
+                }
+                let mut expected_rem = 0u32;
+                let mut base_lb = candidates.len() as u32;
                 for i in 0..num_non_empty {
-                    counts[non_empty_indices[i] as usize] = 0;
+                    let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                    let v = unsafe { *counts.get_unchecked(r) as usize };
+                    expected_rem += (v as u32) * (v as u32);
+                    if r != matrix.win_response.0 as usize {
+                        base_lb += unsafe { *cap_bounds_ptr.add(v) };
+                    }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = 0;
+                    }
                 }
-                continue;
+                out.push((g, expected_rem, base_lb));
             }
-            let mut expected_rem = 0u32;
-            let mut base_lb = candidates.len() as u32;
-            for i in 0..num_non_empty {
-                let r = non_empty_indices[i] as usize;
-                let v = counts[r] as usize;
-                expected_rem += (v as u32) * (v as u32);
-                if r != matrix.win_response.0 as usize {
-                    base_lb += unsafe { *cap_bounds_ptr.add(v) };
-                }
-                counts[r] = 0;
-            }
-            out.push((g, expected_rem, base_lb));
         }
         out
     };
@@ -196,16 +337,13 @@ pub(crate) fn active_guesses(
 /// distinct responses). A guess that doesn't is *useless*: it leaves the
 /// candidate set unchanged and can never terminate a policy.
 fn guess_is_useful(matrix: &ResponseMatrix, candidates: &[usize], guess: usize) -> bool {
-    let mut seen = [false; 2187];
-    let mut distinct = 0;
-    for &c in candidates {
-        let r = matrix.get(guess, c).0 as usize;
-        if !seen[r] {
-            seen[r] = true;
-            distinct += 1;
-            if distinct > 1 {
-                return true;
-            }
+    if candidates.len() <= 1 {
+        return false;
+    }
+    let first = matrix.get(guess, candidates[0]);
+    for &c in &candidates[1..] {
+        if matrix.get(guess, c) != first {
+            return true;
         }
     }
     false
@@ -228,29 +366,69 @@ impl CandidatesPolicy for MinRemainingPolicy<'_> {
     fn guess(&self, candidates: &[usize]) -> usize {
         let mut best_guess = usize::MAX;
         let mut best_score = u64::MAX;
-        let mut counts = [0u32; 2187];
-        for g in 0..self.matrix.num_guesses {
-            for v in counts.iter_mut() {
-                *v = 0;
-            }
-            let mut distinct = 0;
-            for &c in candidates {
-                let r = self.matrix.get(g, c).0 as usize;
-                if counts[r] == 0 {
-                    distinct += 1;
+        if self.matrix.num_responses <= 256 {
+            let mut counts = [0u16; 256];
+            for g in 0..self.matrix.num_guesses {
+                let mut distinct = 0;
+                for &c in candidates {
+                    let r = self.matrix.get(g, c).0 as usize;
+                    if counts[r] == 0 {
+                        distinct += 1;
+                    }
+                    counts[r] += 1;
                 }
-                counts[r] += 1;
+                if distinct <= 1 {
+                    for &c in candidates {
+                        let r = self.matrix.get(g, c).0 as usize;
+                        counts[r] = 0;
+                    }
+                    continue; // useless
+                }
+                let mut score = 0u64;
+                for &c in candidates {
+                    let r = self.matrix.get(g, c).0 as usize;
+                    let v = counts[r];
+                    if v > 0 {
+                        score += (v as u64) * (v as u64);
+                        counts[r] = 0;
+                    }
+                }
+                if score < best_score {
+                    best_score = score;
+                    best_guess = g;
+                }
             }
-            if distinct <= 1 {
-                continue; // useless
-            }
-            let mut score = 0u64;
-            for &v in counts.iter() {
-                score += (v as u64) * (v as u64);
-            }
-            if score < best_score {
-                best_score = score;
-                best_guess = g;
+        } else {
+            let mut counts = [0u16; 2187];
+            for g in 0..self.matrix.num_guesses {
+                let mut distinct = 0;
+                for &c in candidates {
+                    let r = self.matrix.get(g, c).0 as usize;
+                    if counts[r] == 0 {
+                        distinct += 1;
+                    }
+                    counts[r] += 1;
+                }
+                if distinct <= 1 {
+                    for &c in candidates {
+                        let r = self.matrix.get(g, c).0 as usize;
+                        counts[r] = 0;
+                    }
+                    continue; // useless
+                }
+                let mut score = 0u64;
+                for &c in candidates {
+                    let r = self.matrix.get(g, c).0 as usize;
+                    let v = counts[r];
+                    if v > 0 {
+                        score += (v as u64) * (v as u64);
+                        counts[r] = 0;
+                    }
+                }
+                if score < best_score {
+                    best_score = score;
+                    best_guess = g;
+                }
             }
         }
         best_guess
@@ -373,28 +551,52 @@ impl<'a> OptimalPolicy<'a> {
         cand_guesses[0..n].sort_unstable();
 
         let matrix_data_ptr = self.matrix.data.as_ptr();
-        for &g in &cand_guesses[0..n] {
-            let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
+        if self.matrix.num_responses <= 256 {
+            for &g in &cand_guesses[0..n] {
+                let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
 
-            let mut seen = [0u16; 16];
-            let mut has_collision = false;
+                let mut seen_mask = [0u64; 4];
+                let mut has_collision = false;
 
-            for (seen_len, &c) in candidates.iter().enumerate() {
-                let r = unsafe { (*g_ptr.add(c)).0 };
-                for &prev in &seen[..seen_len] {
-                    if prev == r {
+                for &c in candidates {
+                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                    let word_idx = r >> 6;
+                    let bit = 1u64 << (r & 63);
+                    if (seen_mask[word_idx] & bit) != 0 {
                         has_collision = true;
                         break;
                     }
+                    seen_mask[word_idx] |= bit;
                 }
-                if has_collision {
-                    break;
-                }
-                seen[seen_len] = r;
-            }
 
-            if !has_collision {
-                return Some((g, (2 * n - 1) as u32));
+                if !has_collision {
+                    return Some((g, (2 * n - 1) as u32));
+                }
+            }
+        } else {
+            for &g in &cand_guesses[0..n] {
+                let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
+
+                let mut seen = [0u16; 16];
+                let mut has_collision = false;
+
+                for (seen_len, &c) in candidates.iter().enumerate() {
+                    let r = unsafe { (*g_ptr.add(c)).0 };
+                    for &prev in &seen[..seen_len] {
+                        if prev == r {
+                            has_collision = true;
+                            break;
+                        }
+                    }
+                    if has_collision {
+                        break;
+                    }
+                    seen[seen_len] = r;
+                }
+
+                if !has_collision {
+                    return Some((g, (2 * n - 1) as u32));
+                }
             }
         }
 
