@@ -1487,8 +1487,7 @@ impl<'a> Solver<'a> {
                 return cost;
             }
 
-            local_counts_slice
-                .sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
+            local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
 
             for entry in local_counts_slice.iter_mut() {
                 let p_len = entry.1 as usize;
