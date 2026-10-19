@@ -1344,26 +1344,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             };
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let mut num_non_empty_local = 0usize;
             for &c in set {
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
-                    let cnt = counts_ptr.add(r);
-                    let curr_non_empty = num_non_empty.get();
-                    *non_empty_indices_ptr.add(curr_non_empty) = r as u16;
-                    num_non_empty.set(curr_non_empty + (*cnt == 0) as usize);
-                    *cnt += 1;
+                    let cnt_ptr = counts_ptr.add(r);
+                    let cnt = *cnt_ptr;
+                    if cnt == 0 {
+                        *non_empty_indices_ptr.add(num_non_empty_local) = r as u16;
+                        num_non_empty_local += 1;
+                    }
+                    *cnt_ptr = cnt + 1;
                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
                 }
             }
+            num_non_empty.set(num_non_empty_local);
 
-            if num_non_empty.get() == 1 {
+            if num_non_empty_local == 1 {
                 return beta;
             }
 
             let mut cost = set.len() as u32;
             let mut max_p_len = 0;
 
-            for i in 0..num_non_empty.get() {
+            for i in 0..num_non_empty_local {
                 let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
                 if r_idx == WIN {
                     continue;
@@ -1462,7 +1466,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
             let mut curr = 0;
-            let n_non_empty = num_non_empty.get();
+            let n_non_empty = num_non_empty_local;
             for i in 0..n_non_empty {
                 let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
                 unsafe {
