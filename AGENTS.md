@@ -4,8 +4,8 @@ This file is the single, authoritative source of process rules for whoever
 (or whatever) is working on this repo autonomously. If you find guidance
 elsewhere - a comment left in an old issue, a stray note on disk, something
 from an earlier session - and it conflicts with this file, **this file
-wins**. Update this file itself, in a commit, when a rule needs to change;
-don't leave the correction somewhere else.
+wins**. Update this file itself, in a pull request, when a rule needs to
+change; don't leave the correction somewhere else.
 
 ## The actual goal - read this twice
 
@@ -284,17 +284,18 @@ no meaningful overhead to the solve itself.
 day was written when a run took hours; it now takes minutes, so the clock is not
 the constraint. What that cap was really protecting was signal - a full run is a
 checkpoint only if it marks a real change, and running one after every commit
-turns the trend into noise. So run one whenever a commit that changes solver
-performance has landed, as many times in a day as that happens, and skip it when
-nothing performance-relevant changed: a run whose commit differs only in docs or
-tests measures nothing new. Two runs cannot collide, because every artifact is
-stamped with the commit it ran as.
+turns the trend into noise. So run one whenever a branch carries a
+performance-relevant change, as many times in a day as that happens, and skip it
+when nothing performance-relevant changed: a run whose commit differs only in
+docs or tests measures nothing new. Two runs cannot collide, because every
+artifact is stamped with the commit it ran as.
 
 When to run it is your judgment, not a schedule:
 
-- Run one when a commit with a **performance-relevant change** has landed, and
-  skip it when nothing performance-relevant changed. A run whose commit differs
-  only in docs or tests measures nothing new.
+- Run one when a branch carries a **performance-relevant change**, and skip it
+  when nothing performance-relevant changed. A run whose commit differs only in
+  docs or tests measures nothing new. The result goes in the pull request, so
+  the maintainer sees it before merging.
 - Nothing schedules it. There is no daily job.
 - Only launch it when large-N evidence gives a specific, verified reason to expect
   it will finish in a bounded time (see ARCHITECTURE.md's "Known Scaling
@@ -367,12 +368,47 @@ Operationally:
   conditions, memory ordering, ABA problems, use-after-free-shaped bugs. There is
   no separate review pass checking this for you. The self-review is the review.
 
+## Branches, pull requests and releases
+
+`main` is the published branch: every commit on it that passes CI is built and
+put in the `latest` release, so whatever lands there is what strangers
+download. Only the maintainer merges to `main`. Agents never do.
+
+- **Never push to, merge into or force-push `main`.** Never push tags. Never
+  create, edit or delete releases. Never run the "Prebuilt binaries" workflow
+  by hand.
+- Work on a branch named `agent/<short-topic>`, one per piece of work, cut from
+  the current `main`. Push it regularly and keep a draft pull request open for
+  it, so CI runs on every push. The maintainer reviews and merges; a merged PR
+  is the only way work reaches `main`.
+- Rebase on `main` when it moves. Do not start a second piece of work on top of
+  an unreviewed branch unless it truly depends on it; say so in the PR if it
+  does.
+- Before marking a PR ready for review, run these and report the results in the
+  PR description:
+  - `cargo test --release`;
+  - the ignored tests:
+    `cargo test --release --test published_optima --test full_scale --test parallel_consistency -- --ignored`;
+  - `cargo test --release --features tt-audit --test tt_audit -- --ignored`
+    if the change touches the parallel scans, the global beta or what is stored
+    in the transposition table;
+  - a full certify-and-check on the compute machine for any change to solver,
+    bound or cache logic (see "Correctness practice").
+- Every performance claim needs timing evidence: interleaved runs against
+  `main`, with the seeds recorded in `.agent/run_history.md`, and the command
+  and its captured output quoted in the PR.
+- Progress goes to the single open "Agent progress log" issue (#1), not to a
+  new issue per update. Review requests are pull requests. (Issue #9 is closed;
+  do not reopen or duplicate it.)
+- A failed release build is a bug to fix like a failed test. If one happens,
+  report it in the progress issue; do not re-run or edit the release yourself.
+
 ## Communication and repo hygiene
 
 - Commit code to this repo, and communicate with the maintainer through GitHub
   Issues rather than commit messages or files scattered on disk. Post progress to
-  the single ongoing "Agent progress log" issue rather than opening a new issue per
-  update.
+  the single ongoing "Agent progress log" issue (#1) rather than opening a new
+  issue per update.
 - Before opening a new milestone-style issue, check whether an equivalent one is
   already open and comment there instead of creating a duplicate. (This repo once
   had three separate "MILESTONE: full-scale estimate under 10 hours" issues open at
@@ -382,26 +418,27 @@ Operationally:
 - Keep the working tree clean: commit or discard changes before moving to new
   work, and delete one-off and scratch files when you are done with them rather
   than leaving them untracked.
-- Push to `origin/main` regularly. Don't let commits sit local-only. A commit that
-  exists on one machine only is one disk failure away from being lost, and anyone
-  checking GitHub sees a stale state. Push after each commit, or at minimum before
-  moving on to a different task. (This has happened: 11 commits, including a
-  correctness fix to `build.rs`, sat unpushed for over a day.)
+- Push your branch regularly. Don't let commits sit local-only: a commit that
+  exists on one machine only is one disk failure away from being lost, and the
+  pull request is the only place the maintainer sees the work. (This has
+  happened: 11 commits, including a correctness fix to `build.rs`, sat unpushed
+  for over a day.)
 - Every commit on `main` that passes CI is built and published as the
   `latest` release (`.github/workflows/release.yml`), so whatever lands on
-  `main` is what strangers download. After pushing, check that both "Rust CI"
-  and "Prebuilt binaries" succeeded; a failed release build is a bug to fix
-  like a failed test.
+  `main` is what strangers download. Only the maintainer merges to `main`.
+  After a merge, check that both "Rust CI" and "Prebuilt binaries" succeeded; a
+  failed release build is a bug to fix like a failed test, and it is reported,
+  not fixed by hand.
 - **Always run the exact CI gates before pushing.** You must have a pre-push hook
   configured (`git config core.hooksPath .githooks`) containing:
   `cargo fmt --all -- --check && cargo clippy --release -- -D warnings && cargo test --release`.
+  The hook also refuses any push to `main` or to a tag.
 - Commit messages: terse and professional, describing what changed and why. No AI
   branding, no narrating your own process. The existing git history
   (`git log --oneline`) is a good model to match.
-- There is no separate reviewer, whether a different model or a scheduled process.
-  The setup is deliberately minimal and hands-off, and every cycle of usage goes
-  toward the actual problem rather than auxiliary tooling. You are responsible for
-  your own correctness review before committing.
+- The maintainer reviews and merges every pull request. There is no separate
+  automated reviewer, whether a different model or a scheduled process: you are
+  responsible for your own correctness review before opening a PR.
 
 ## If you're blocked
 
