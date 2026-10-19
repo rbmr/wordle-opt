@@ -1722,9 +1722,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             for i in 0..num_non_empty {
                 let entry = unsafe { &mut *local_counts_ptr.add(i) };
                 let p_len = entry.1 as usize;
-                let r_idx = entry.0 as usize;
-                if r_idx == WIN || p_len <= 2 {
-                    continue;
+                if p_len <= 2 {
+                    break;
                 }
 
                 let mut p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
