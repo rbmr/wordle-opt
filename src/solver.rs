@@ -1503,6 +1503,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let mut num_non_empty = 0;
             let mut seen_mask = [0u64; M];
+            let seen_ptr = seen_mask.as_mut_ptr();
+            let mut prev_idx = 0usize;
             let set_ptr = set.as_ptr();
             for cand_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
@@ -1512,19 +1514,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let word_idx = (r >> 6) as usize;
                 let bit = 1u64 << (r & 63);
-                let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                let word = unsafe { &mut *seen_ptr.add(word_idx) };
                 if (*word & bit) == 0 {
                     *word |= bit;
+                    prev_idx = num_non_empty;
                     unsafe {
                         *local_counts_ptr.add(num_non_empty) = (r, 1, 0);
                     }
                     num_non_empty += 1;
                 } else {
-                    for i in 0..num_non_empty {
-                        let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                        if entry.0 == r {
-                            entry.1 += 1;
-                            break;
+                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
+                    if prev_entry.0 == r {
+                        prev_entry.1 += 1;
+                    } else {
+                        for i in 0..num_non_empty {
+                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                            if entry.0 == r {
+                                entry.1 += 1;
+                                prev_idx = i;
+                                break;
+                            }
                         }
                     }
                 }
