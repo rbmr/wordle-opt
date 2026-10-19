@@ -1070,12 +1070,15 @@ impl<'a> Solver<'a> {
             let mut valid_phase2_k = 0;
             let mut is_in_set =
                 std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
+            let mut c_mask = 0u32;
             for &c in set {
                 let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
                 unsafe {
                     *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
+                    c_mask |= *self.matrix.candidate_masks.get_unchecked(c);
                 }
             }
+            let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
             let num_guesses = self.dict.guesses.len();
             let data_c_g_ptr = self.matrix.data_c_g.as_ptr();
             let mut stack_c_ptrs = [std::ptr::null::<Response>(); 256];
@@ -1105,6 +1108,11 @@ impl<'a> Solver<'a> {
                     let g = block_idx * 64 + tz as usize;
                     b &= b - 1;
 
+                    let g_mask = unsafe { *guess_masks_ptr.add(g) };
+                    if (g_mask & c_mask) == 0 {
+                        continue;
+                    }
+
                     let mut num_non_empty = 0;
                     for &c_base in c_ptrs {
                         let r = unsafe { (*c_base.add(g)).0 as usize };
@@ -1131,9 +1139,8 @@ impl<'a> Solver<'a> {
                             *counts.get_unchecked_mut(r_idx) = 0;
                         }
                         expected_rem += (count as u32) * (count as u32);
-                        if r_idx != Response::WIN.0 as usize {
-                            lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                        }
+                        debug_assert_ne!(r_idx, Response::WIN.0 as usize);
+                        lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
                     }
                     if num_non_empty == 2
                         && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
