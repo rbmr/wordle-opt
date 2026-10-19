@@ -634,6 +634,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let scratch_ref = self.scratch.as_mut().unwrap();
             let table = &mut scratch_ref.scratch_hash_table[depth];
+            let table_ptr = table.as_mut_ptr();
             let added_indices = &mut scratch_ref.scratch_added_indices[depth];
             added_indices.clear();
             let num_guesses = self.dict.guesses.len();
@@ -647,6 +648,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let shift = 64 - table_size.trailing_zeros();
 
             let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let set_ptr = set.as_ptr();
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
@@ -667,9 +670,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 projs_chunk.fill(0);
                 let chunk_len = chunk_end - chunk_start;
                 let projs_ptr = projs_chunk.as_mut_ptr();
-                for &c in set {
+                for c_idx in 0..c_len {
+                    let c = unsafe { *set_ptr.add(c_idx) };
                     let c_off = c * num_guesses + chunk_start;
-                    let z = unsafe { *self.matrix.zobrist.get_unchecked(c) };
+                    let z = unsafe { *zobrist_ptr.add(c) };
                     let c_ptr = unsafe { data_cg_ptr.add(c_off) };
                     for i in 0..chunk_len {
                         let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
@@ -683,8 +687,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             for r in 0..R {
                 let mut p = 0u64;
                 let m = r as u64 + 1;
-                for &c in set {
-                    p ^= unsafe { *self.matrix.zobrist.get_unchecked(c) }.wrapping_mul(m);
+                for c_idx in 0..c_len {
+                    let c = unsafe { *set_ptr.add(c_idx) };
+                    p ^= unsafe { *zobrist_ptr.add(c) }.wrapping_mul(m);
                 }
                 if p == 0 {
                     p = 1;
@@ -692,10 +697,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let proj = p;
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
-                    let slot = unsafe { *table.get_unchecked(idx) };
+                    let slot = unsafe { *table_ptr.add(idx) };
                     if slot == 0 {
                         unsafe {
-                            *table.get_unchecked_mut(idx) = proj;
+                            *table_ptr.add(idx) = proj;
                         }
                         added_indices.push(idx);
                         break;
@@ -721,10 +726,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let proj = unsafe { *projs.get_unchecked(g) };
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                     loop {
-                        let slot = unsafe { *table.get_unchecked(idx) };
+                        let slot = unsafe { *table_ptr.add(idx) };
                         if slot == 0 {
                             unsafe {
-                                *table.get_unchecked_mut(idx) = proj;
+                                *table_ptr.add(idx) = proj;
                             }
                             added_indices.push(idx);
                             kept_mask |= 1 << tz;
@@ -743,7 +748,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             for &idx in added_indices.iter() {
                 unsafe {
-                    *table.get_unchecked_mut(idx) = 0;
+                    *table_ptr.add(idx) = 0;
                 }
             }
 
@@ -1385,10 +1390,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut cost = c_len as u32;
             let mut max_p_len = 0;
 
-            let local_counts_slice =
-                unsafe { std::slice::from_raw_parts_mut(local_counts_ptr, num_non_empty) };
-
-            for entry in local_counts_slice.iter_mut() {
+            for i in 0..num_non_empty {
+                let entry = unsafe { &mut *local_counts_ptr.add(i) };
                 let r_idx = entry.0 as usize;
                 if r_idx == WIN {
                     continue;
@@ -1441,10 +1444,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *local_counts_ptr.add(2) = e2;
                 }
             } else if num_non_empty > 3 {
+                let local_counts_slice =
+                    unsafe { std::slice::from_raw_parts_mut(local_counts_ptr, num_non_empty) };
                 local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
             }
 
-            for entry in local_counts_slice.iter_mut() {
+            for i in 0..num_non_empty {
+                let entry = unsafe { &mut *local_counts_ptr.add(i) };
                 let p_len = entry.1 as usize;
                 let r_idx = entry.0 as usize;
                 if r_idx == WIN || p_len <= 2 {
