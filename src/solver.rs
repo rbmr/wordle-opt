@@ -1156,11 +1156,14 @@ impl<'a> Solver<'a> {
             let mut is_in_set =
                 std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
             let mut c_mask = 0u32;
+            let mut multi_c_mask = 0u32;
             for &c in set {
                 let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
+                let m = unsafe { *self.matrix.candidate_masks.get_unchecked(c) };
+                multi_c_mask |= c_mask & m;
+                c_mask |= m;
                 unsafe {
                     *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
-                    c_mask |= *self.matrix.candidate_masks.get_unchecked(c);
                 }
             }
             let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
@@ -1194,7 +1197,8 @@ impl<'a> Solver<'a> {
                     b &= b - 1;
 
                     let g_mask = unsafe { *guess_masks_ptr.add(g) };
-                    if (g_mask & c_mask) == 0 {
+                    let shared = g_mask & c_mask;
+                    if (shared & (shared - 1)) == 0 && (shared & multi_c_mask) == 0 {
                         continue;
                     }
 
