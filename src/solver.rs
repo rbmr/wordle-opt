@@ -136,6 +136,9 @@ impl SolverScratch {
             if self.scratch_is_in_set[d].len() < words {
                 self.scratch_is_in_set[d].resize(words, 0);
             }
+            if self.scratch_sorted_sets[d].len() < num_guesses {
+                self.scratch_sorted_sets[d].resize(num_guesses, 0);
+            }
             if self.scratch_projs[d].len() < num_guesses {
                 self.scratch_projs[d].resize(num_guesses, 0);
             }
@@ -1397,14 +1400,41 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            let eval_indices_slice =
-                unsafe { std::slice::from_raw_parts_mut(eval_indices_ptr, num_eval) };
-            eval_indices_slice.sort_unstable_by_key(|&r| {
-                (std::cmp::Reverse(unsafe { *counts_ptr.add(r as usize) }), r)
-            });
-
-            let split_idx = eval_indices_slice
-                .partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 });
+            let split_idx = if num_eval == 1 {
+                let r0 = unsafe { *eval_indices_ptr as usize };
+                if unsafe { *counts_ptr.add(r0) > 15 } {
+                    1
+                } else {
+                    0
+                }
+            } else if num_eval == 2 {
+                let r0 = unsafe { *eval_indices_ptr };
+                let r1 = unsafe { *eval_indices_ptr.add(1) };
+                let c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    unsafe {
+                        *eval_indices_ptr = r1;
+                        *eval_indices_ptr.add(1) = r0;
+                    }
+                    if c1 > 15 {
+                        if c0 > 15 { 2 } else { 1 }
+                    } else {
+                        0
+                    }
+                } else if c0 > 15 {
+                    if c1 > 15 { 2 } else { 1 }
+                } else {
+                    0
+                }
+            } else {
+                let eval_indices_slice =
+                    unsafe { std::slice::from_raw_parts_mut(eval_indices_ptr, num_eval) };
+                eval_indices_slice.sort_unstable_by_key(|&r| {
+                    (std::cmp::Reverse(unsafe { *counts_ptr.add(r as usize) }), r)
+                });
+                eval_indices_slice.partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 })
+            };
 
             for i in 0..num_eval {
                 let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
@@ -1459,7 +1489,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut sorted_set =
                 std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
-            sorted_set.resize(set.len(), 0);
+            if sorted_set.len() < set.len() {
+                sorted_set.resize(set.len(), 0);
+            }
 
             let mut offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let offsets_ptr = offsets.as_mut_ptr() as *mut u16;
