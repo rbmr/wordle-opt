@@ -1714,9 +1714,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *local_counts_ptr.add(3) = e3;
                 }
             } else if num_non_empty > 4 {
-                let local_counts_slice =
-                    unsafe { std::slice::from_raw_parts_mut(local_counts_ptr, num_non_empty) };
-                local_counts_slice.sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
+                for j in 1..num_non_empty {
+                    let key = unsafe { *local_counts_ptr.add(j) };
+                    let mut k = j;
+                    while k > 0 && unsafe { (*local_counts_ptr.add(k - 1)).1 < key.1 } {
+                        unsafe {
+                            *local_counts_ptr.add(k) = *local_counts_ptr.add(k - 1);
+                        }
+                        k -= 1;
+                    }
+                    unsafe {
+                        *local_counts_ptr.add(k) = key;
+                    }
+                }
             }
 
             for i in 0..num_non_empty {
