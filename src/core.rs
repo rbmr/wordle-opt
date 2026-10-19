@@ -158,6 +158,35 @@ impl Response {
     }
 }
 
+pub trait ResponseElem:
+    Copy + Default + Send + Sync + 'static + PartialEq + Eq + PartialOrd + Ord
+{
+    fn to_usize(self) -> usize;
+    fn from_usize(val: usize) -> Self;
+}
+
+impl ResponseElem for u8 {
+    #[inline(always)]
+    fn to_usize(self) -> usize {
+        self as usize
+    }
+    #[inline(always)]
+    fn from_usize(val: usize) -> Self {
+        val as u8
+    }
+}
+
+impl ResponseElem for Response {
+    #[inline(always)]
+    fn to_usize(self) -> usize {
+        self.0 as usize
+    }
+    #[inline(always)]
+    fn from_usize(val: usize) -> Self {
+        Response(val as u16)
+    }
+}
+
 impl std::fmt::Display for Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut val = self.0;

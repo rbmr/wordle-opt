@@ -70,10 +70,10 @@ pub fn compute_max_branching_factor(
         (0..matrix.num_guesses)
             .into_par_iter()
             .map(|g| {
-                let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
                 let mut mask = [0u64; 4];
                 for &c in candidates {
-                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                    let r = unsafe { *g_ptr.add(c) as usize };
                     unsafe {
                         *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                     }
@@ -116,14 +116,14 @@ pub fn compute_candidate_branching_factor_with_target(
     }
     let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = 0;
-    let data_ptr = matrix.data.as_ptr();
     if matrix.num_responses <= 256 {
+        let data_ptr = matrix.data_u8.as_ptr();
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
             let mut mask = [0u64; 4];
             for &other in candidates {
-                let r = unsafe { (*g_ptr.add(other)).0 as usize };
+                let r = unsafe { *g_ptr.add(other) as usize };
                 unsafe {
                     *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                 }
@@ -140,6 +140,7 @@ pub fn compute_candidate_branching_factor_with_target(
             }
         }
     } else {
+        let data_ptr = matrix.data.as_ptr();
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
@@ -234,28 +235,27 @@ pub fn compute_max_branching_factor_seq_with_target(
     let mid = candidates.len() / 2;
     let rem_len = candidates.len() - mid;
     let num_guesses = matrix.num_guesses;
-    let data_c_g_ptr = matrix.data_c_g.as_ptr();
-
-    let mut stack_ptrs = std::mem::MaybeUninit::<[*const crate::core::Response; 256]>::uninit();
-    let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
-    let mut heap_ptrs = Vec::new();
-    let (c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
-        for (i, &c) in candidates.iter().enumerate() {
-            unsafe {
-                *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
-            }
-        }
-        let all_ptrs = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
-        (&all_ptrs[..mid], &all_ptrs[mid..])
-    } else {
-        heap_ptrs.reserve(candidates.len());
-        for &c in candidates {
-            heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-        }
-        (&heap_ptrs[..mid], &heap_ptrs[mid..])
-    };
-
     if matrix.num_responses <= 256 {
+        let data_c_g_ptr = matrix.data_c_g_u8.as_ptr();
+        let mut stack_ptrs = std::mem::MaybeUninit::<[*const u8; 256]>::uninit();
+        let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const u8;
+        let mut heap_ptrs = Vec::new();
+        let (c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
+            }
+            let all_ptrs = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
+            (&all_ptrs[..mid], &all_ptrs[mid..])
+        } else {
+            heap_ptrs.reserve(candidates.len());
+            for &c in candidates {
+                heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+            }
+            (&heap_ptrs[..mid], &heap_ptrs[mid..])
+        };
+
         for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
             let overlap = g_mask & c_mask;
             if overlap == 0 {
@@ -287,7 +287,7 @@ pub fn compute_max_branching_factor_seq_with_target(
 
             let mut mask = [0u64; 4];
             for &c_base in c_half1_ptrs {
-                let r = unsafe { (*c_base.add(g)).0 as usize };
+                let r = unsafe { *c_base.add(g) as usize };
                 unsafe {
                     *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                 }
@@ -300,7 +300,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 continue;
             }
             for &c_base in c_half2_ptrs {
-                let r = unsafe { (*c_base.add(g)).0 as usize };
+                let r = unsafe { *c_base.add(g) as usize };
                 unsafe {
                     *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                 }
@@ -317,6 +317,26 @@ pub fn compute_max_branching_factor_seq_with_target(
             }
         }
     } else {
+        let data_c_g_ptr = matrix.data_c_g.as_ptr();
+        let mut stack_ptrs = std::mem::MaybeUninit::<[*const crate::core::Response; 256]>::uninit();
+        let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
+        let mut heap_ptrs = Vec::new();
+        let (c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
+            }
+            let all_ptrs = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
+            (&all_ptrs[..mid], &all_ptrs[mid..])
+        } else {
+            heap_ptrs.reserve(candidates.len());
+            for &c in candidates {
+                heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+            }
+            (&heap_ptrs[..mid], &heap_ptrs[mid..])
+        };
+
         for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
             let overlap = g_mask & c_mask;
             if overlap == 0 {
@@ -930,9 +950,8 @@ mod target_bound_tests {
                 };
 
                 let mut mask = [0u64; 4];
-                let g_offset = g * matrix.num_candidates;
                 for &c in subset {
-                    let r = matrix.data[g_offset + c].0 as usize;
+                    let r = matrix.get(g, c).0 as usize;
                     mask[r >> 6] |= 1u64 << (r & 63);
                 }
                 let actual_k = (mask[0].count_ones()

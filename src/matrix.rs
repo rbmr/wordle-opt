@@ -23,6 +23,8 @@ pub struct ResponseMatrix {
     /// for a fixed candidate. This is critical for the `is_equivalent` check which compares two
     /// candidates across all possible guesses.
     pub data_c_g: Vec<Response>,
+    pub data_u8: Vec<u8>,
+    pub data_c_g_u8: Vec<u8>,
     pub candidate_to_guess: Vec<usize>,
     pub guess_chars: Vec<[u8; 8]>,
 }
@@ -34,7 +36,6 @@ impl ResponseMatrix {
         let word_len = dict.word_len;
         let num_responses = 3usize.pow(word_len.min(10) as u32);
         let win_response = Response::win_for_len(word_len);
-        let mut data = Vec::with_capacity(num_guesses * num_candidates);
         let mut guess_masks = Vec::with_capacity(num_guesses);
         let mut candidate_masks = Vec::with_capacity(num_candidates);
         let mut zobrist = Vec::with_capacity(num_candidates);
@@ -67,27 +68,58 @@ impl ResponseMatrix {
 
         use rayon::prelude::*;
 
-        // Pre-allocate the data array
-        data.resize(dict.guesses.len() * dict.candidates.len(), Response(0));
+        let total_cells = num_guesses * num_candidates;
+        let mut data = Vec::new();
+        let mut data_c_g = Vec::new();
+        let mut data_u8 = Vec::new();
+        let mut data_c_g_u8 = Vec::new();
 
-        let num_candidates = dict.candidates.len();
         let guesses = &dict.guesses;
         let candidates = &dict.candidates;
 
-        // Compute rows in parallel
-        data.par_chunks_mut(num_candidates)
-            .enumerate()
-            .for_each(|(g, row)| {
-                let guess = &guesses[g];
-                for (c, candidate) in candidates.iter().enumerate() {
-                    row[c] = Response::compute(candidate, guess);
-                }
-            });
+        if word_len <= 5 {
+            data_u8.resize(total_cells, 0u8);
+            data_u8
+                .par_chunks_mut(num_candidates)
+                .enumerate()
+                .for_each(|(g, row)| {
+                    let guess = &guesses[g];
+                    for (c, candidate) in candidates.iter().enumerate() {
+                        row[c] = Response::compute(candidate, guess).0 as u8;
+                    }
+                });
 
-        let mut data_c_g = vec![Response(0); num_candidates * num_guesses];
-        for c in 0..num_candidates {
-            for g in 0..num_guesses {
-                data_c_g[c * num_guesses + g] = data[g * num_candidates + c];
+            data_c_g_u8.resize(total_cells, 0u8);
+            for c in 0..num_candidates {
+                for g in 0..num_guesses {
+                    data_c_g_u8[c * num_guesses + g] = data_u8[g * num_candidates + c];
+                }
+            }
+
+            data.resize(total_cells, Response(0));
+            for i in 0..total_cells {
+                data[i] = Response(data_u8[i] as u16);
+            }
+            data_c_g.resize(total_cells, Response(0));
+            for i in 0..total_cells {
+                data_c_g[i] = Response(data_c_g_u8[i] as u16);
+            }
+        } else {
+            data.resize(total_cells, Response(0));
+            data.par_chunks_mut(num_candidates)
+                .enumerate()
+                .for_each(|(g, row)| {
+                    let guess = &guesses[g];
+                    for (c, candidate) in candidates.iter().enumerate() {
+                        row[c] = Response::compute(candidate, guess);
+                    }
+                });
+
+            data_c_g.resize(total_cells, Response(0));
+            for c in 0..num_candidates {
+                for g in 0..num_guesses {
+                    data_c_g[c * num_guesses + g] = data[g * num_candidates + c];
+                }
             }
         }
 
@@ -105,14 +137,66 @@ impl ResponseMatrix {
             zobrist,
             data,
             data_c_g,
+            data_u8,
+            data_c_g_u8,
             candidate_to_guess,
             guess_chars,
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, guess_idx: usize, candidate_idx: usize) -> Response {
-        self.data[guess_idx * self.num_candidates + candidate_idx]
+        if self.word_len <= 5 {
+            Response(unsafe {
+                *self
+                    .data_u8
+                    .get_unchecked(guess_idx * self.num_candidates + candidate_idx)
+            } as u16)
+        } else {
+            self.data[guess_idx * self.num_candidates + candidate_idx]
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_cg(&self, candidate_idx: usize, guess_idx: usize) -> Response {
+        if self.word_len <= 5 {
+            Response(unsafe {
+                *self
+                    .data_c_g_u8
+                    .get_unchecked(candidate_idx * self.num_guesses + guess_idx)
+            } as u16)
+        } else {
+            self.data_c_g[candidate_idx * self.num_guesses + guess_idx]
+        }
+    }
+
+    #[inline(always)]
+    pub fn data_ptr<Elem: crate::core::ResponseElem>(&self) -> *const Elem {
+        if self.word_len <= 5 {
+            self.data_u8.as_ptr() as *const Elem
+        } else {
+            self.data.as_ptr() as *const Elem
+        }
+    }
+
+    #[inline(always)]
+    pub fn data_cg_ptr<Elem: crate::core::ResponseElem>(&self) -> *const Elem {
+        if self.word_len <= 5 {
+            self.data_c_g_u8.as_ptr() as *const Elem
+        } else {
+            self.data_c_g.as_ptr() as *const Elem
+        }
+    }
+
+    #[inline(always)]
+    pub fn slice_cg<Elem: crate::core::ResponseElem>(&self, start: usize, end: usize) -> &[Elem] {
+        if self.word_len <= 5 {
+            let slice = &self.data_c_g_u8[start..end];
+            unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const Elem, slice.len()) }
+        } else {
+            let slice = &self.data_c_g[start..end];
+            unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const Elem, slice.len()) }
+        }
     }
 }
 
@@ -163,8 +247,8 @@ mod extra_tests {
 
         for g in 0..matrix.num_guesses {
             for c in 0..matrix.num_candidates {
-                let r1 = matrix.data[g * matrix.num_candidates + c];
-                let r2 = matrix.data_c_g[c * matrix.num_guesses + g];
+                let r1 = matrix.get(g, c);
+                let r2 = matrix.get_cg(c, g);
                 assert_eq!(r1, r2, "Mismatch at g={}, c={}", g, c);
             }
         }

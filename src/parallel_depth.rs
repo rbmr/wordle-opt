@@ -38,15 +38,14 @@ pub fn solve_parallel_depth2<'a>(
 
     active_guesses.par_iter().for_each(|&g| {
         let win_response = matrix.win_response.0 as usize;
-        let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
-
         if matrix.num_responses <= 256 {
+            let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
             let mut counts = [0u16; 256];
             let mut non_empty_indices = [0u16; 256];
             let mut num_non_empty = 0;
 
             for &c in initial_candidates {
-                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
+                let r_idx = unsafe { *g_ptr.add(c) as usize };
                 if counts[r_idx] == 0 {
                     non_empty_indices[num_non_empty] = r_idx as u16;
                     num_non_empty += 1;
@@ -66,7 +65,7 @@ pub fn solve_parallel_depth2<'a>(
 
             let mut sorted_set = vec![0usize; initial_candidates.len()];
             for &c in initial_candidates {
-                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
+                let r_idx = unsafe { *g_ptr.add(c) as usize };
                 let pos = current_offsets[r_idx] as usize;
                 sorted_set[pos] = c;
                 current_offsets[r_idx] += 1;
@@ -218,6 +217,7 @@ pub fn solve_parallel_depth2<'a>(
 
             metrics.root_guesses_done.fetch_add(1, Ordering::Relaxed);
         } else {
+            let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
             let num_resp = matrix.num_responses;
             let mut counts = vec![0u16; num_resp];
             let mut non_empty_indices = vec![0u16; num_resp];

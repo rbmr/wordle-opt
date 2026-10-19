@@ -80,15 +80,13 @@ impl Lists {
     fn candidates(&self) -> usize {
         self.dict.candidates.len()
     }
-    /// Responses of guess `g` to every candidate.
-    fn row(&self, g: usize) -> &[Response] {
-        let n = self.candidates();
-        &self.matrix.data[g * n..(g + 1) * n]
+    #[inline(always)]
+    fn get(&self, g: usize, c: usize) -> Response {
+        self.matrix.get(g, c)
     }
-    /// Responses of every guess to candidate `c`.
-    fn column(&self, c: usize) -> &[Response] {
-        let n = self.guesses();
-        &self.matrix.data_c_g[c * n..(c + 1) * n]
+    #[inline(always)]
+    fn get_cg(&self, c: usize, g: usize) -> Response {
+        self.matrix.get_cg(c, g)
     }
 }
 
@@ -128,12 +126,11 @@ fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
                 {
                     return Err(format!("claim {i}: bad set definition"));
                 }
-                let row = lists.row(g);
                 let set: Vec<u16> = claims[parent]
                     .set
                     .iter()
                     .copied()
-                    .filter(|&c| row[c as usize].0 == response as u16)
+                    .filter(|&c| lists.get(g, c as usize).0 == response as u16)
                     .collect();
                 if set.is_empty() {
                     return Err(format!("claim {i}: empty set"));
@@ -166,9 +163,8 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
         let seen = &mut seen[..chunk.len()];
         seen.fill([0; 36]);
         for &c in set {
-            let column = lists.column(c as usize);
             for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = column[g].0;
+                let r = lists.get_cg(c as usize, g).0;
                 s[(r >> 6) as usize] |= 1 << (r & 63);
             }
         }
@@ -190,9 +186,8 @@ fn max_branching(set: &[u16], lists: &Lists, guesses: &[usize]) -> usize {
         let seen = &mut seen[..chunk.len()];
         seen.fill([0; 36]);
         for &c in set {
-            let column = lists.column(c as usize);
             for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = column[g].0;
+                let r = lists.get_cg(c as usize, g).0;
                 s[(r >> 6) as usize] |= 1 << (r & 63);
             }
         }
@@ -249,9 +244,8 @@ fn check_expansion(
     let mut k = 0;
     for chunk in summed.chunks(CHUNK) {
         for &c in set {
-            let column = lists.column(c as usize);
             for (j, &g) in chunk.iter().enumerate() {
-                let r = column[g].0;
+                let r = lists.get_cg(c as usize, g).0;
                 let slot = &mut counts[j * nr + r as usize];
                 if *slot == 0 {
                     used[j].push(r);
@@ -305,15 +299,14 @@ fn check_expansion(
         .collect();
     let mut seen_rows: HashSet<Vec<u16>> = HashSet::new();
     for g in short {
-        let row = lists.row(g);
         // Defaults are not enough: use the claims on this guess's buckets.
-        let key: Vec<u16> = set.iter().map(|&c| row[c as usize].0).collect();
+        let key: Vec<u16> = set.iter().map(|&c| lists.get(g, c as usize).0).collect();
         if !seen_rows.insert(key) {
             continue; // identical partition, already checked
         }
         let mut buckets: HashMap<u16, Vec<u16>> = HashMap::new();
         for &c in set {
-            let r = row[c as usize].0;
+            let r = lists.get(g, c as usize).0;
             if r != WIN {
                 buckets.entry(r).or_default().push(c);
             }
@@ -525,9 +518,8 @@ mod tests {
     }
 
     fn naive_branching(set: &[u16], lists: &Lists, g: usize) -> usize {
-        let row = lists.row(g);
         set.iter()
-            .map(|&c| row[c as usize].0)
+            .map(|&c| lists.get(g, c as usize).0)
             .collect::<HashSet<_>>()
             .len()
     }

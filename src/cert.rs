@@ -250,9 +250,8 @@ fn branching_at_most(
         let seen = &mut seen[..chunk.len()];
         seen.fill([0; 36]);
         for &c in set {
-            let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
             for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = col[g].0;
+                let r = matrix.get_cg(c as usize, g).0;
                 s[(r >> 6) as usize] |= 1 << (r & 63);
             }
         }
@@ -268,16 +267,15 @@ fn branching_at_most(
 
 /// The most distinct responses any of `guesses` gives on `set`.
 fn max_branching(matrix: &ResponseMatrix, set: &[u16], guesses: &[usize]) -> usize {
-    let ng = matrix.num_guesses;
+    let _ng = matrix.num_guesses;
     let mut k = 0;
     let mut seen = [[0u64; 36]; 64];
     for chunk in guesses.chunks(64) {
         let seen = &mut seen[..chunk.len()];
         seen.fill([0; 36]);
         for &c in set {
-            let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
             for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = col[g].0;
+                let r = matrix.get_cg(c as usize, g).0;
                 s[(r >> 6) as usize] |= 1 << (r & 63);
             }
         }
@@ -316,7 +314,7 @@ fn justify(
         return Ok((RULE_ASSUMED, Vec::new()));
     }
     let win = Response::WIN.0;
-    let nc = matrix.num_candidates;
+    let _nc = matrix.num_candidates;
     let ng = matrix.num_guesses;
     // Only guesses whose smallest possible default sum (at most `caps[g]`
     // buckets, k at most the largest cap) falls short of the target are read
@@ -353,9 +351,8 @@ fn justify(
     let mut k = 0;
     for chunk in summed.chunks(CHUNK) {
         for &c in set {
-            let col = &matrix.data_c_g[c as usize * ng..(c as usize + 1) * ng];
             for (j, &g) in chunk.iter().enumerate() {
-                let r = col[g];
+                let r = matrix.get_cg(c as usize, g);
                 let slot = &mut counts[j * nr + r.0 as usize];
                 if *slot == 0 {
                     used[j].push(r.0);
@@ -409,14 +406,13 @@ fn justify(
     let mut unrefuted: Vec<u32> = Vec::new();
     let mut first_msg = String::new();
     for g in short {
-        let row = &matrix.data[g * nc..(g + 1) * nc];
-        let key: Vec<u16> = set.iter().map(|&c| row[c as usize].0).collect();
+        let key: Vec<u16> = set.iter().map(|&c| matrix.get(g, c as usize).0).collect();
         if !seen_rows.insert(key) {
             continue;
         }
         let mut buckets: BTreeMap<u16, Vec<u16>> = BTreeMap::new();
         for &c in set {
-            let r = row[c as usize].0;
+            let r = matrix.get(g, c as usize).0;
             if r as usize != win {
                 buckets.entry(r).or_default().push(c);
             }
