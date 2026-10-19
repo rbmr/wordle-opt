@@ -630,15 +630,23 @@ impl<'a> Solver<'a> {
                 let target_exact = (2 * n) as u32;
                 let data_ptr = matrix.data.as_ptr();
                 if matrix.num_responses <= 256 {
+                    let win_r = matrix.win_response.0 as usize;
+                    let win_word = win_r >> 6;
+                    let win_bit = 1u64 << (win_r & 63);
+
                     for &ci in bucket {
                         let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                         let mut seen_mask = [0u64; 4];
+                        seen_mask[win_word] = win_bit;
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
                         for &c in bucket {
+                            if c == ci {
+                                continue;
+                            }
                             let r = unsafe { (*g_ptr.add(c)).0 as usize };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
@@ -660,16 +668,21 @@ impl<'a> Solver<'a> {
                         }
                     }
                 } else {
+                    let win_r = matrix.win_response.0;
                     for &ci in bucket {
                         let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                         let mut seen = [0u16; 16];
-                        let mut seen_len = 0;
+                        seen[0] = win_r;
+                        let mut seen_len = 1;
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
                         for &c in bucket {
+                            if c == ci {
+                                continue;
+                            }
                             let r = unsafe { (*g_ptr.add(c)).0 };
                             let mut duplicate = false;
                             for &prev in &seen[..seen_len] {

@@ -232,37 +232,27 @@ pub fn compute_max_branching_factor_seq_with_target(
     }
 
     let mid = candidates.len() / 2;
-    let (c_half1, c_half2) = candidates.split_at(mid);
-    let rem_len = c_half2.len();
+    let rem_len = candidates.len() - mid;
     let num_guesses = matrix.num_guesses;
     let data_c_g_ptr = matrix.data_c_g.as_ptr();
 
-    let mut stack_ptrs1 = [std::ptr::null::<crate::core::Response>(); 256];
-    let mut stack_ptrs2 = [std::ptr::null::<crate::core::Response>(); 256];
-    let mut heap_ptrs1 = Vec::new();
-    let mut heap_ptrs2 = Vec::new();
+    let mut stack_ptrs = std::mem::MaybeUninit::<[*const crate::core::Response; 256]>::uninit();
+    let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
+    let mut heap_ptrs = Vec::new();
     let (c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
-        for (i, &c) in c_half1.iter().enumerate() {
+        for (i, &c) in candidates.iter().enumerate() {
             unsafe {
-                *stack_ptrs1.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+                *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
             }
         }
-        for (i, &c) in c_half2.iter().enumerate() {
-            unsafe {
-                *stack_ptrs2.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
-            }
-        }
-        (&stack_ptrs1[..c_half1.len()], &stack_ptrs2[..c_half2.len()])
+        let all_ptrs = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
+        (&all_ptrs[..mid], &all_ptrs[mid..])
     } else {
-        heap_ptrs1.reserve(c_half1.len());
-        for &c in c_half1 {
-            heap_ptrs1.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+        heap_ptrs.reserve(candidates.len());
+        for &c in candidates {
+            heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
         }
-        heap_ptrs2.reserve(c_half2.len());
-        for &c in c_half2 {
-            heap_ptrs2.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-        }
-        (&heap_ptrs1[..], &heap_ptrs2[..])
+        (&heap_ptrs[..mid], &heap_ptrs[mid..])
     };
 
     if matrix.num_responses <= 256 {
