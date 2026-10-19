@@ -775,7 +775,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let mut valid_phase1_k = 0;
         let mut min_val_found = u32::MAX;
 
-        for &cand in set {
+        let set_ptr = set.as_ptr();
+        for (cand_idx, &cand) in set.iter().enumerate() {
             let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(cand) };
             if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
                 continue;
@@ -783,10 +784,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut num_non_empty = 0;
             let g_off = g * self.matrix.num_candidates;
             let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
-            for &c in set {
-                if c == cand {
-                    continue;
+            for i in 0..cand_idx {
+                let c = unsafe { *set_ptr.add(i) };
+                let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                unsafe {
+                    let cnt_ptr = counts_ptr.add(r);
+                    let cnt = *cnt_ptr;
+                    if cnt == 0 {
+                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        num_non_empty += 1;
+                    }
+                    *cnt_ptr = cnt + 1;
                 }
+            }
+            for i in (cand_idx + 1)..c_len {
+                let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
                     let cnt_ptr = counts_ptr.add(r);
@@ -965,20 +977,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
             let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
             let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
-            let mut heap_c_ptrs = Vec::new();
+            let mut heap_c_ptrs = if c_len > 256 {
+                let mut v = Vec::with_capacity(c_len);
+                let set_ptr = set.as_ptr();
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                }
+                Some(v)
+            } else {
+                None
+            };
             let c_ptrs: &[*const Elem] = if c_len <= 256 {
-                for (i, &c) in set.iter().enumerate() {
+                let set_ptr = set.as_ptr();
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
                     unsafe {
                         *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                     }
                 }
                 unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
             } else {
-                heap_c_ptrs.reserve(c_len);
-                for &c in set {
-                    heap_c_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-                }
-                &heap_c_ptrs
+                heap_c_ptrs.as_ref().unwrap()
             };
 
             for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
@@ -1104,9 +1124,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
             }
-            for &c in set {
-                let g = self.dict.candidate_to_guess[c];
-                is_in_set[g / 64] = 0;
+            let set_ptr = set.as_ptr();
+            for i in 0..c_len {
+                let c = unsafe { *set_ptr.add(i) };
+                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
+                unsafe {
+                    *is_in_set.get_unchecked_mut(g / 64) = 0;
+                }
             }
             self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
 
@@ -1276,7 +1300,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let mut num_non_empty = 0;
             let mut seen_mask = [0u64; M];
-            for (cand_idx, &c) in set.iter().enumerate() {
+            let set_ptr = set.as_ptr();
+            for cand_idx in 0..c_len {
+                let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                 unsafe {
                     *c_responses_ptr.add(cand_idx) = r;
@@ -1377,10 +1403,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
                 let p_ptr = p.as_mut_ptr() as *mut usize;
                 let mut p_idx = 0;
+                let r_target = entry.0;
                 let set_ptr = set.as_ptr();
                 for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) as usize };
-                    if r == r_idx {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r_target {
                         unsafe {
                             *p_ptr.add(p_idx) = *set_ptr.add(cand_idx);
                         }
@@ -1500,7 +1527,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut num_non_empty_local = 0usize;
-            for &c in set {
+            let set_ptr = set.as_ptr();
+            for i in 0..c_len {
+                let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
                     let cnt_ptr = counts_ptr.add(r);
@@ -1693,7 +1722,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            for &c in set {
+            let set_ptr = set.as_ptr();
+            for i in 0..c_len {
+                let c = unsafe { *set_ptr.add(i) };
                 let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
                 let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
                 let pos = unsafe { *pos_ptr as usize };
