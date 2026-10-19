@@ -916,9 +916,11 @@ impl<'a> Solver<'a> {
                 let proj = unsafe { *useless_projs_ptr.add(r) };
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
-                    let slot = table[idx];
+                    let slot = unsafe { *table.get_unchecked(idx) };
                     if slot == 0 {
-                        table[idx] = proj;
+                        unsafe {
+                            *table.get_unchecked_mut(idx) = proj;
+                        }
                         added_indices.push(idx);
                         break;
                     }
@@ -942,10 +944,10 @@ impl<'a> Solver<'a> {
                         }
                         let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                         loop {
-                            let slot = table[idx];
+                            let slot = unsafe { *table.get_unchecked(idx) };
                             if slot == 0 {
-                                table[idx] = proj;
                                 unsafe {
+                                    *table.get_unchecked_mut(idx) = proj;
                                     *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
                                 }
                                 added_indices.push(idx);
@@ -968,10 +970,12 @@ impl<'a> Solver<'a> {
                         }
                         let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                         loop {
-                            let slot = table[idx];
+                            let slot = unsafe { *table.get_unchecked(idx) };
                             if slot == 0 {
-                                table[idx] = proj;
-                                active_bits_scratch[block_idx] |= 1 << tz;
+                                unsafe {
+                                    *table.get_unchecked_mut(idx) = proj;
+                                    *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
+                                }
                                 added_indices.push(idx);
                                 break;
                             }
@@ -986,7 +990,9 @@ impl<'a> Solver<'a> {
             }
 
             for &idx in added_indices.iter() {
-                table[idx] = 0;
+                unsafe {
+                    *table.get_unchecked_mut(idx) = 0;
+                }
             }
 
             let rc_new = if should_cache_equiv {
@@ -1078,6 +1084,9 @@ impl<'a> Solver<'a> {
             let g_off = g * self.matrix.num_candidates;
             let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
             for &c in set {
+                if c == cand {
+                    continue;
+                }
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
                     let cnt = counts_ptr.add(r);
@@ -1086,27 +1095,54 @@ impl<'a> Solver<'a> {
                     *cnt += 1;
                 }
             }
-            if num_non_empty > local_max_k {
-                local_max_k = num_non_empty;
+            let total_non_empty = num_non_empty + 1;
+            if total_non_empty > local_max_k {
+                local_max_k = total_non_empty;
             }
-            let mut expected_rem = 0u32;
-            let mut lb_cost = c_len as u32;
-            for i in 0..num_non_empty {
-                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                let count = unsafe { *counts_ptr.add(r_idx) };
+            let (expected_rem, lb_cost) = if num_non_empty == 1 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
                 unsafe {
-                    *counts_ptr.add(r_idx) = 0;
+                    *counts_ptr.add(r0) = 0;
                 }
-                expected_rem += (count as u32) * (count as u32);
-                if r_idx != self.matrix.win_response.0 as usize {
-                    lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
+                let rem_c = (c_len as u32) - 1;
+                (
+                    1 + rem_c * rem_c,
+                    (c_len as u32) + unsafe { *parent_cap_bounds_ptr.add(rem_c as usize) },
+                )
+            } else if num_non_empty == 2 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
                 }
-            }
+                let count1 = (c_len as u32 - 1) - count0;
+                (
+                    1 + count0 * count0 + count1 * count1,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) },
+                )
+            } else {
+                let mut exp = 1u32;
+                let mut lb = c_len as u32;
+                for i in 0..num_non_empty {
+                    let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                    let count = unsafe { *counts_ptr.add(r_idx) };
+                    unsafe {
+                        *counts_ptr.add(r_idx) = 0;
+                    }
+                    exp += (count as u32) * (count as u32);
+                    lb += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
+                }
+                (exp, lb)
+            };
             if lb_cost < beta {
-                if num_non_empty > valid_phase1_k {
-                    valid_phase1_k = num_non_empty;
+                if total_non_empty > valid_phase1_k {
+                    valid_phase1_k = total_non_empty;
                 }
-                phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                phase1_tuples.push((g, expected_rem, lb_cost, total_non_empty));
             } else {
                 min_val_found = min_val_found.min(lb_cost);
             }
@@ -1229,14 +1265,32 @@ impl<'a> Solver<'a> {
                     if num_non_empty == 2 {
                         let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
                         let count0 = unsafe { *counts_ptr.add(r0) };
+                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                        unsafe {
+                            *counts_ptr.add(r0) = 0;
+                            *counts_ptr.add(r1) = 0;
+                        }
                         if count0 == 1 || count0 == (c_len as u16 - 1) {
-                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
-                            unsafe {
-                                *counts_ptr.add(r0) = 0;
-                                *counts_ptr.add(r1) = 0;
-                            }
                             continue;
                         }
+                        let c0 = count0 as u32;
+                        let c1 = (c_len as u32) - c0;
+                        let expected_rem = c0 * c0 + c1 * c1;
+                        let lb_cost = (c_len as u32)
+                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) };
+                        if 2 > local_max_k {
+                            local_max_k = 2;
+                        }
+                        if lb_cost < best_val {
+                            if 2 > valid_phase2_k {
+                                valid_phase2_k = 2;
+                            }
+                            phase2_tuples.push((g, expected_rem, lb_cost, 2));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
+                        }
+                        continue;
                     }
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
