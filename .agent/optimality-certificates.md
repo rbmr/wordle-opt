@@ -1,10 +1,11 @@
 # Optimality certificates: investigation
 
-Status: shipped. Since 2026-10-18 `solve --certify`, `certify` and
-`check-cert` are in main as a runtime option (no build feature), the checker
-is its own crate (`crates/wordle-checker`), and the full certificate checks in
-about 45 s on pc01. The rest of this file is the original investigation, from
-branch `cert-investigation`; build-feature details below are historical. The question was whether, and how, `solve` should produce a
+Status: shipped. Since 2026-10-18 `solve --certify`, `certify` and `check` are
+in main as a runtime option (no build feature), the checker is `src/certcheck.rs`
+in the same crate, and the full certificate checks in about 45 s on a 16-core
+machine. The rest of this file is the original investigation, from branch
+`cert-investigation`; the build-feature and crate-split details below are
+historical. The question was whether, and how, `solve` should produce a
 lower-bound proof that a small independent checker verifies, without making the
 plain solve slower.
 
@@ -209,7 +210,7 @@ subsets.
 Format: `WOCERT01`, FNV-1a digest of both word lists, list sizes, claim count,
 then per claim a set definition (1 or 10 bytes), a `u32` bound and a rule byte.
 
-## The checker (`crates/wordle-checker/src/lib.rs`)
+## The checker (`src/certcheck.rs`)
 
 About 450 lines, `std` + `serde_json` + `rayon` only. It reads the readable policy
 JSON (word lists and tree) and the certificate. It has its own feedback function,
@@ -235,7 +236,7 @@ a forward parent reference, a missing root claim. `L3 <= optimum` is checked on
 every memoized subset. A feature-gated test runs the real generator end to end
 on the same 12 instances.
 
-## The generator (`crates/wordle-solver/src/cert.rs`, `crates/wordle-solver/src/certlog.rs`)
+## The generator (`src/cert.rs`, `src/certlog.rs`)
 
 Facts `(set, value, exact)` come from `cert_record!` hooks at every place the
 search stores or returns a bound. The macro expands to nothing unless built with

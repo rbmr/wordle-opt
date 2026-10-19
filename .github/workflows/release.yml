@@ -23,9 +23,14 @@ env:
 
 jobs:
   build:
+    # A manual run only publishes when it is started from main. Without this,
+    # running the workflow from a branch would build that branch and replace
+    # the public `latest` release with it.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push')
     strategy:
       fail-fast: true

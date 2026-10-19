@@ -13,7 +13,6 @@ The files of a full run stay on the compute host in `~/full-runs/`, named by the
 UTC date and the commit:
 
 - `~/full-runs/<YYYY-MM-DD>-<commit>.json`: the policy tree
-- `~/full-runs/<YYYY-MM-DD>-<commit>-progress.parquet`: its progress series
 - `~/full-runs/<YYYY-MM-DD>-<commit>.log`: the run output, with the summary
 
 On 2026-10-16 the history was rewritten to clean up commit messages, and the

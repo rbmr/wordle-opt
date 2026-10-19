@@ -614,7 +614,7 @@ candidate terminates. The dictionary is embedded in the tree file."
     );
 }
 
-/// Command line interface entrypoint for solving, benchmarking, and verifying the optimal strategy.
+/// Command line interface entrypoint: solve, validate, certify and check.
 pub fn run_cli() {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {

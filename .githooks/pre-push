@@ -1,5 +1,25 @@
 #!/bin/bash
 set -e
+
+# main is the published branch: CI builds every commit that lands there into the
+# public `latest` release. A direct push to it is refused here. Merging a
+# reviewed pull request is the maintainer's call and is not blocked by this
+# hook; tags and releases are the maintainer's and CI's alone.
+# Git passes one line per ref on stdin: <local ref> <local sha> <remote ref>
+# <remote sha>. Reading nothing (a manual run) just skips this check.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	case "$remote_ref" in
+		refs/heads/main)
+			echo "refusing to push to main: work on a branch and open a pull request instead" >&2
+			exit 1
+			;;
+		refs/tags/*)
+			echo "refusing to push tag $remote_ref: tags and releases are managed by the maintainer and CI" >&2
+			exit 1
+			;;
+	esac
+done
+
 source $HOME/.cargo/env
 cargo fmt --all -- --check
 cargo clippy --release -- -D warnings
