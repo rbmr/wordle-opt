@@ -292,6 +292,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let num_cand = matrix.num_candidates;
                 let data_ptr = matrix.data_ptr::<Elem>();
 
+                const ROT4: [[usize; 3]; 4] = [
+                    [1, 2, 3],
+                    [2, 3, 0],
+                    [3, 0, 1],
+                    [0, 1, 2],
+                ];
                 let c = [c0, c1, c2, c3];
                 let mut best_inside = u32::MAX;
 
@@ -299,9 +305,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let gi = unsafe { *dict.candidate_to_guess.get_unchecked(c[i]) };
                     let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
 
-                    let ca = c[(i + 1) & 3];
-                    let cb = c[(i + 2) & 3];
-                    let cc = c[(i + 3) & 3];
+                    let [ia, ib, ic] = ROT4[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
 
                     let ra = unsafe { *gi_ptr.add(ca) };
                     let rb = unsafe { *gi_ptr.add(cb) };
@@ -334,6 +341,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let num_cand = matrix.num_candidates;
                 let data_ptr = matrix.data_ptr::<Elem>();
 
+                const ROT5: [[usize; 4]; 5] = [
+                    [1, 2, 3, 4],
+                    [2, 3, 4, 0],
+                    [3, 4, 0, 1],
+                    [4, 0, 1, 2],
+                    [0, 1, 2, 3],
+                ];
                 let c = [c0, c1, c2, c3, c4];
                 let mut best_inside = u32::MAX;
 
@@ -341,10 +355,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let gi = unsafe { *dict.candidate_to_guess.get_unchecked(c[i]) };
                     let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
 
-                    let ca = c[(i + 1) % 5];
-                    let cb = c[(i + 2) % 5];
-                    let cc = c[(i + 3) % 5];
-                    let cd = c[(i + 4) % 5];
+                    let [ia, ib, ic, id] = ROT5[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
 
                     let ra = unsafe { *gi_ptr.add(ca) };
                     let rb = unsafe { *gi_ptr.add(cb) };
@@ -383,7 +398,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let win_word = WIN >> 6;
                     let win_bit = 1u64 << (WIN & 63);
 
-                    for &ci in bucket {
+                    let bucket_ptr = bucket.as_ptr();
+                    for (ci_idx, &ci) in bucket.iter().enumerate() {
                         let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
@@ -394,10 +410,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                        for &c in bucket {
-                            if c == ci {
-                                continue;
-                            }
+                        let mut early_break = false;
+                        for i in 0..ci_idx {
+                            let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
@@ -405,10 +420,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions >= max_collisions {
+                                    early_break = true;
                                     break;
                                 }
                             } else {
                                 *word |= bit;
+                            }
+                        }
+                        if !early_break {
+                            for i in (ci_idx + 1)..n {
+                                let c = unsafe { *bucket_ptr.add(i) };
+                                let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                                let word_idx = r >> 6;
+                                let bit = 1u64 << (r & 63);
+                                let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                                if (*word & bit) != 0 {
+                                    collisions += 1;
+                                    if collisions >= max_collisions {
+                                        break;
+                                    }
+                                } else {
+                                    *word |= bit;
+                                }
                             }
                         }
 
@@ -421,7 +454,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 } else {
                     let win_r = WIN as u16;
-                    for &ci in bucket {
+                    let bucket_ptr = bucket.as_ptr();
+                    for (ci_idx, &ci) in bucket.iter().enumerate() {
                         let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
@@ -431,10 +465,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                        for &c in bucket {
-                            if c == ci {
-                                continue;
-                            }
+                        let mut early_break = false;
+                        for i in 0..ci_idx {
+                            let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                             let mut duplicate = false;
                             for &prev in &seen[..seen_len] {
@@ -446,11 +479,34 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             if duplicate {
                                 collisions += 1;
                                 if collisions >= max_collisions {
+                                    early_break = true;
                                     break;
                                 }
                             } else {
                                 seen[seen_len] = r;
                                 seen_len += 1;
+                            }
+                        }
+                        if !early_break {
+                            for i in (ci_idx + 1)..n {
+                                let c = unsafe { *bucket_ptr.add(i) };
+                                let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                                let mut duplicate = false;
+                                for &prev in &seen[..seen_len] {
+                                    if prev == r {
+                                        duplicate = true;
+                                        break;
+                                    }
+                                }
+                                if duplicate {
+                                    collisions += 1;
+                                    if collisions >= max_collisions {
+                                        break;
+                                    }
+                                } else {
+                                    seen[seen_len] = r;
+                                    seen_len += 1;
+                                }
                             }
                         }
 
