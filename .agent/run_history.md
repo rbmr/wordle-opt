@@ -474,8 +474,13 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-19 | `de74b73` | pc01 | 500 | 1 | optimal | 0.521s | 1453 | 517 | 158 | — | optimize candidate counting and fast-path small tuple sorts in min_state_val and OptimalPolicy; validation OK |
 | 2026-10-19 | `de74b73` | pc01 | 1000 | 1 | optimal | 3.854s | 3124 | 1049 | 1142 | — | optimize candidate counting and fast-path small tuple sorts in min_state_val and OptimalPolicy; pick time 3.7s; validation OK |
 | 2026-10-19 | `de74b73` | pc01 | 2340 | — | optimal | 37.747s (0.01h) | 8001 | 2478 | 27972 | ~2.5GB | full N=2340 run (2026-10-19-de74b73); optimize candidate counting and fast-path small tuple sorts in min_state_val and OptimalPolicy; pick time 36.1s; states 27972; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-19 | `d5e4d76` | pc01 | 500 | 1 | optimal | 0.511s | 1453 | 517 | 138 | — | optimize equivalence projection loop and fuse useless projs loop in min_state_val; validation OK |
+| 2026-10-19 | `d5e4d76` | pc01 | 1000 | 1 | optimal | 3.852s | 3124 | 1049 | 1175 | — | optimize equivalence projection loop and fuse useless projs loop in min_state_val; pick time 3.7s; validation OK |
+| 2026-10-19 | `d5e4d76` | pc01 | 2340 | — | optimal | 37.784s (0.01h) | 8001 | 2478 | 27970 | ~2.5GB | full N=2340 run (2026-10-19-d5e4d76); optimize equivalence projection loop and fuse useless projs loop in min_state_val; pick time 36.1s; states 27970; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `d5e4d76` rows demonstrated that using direct row pointer indexing (`data_cg_ptr`) in the tiled equivalence projection loop and fusing the useless projections calculation and hash table insertion into a single loop in `SpecializedSolver::min_state_val` improved $N=500$ runtime from 0.521s down to **0.511s** (evaluated states down from 158 to **138**), with $N=1000$ at **3.852s** (pick time 3.7s). The full N=2340 solve completed in **37.784s** (pick time 36.1s, 27,970 states evaluated) with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
 - The `de74b73` rows demonstrated that eliminating redundant stores to `non_empty_indices_ptr` in `SpecializedSolver::min_state_val` (Phase 1 and Phase 2), fast-pathing $\le 2$ element tuple sorts in `min_state_val` and `local_counts_slice`, and precomputing the root row pointer in `OptimalPolicy::scan` maintained top performance and exactness across all scales. The full N=2340 solve completed in **37.747s** (pick time 36.1s) with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
