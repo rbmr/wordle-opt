@@ -281,6 +281,96 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 (6, true)
             }
+            4 => {
+                let c0 = unsafe { *bucket.get_unchecked(0) };
+                let c1 = unsafe { *bucket.get_unchecked(1) };
+                let c2 = unsafe { *bucket.get_unchecked(2) };
+                let c3 = unsafe { *bucket.get_unchecked(3) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+
+                let c = [c0, c1, c2, c3];
+                let mut best_inside = u32::MAX;
+
+                for i in 0..4 {
+                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let ca = c[(i + 1) & 3];
+                    let cb = c[(i + 2) & 3];
+                    let cc = c[(i + 3) & 3];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+
+                    if ra != rb && ra != rc && rb != rc {
+                        return (7, true);
+                    }
+
+                    if best_inside != 8 {
+                        let coll = (ra == rb) as u32 + (ra == rc) as u32 + (rb == rc) as u32;
+                        if coll == 1 {
+                            best_inside = 8;
+                        }
+                    }
+                }
+
+                if best_inside == 8 {
+                    (8, true)
+                } else {
+                    (8, false)
+                }
+            }
+            5 => {
+                let c0 = unsafe { *bucket.get_unchecked(0) };
+                let c1 = unsafe { *bucket.get_unchecked(1) };
+                let c2 = unsafe { *bucket.get_unchecked(2) };
+                let c3 = unsafe { *bucket.get_unchecked(3) };
+                let c4 = unsafe { *bucket.get_unchecked(4) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+
+                let c = [c0, c1, c2, c3, c4];
+                let mut best_inside = u32::MAX;
+
+                for i in 0..5 {
+                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let ca = c[(i + 1) % 5];
+                    let cb = c[(i + 2) % 5];
+                    let cc = c[(i + 3) % 5];
+                    let cd = c[(i + 4) % 5];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+
+                    if ra != rb && ra != rc && ra != rd && rb != rc && rb != rd && rc != rd {
+                        return (9, true);
+                    }
+
+                    if best_inside != 10 {
+                        let coll = (ra == rb) as u32
+                            + (ra == rc) as u32
+                            + (ra == rd) as u32
+                            + (rb == rc) as u32
+                            + (rb == rd) as u32
+                            + (rc == rd) as u32;
+                        if coll == 1 {
+                            best_inside = 10;
+                        }
+                    }
+                }
+
+                if best_inside == 10 {
+                    (10, true)
+                } else {
+                    (10, false)
+                }
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -2425,9 +2515,9 @@ mod solver_cache_tests {
         let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
-        // Test multiple small subsets of candidates (sizes 2, 3, 4)
-        for offset in (0..15).step_by(5) {
-            for size in 2..=4 {
+        // Test multiple small subsets of candidates (sizes 2..=6)
+        for offset in (0..30).step_by(5) {
+            for size in 2..=6 {
                 let bucket: Vec<usize> = (offset..offset + size).collect();
                 let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
                 let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);
