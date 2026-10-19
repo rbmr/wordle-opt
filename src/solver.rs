@@ -504,36 +504,66 @@ impl<'a> Solver<'a> {
             // so we can skip it entirely. Note: allowed_guesses (active_guesses)
             // is passed unchanged to sub-problems; this filter only affects
             // which root tasks we launch.
-            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = active_guesses[1..]
-                .iter()
-                .copied()
-                .filter_map(|g| {
-                    let mut counts = vec![0u16; matrix.num_responses];
-                    for &c in set {
-                        counts[matrix.get(g, c).0 as usize] += 1;
-                    }
-                    let lb: u32 = set.len() as u32
-                        + counts
-                            .iter()
-                            .enumerate()
-                            .filter(|&(r_idx, &cnt)| {
-                                cnt > 0 && r_idx != matrix.win_response.0 as usize
-                            })
-                            .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
-                            .sum::<u32>();
-                    let mut expected_rem = 0u32;
-                    for &cnt in &counts {
-                        if cnt > 0 {
-                            expected_rem += (cnt as u32) * (cnt as u32);
+            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = if matrix.num_responses <= 256
+            {
+                active_guesses[1..]
+                    .par_iter()
+                    .copied()
+                    .filter_map(|g| {
+                        let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                        let mut counts = [0u16; 256];
+                        for &c in set {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            counts[r] += 1;
                         }
-                    }
-                    if lb < greedy_cost_to_beat {
-                        Some((g, lb, expected_rem))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+                        let mut lb = set.len() as u32;
+                        let win_r = matrix.win_response.0 as usize;
+                        let mut expected_rem = 0u32;
+                        for (r_idx, &cnt) in counts.iter().enumerate() {
+                            if cnt > 0 {
+                                expected_rem += (cnt as u32) * (cnt as u32);
+                                if r_idx != win_r {
+                                    lb += capacity_bounds_2d[max_k][cnt as usize];
+                                }
+                            }
+                        }
+                        if lb < greedy_cost_to_beat {
+                            Some((g, lb, expected_rem))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                active_guesses[1..]
+                    .par_iter()
+                    .copied()
+                    .filter_map(|g| {
+                        let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                        let mut counts = vec![0u16; matrix.num_responses];
+                        for &c in set {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            counts[r] += 1;
+                        }
+                        let mut lb = set.len() as u32;
+                        let win_r = matrix.win_response.0 as usize;
+                        let mut expected_rem = 0u32;
+                        for (r_idx, &cnt) in counts.iter().enumerate() {
+                            if cnt > 0 {
+                                expected_rem += (cnt as u32) * (cnt as u32);
+                                if r_idx != win_r {
+                                    lb += capacity_bounds_2d[max_k][cnt as usize];
+                                }
+                            }
+                        }
+                        if lb < greedy_cost_to_beat {
+                            Some((g, lb, expected_rem))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
 
             root_candidates_tuples.sort_unstable_by_key(|t| (t.1, t.2));
             let root_candidates: Vec<usize> =
