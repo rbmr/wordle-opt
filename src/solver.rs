@@ -1305,25 +1305,29 @@ impl<'a> Solver<'a> {
             let mut local_counts = [(0u8, 0u8, 0u32); 16];
             let mut c_responses = [0u8; 16];
             let mut num_non_empty = 0;
+            let mut seen_mask = [0u64; 4];
             for (cand_idx, &c) in set.iter().enumerate() {
                 let r = unsafe { (*g_ptr.add(c)).0 };
                 unsafe {
                     *c_responses.get_unchecked_mut(cand_idx) = r;
                 }
-                let mut found = false;
-                for i in 0..num_non_empty {
-                    let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                    if entry.0 == r {
-                        entry.1 += 1;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
+                let word_idx = (r >> 6) as usize;
+                let bit = 1u64 << (r & 63);
+                let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                if (*word & bit) == 0 {
+                    *word |= bit;
                     unsafe {
                         *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
                     }
                     num_non_empty += 1;
+                } else {
+                    for i in 0..num_non_empty {
+                        let entry = unsafe { local_counts.get_unchecked_mut(i) };
+                        if entry.0 == r {
+                            entry.1 += 1;
+                            break;
+                        }
+                    }
                 }
             }
 
