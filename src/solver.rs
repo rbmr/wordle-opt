@@ -100,6 +100,8 @@ pub struct SolverScratch {
     pub scratch_guess_hashes: [[u64; MAX_RESPONSES]; 32],
     pub scratch_guess_p_lbs: [[u32; MAX_RESPONSES]; 32],
     pub scratch_guess_child_max_ks: [[u16; MAX_RESPONSES]; 32],
+    pub scratch_state_counts: [u16; MAX_RESPONSES],
+    pub scratch_useless_projs: [u64; MAX_RESPONSES],
 }
 
 impl SolverScratch {
@@ -337,6 +339,8 @@ impl<'a> Solver<'a> {
                     scratch_guess_hashes: [[0u64; MAX_RESPONSES]; 32],
                     scratch_guess_p_lbs: [[0u32; MAX_RESPONSES]; 32],
                     scratch_guess_child_max_ks: [[0u16; MAX_RESPONSES]; 32],
+                    scratch_state_counts: [0u16; MAX_RESPONSES],
+                    scratch_useless_projs: [0u64; MAX_RESPONSES],
                 })
             });
         scratch.fit_dictionary(dict.guesses.len());
@@ -819,7 +823,7 @@ impl<'a> Solver<'a> {
             }
 
             let num_resp = self.matrix.num_responses;
-            let mut useless_projs = vec![0u64; num_resp];
+            let useless_projs_ptr = scratch_ref.scratch_useless_projs.as_mut_ptr();
             for r in 0..num_resp {
                 let mut p = 0u64;
                 let m = r as u64 + 1;
@@ -829,10 +833,12 @@ impl<'a> Solver<'a> {
                 if p == 0 {
                     p = 1;
                 }
-                useless_projs[r] = p;
+                unsafe {
+                    *useless_projs_ptr.add(r) = p;
+                }
             }
             for r in 0..num_resp {
-                let proj = useless_projs[r];
+                let proj = unsafe { *useless_projs_ptr.add(r) };
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
                     let slot = table[idx];
@@ -965,8 +971,14 @@ impl<'a> Solver<'a> {
         self.scratch.as_mut().unwrap().scratch_active_bits[depth] = active_bits_scratch;
 
         let mut local_lb = parent_lb.max(cached_lower_bound);
-        let mut counts = [0u16; MAX_RESPONSES];
-        let mut non_empty_indices = [0u16; MAX_RESPONSES];
+        let counts_ptr = self
+            .scratch
+            .as_mut()
+            .unwrap()
+            .scratch_state_counts
+            .as_mut_ptr();
+        let mut non_empty_indices = std::mem::MaybeUninit::<[u16; MAX_RESPONSES]>::uninit();
+        let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
 
         let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
         let matrix_data_ptr = self.matrix.data.as_ptr();
@@ -993,16 +1005,16 @@ impl<'a> Solver<'a> {
             for &c in set {
                 let r = unsafe { (*g_ptr.add(c)).0 as usize };
                 unsafe {
-                    let cnt = counts.get_unchecked_mut(r);
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u16;
+                    let cnt = counts_ptr.add(r);
+                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
                     num_non_empty += (*cnt == 0) as usize;
                     *cnt += 1;
                 }
             }
             if num_non_empty == 1 {
                 unsafe {
-                    let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                    *counts.get_unchecked_mut(r_idx) = 0;
+                    let r_idx = *non_empty_indices_ptr.add(0) as usize;
+                    *counts_ptr.add(r_idx) = 0;
                 }
                 continue;
             }
@@ -1012,10 +1024,10 @@ impl<'a> Solver<'a> {
             let mut expected_rem = 0u32;
             let mut lb_cost = c_len as u32;
             for i in 0..num_non_empty {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                let count = unsafe { *counts.get_unchecked(r_idx) };
+                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                let count = unsafe { *counts_ptr.add(r_idx) };
                 unsafe {
-                    *counts.get_unchecked_mut(r_idx) = 0;
+                    *counts_ptr.add(r_idx) = 0;
                 }
                 expected_rem += (count as u32) * (count as u32);
                 if r_idx != self.matrix.win_response.0 as usize {
@@ -1128,26 +1140,26 @@ impl<'a> Solver<'a> {
                     for &c_base in c_ptrs {
                         let r = unsafe { (*c_base.add(g)).0 as usize };
                         unsafe {
-                            let cnt = counts.get_unchecked_mut(r);
-                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u16;
+                            let cnt = counts_ptr.add(r);
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
                             num_non_empty += (*cnt == 0) as usize;
                             *cnt += 1;
                         }
                     }
                     if num_non_empty == 1 {
                         unsafe {
-                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                            *counts.get_unchecked_mut(r_idx) = 0;
+                            let r_idx = *non_empty_indices_ptr.add(0) as usize;
+                            *counts_ptr.add(r_idx) = 0;
                         }
                         continue;
                     }
                     let mut expected_rem = 0u32;
                     let mut lb_cost = c_len as u32;
                     for i in 0..num_non_empty {
-                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                        let count = unsafe { *counts.get_unchecked(r_idx) };
+                        let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                        let count = unsafe { *counts_ptr.add(r_idx) };
                         unsafe {
-                            *counts.get_unchecked_mut(r_idx) = 0;
+                            *counts_ptr.add(r_idx) = 0;
                         }
                         expected_rem += (count as u32) * (count as u32);
                         debug_assert_ne!(r_idx, self.matrix.win_response.0 as usize);
@@ -1316,27 +1328,55 @@ impl<'a> Solver<'a> {
             let mut local_counts = [(0u16, 0u8, 0u32); 16];
             let mut c_responses = [0u16; 16];
             let mut num_non_empty = 0;
-            let mut seen_mask = [0u64; 36];
-            for (cand_idx, &c) in set.iter().enumerate() {
-                let r = unsafe { (*g_ptr.add(c)).0 };
-                unsafe {
-                    *c_responses.get_unchecked_mut(cand_idx) = r;
-                }
-                let word_idx = (r >> 6) as usize;
-                let bit = 1u64 << (r & 63);
-                let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
-                if (*word & bit) == 0 {
-                    *word |= bit;
+            if self.matrix.num_responses <= 256 {
+                let mut seen_mask = [0u64; 4];
+                for (cand_idx, &c) in set.iter().enumerate() {
+                    let r = unsafe { (*g_ptr.add(c)).0 };
                     unsafe {
-                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
+                        *c_responses.get_unchecked_mut(cand_idx) = r;
                     }
-                    num_non_empty += 1;
-                } else {
-                    for i in 0..num_non_empty {
-                        let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                        if entry.0 == r {
-                            entry.1 += 1;
-                            break;
+                    let word_idx = (r >> 6) as usize;
+                    let bit = 1u64 << (r & 63);
+                    let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                    if (*word & bit) == 0 {
+                        *word |= bit;
+                        unsafe {
+                            *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
+                        }
+                        num_non_empty += 1;
+                    } else {
+                        for i in 0..num_non_empty {
+                            let entry = unsafe { local_counts.get_unchecked_mut(i) };
+                            if entry.0 == r {
+                                entry.1 += 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                let mut seen_mask = [0u64; 36];
+                for (cand_idx, &c) in set.iter().enumerate() {
+                    let r = unsafe { (*g_ptr.add(c)).0 };
+                    unsafe {
+                        *c_responses.get_unchecked_mut(cand_idx) = r;
+                    }
+                    let word_idx = (r >> 6) as usize;
+                    let bit = 1u64 << (r & 63);
+                    let word = unsafe { seen_mask.get_unchecked_mut(word_idx) };
+                    if (*word & bit) == 0 {
+                        *word |= bit;
+                        unsafe {
+                            *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
+                        }
+                        num_non_empty += 1;
+                    } else {
+                        for i in 0..num_non_empty {
+                            let entry = unsafe { local_counts.get_unchecked_mut(i) };
+                            if entry.0 == r {
+                                entry.1 += 1;
+                                break;
+                            }
                         }
                     }
                 }
@@ -1457,9 +1497,11 @@ impl<'a> Solver<'a> {
                 )
             };
 
-            let mut non_empty_indices = [0u16; MAX_RESPONSES];
+            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; MAX_RESPONSES]>::uninit();
+            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
             let num_non_empty = std::cell::Cell::new(0usize);
-            let mut eval_indices = [0u16; MAX_RESPONSES];
+            let mut eval_indices = std::mem::MaybeUninit::<[u16; MAX_RESPONSES]>::uninit();
+            let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
             let mut num_eval = 0;
             let num_p_lbs = std::cell::Cell::new(0usize);
 
@@ -1499,8 +1541,8 @@ impl<'a> Solver<'a> {
                 hashes_ptr,
                 p_lbs_ptr,
                 child_max_ks_ptr,
-                non_empty_indices_ptr: non_empty_indices.as_ptr(),
-                eval_indices_ptr: eval_indices.as_ptr(),
+                non_empty_indices_ptr,
+                eval_indices_ptr,
                 num_non_empty: &num_non_empty,
                 num_p_lbs: &num_p_lbs,
             };
@@ -1511,7 +1553,7 @@ impl<'a> Solver<'a> {
                 unsafe {
                     let cnt = counts_ptr.add(r);
                     let curr_non_empty = num_non_empty.get();
-                    *non_empty_indices.get_unchecked_mut(curr_non_empty) = r as u16;
+                    *non_empty_indices_ptr.add(curr_non_empty) = r as u16;
                     num_non_empty.set(curr_non_empty + (*cnt == 0) as usize);
                     *cnt += 1;
                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
@@ -1526,7 +1568,7 @@ impl<'a> Solver<'a> {
             let mut max_p_len = 0;
 
             for i in 0..num_non_empty.get() {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
                 if r_idx == self.matrix.win_response.0 as usize {
                     continue;
                 }
@@ -1536,7 +1578,7 @@ impl<'a> Solver<'a> {
                 }
                 if p_len > 2 {
                     unsafe {
-                        *eval_indices.get_unchecked_mut(num_eval) = r_idx as u16;
+                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
                     }
                     num_eval += 1;
                 }
@@ -1560,15 +1602,17 @@ impl<'a> Solver<'a> {
             // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
             // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
             // Ties broken by response index for deterministic order.
-            eval_indices[0..num_eval].sort_unstable_by_key(|&r| {
+            let eval_indices_slice =
+                unsafe { std::slice::from_raw_parts_mut(eval_indices_ptr, num_eval) };
+            eval_indices_slice.sort_unstable_by_key(|&r| {
                 (std::cmp::Reverse(unsafe { *counts_ptr.add(r as usize) }), r)
             });
 
-            let split_idx = eval_indices[0..num_eval]
+            let split_idx = eval_indices_slice
                 .partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 });
 
             for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 unsafe {
                     *p_lbs_ptr.add(r_idx) = *parent_cap_bounds_ptr.add(p_len);
@@ -1585,7 +1629,7 @@ impl<'a> Solver<'a> {
             let mut num_exact = 0;
 
             for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -1627,24 +1671,28 @@ impl<'a> Solver<'a> {
                 std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
             sorted_set.resize(set.len(), 0);
 
-            let mut offsets = [0u16; MAX_RESPONSES];
+            let mut offsets = std::mem::MaybeUninit::<[u16; MAX_RESPONSES]>::uninit();
+            let offsets_ptr = offsets.as_mut_ptr() as *mut u16;
+            let mut current_offsets = std::mem::MaybeUninit::<[u16; MAX_RESPONSES]>::uninit();
+            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
             let mut curr = 0;
             let n_non_empty = num_non_empty.get();
             for i in 0..n_non_empty {
-                let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
                 unsafe {
-                    *offsets.get_unchecked_mut(r) = curr;
+                    *offsets_ptr.add(r) = curr;
+                    *current_offsets_ptr.add(r) = curr;
                     curr += *counts_ptr.add(r);
                 }
             }
 
-            let mut current_offsets = offsets;
             for &c in set {
                 let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
-                let pos = unsafe { *current_offsets.get_unchecked(r_idx) as usize };
+                let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
+                let pos = unsafe { *pos_ptr as usize };
                 unsafe {
                     *sorted_set.get_unchecked_mut(pos) = c;
-                    *current_offsets.get_unchecked_mut(r_idx) += 1;
+                    *pos_ptr += 1;
                 }
             }
 
@@ -1653,14 +1701,14 @@ impl<'a> Solver<'a> {
             // immediately, completely bypassing expensive full-dictionary branching factor searches
             // on any p_len > 15 buckets for this guess.
             for i in split_idx..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
+                let start = unsafe { *offsets_ptr.add(r_idx) as usize };
                 let end = start + p_len;
                 let p = unsafe { sorted_set.get_unchecked(start..end) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
@@ -1707,14 +1755,14 @@ impl<'a> Solver<'a> {
             // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
             // Only reached if small buckets alone did not exceed beta.
             for i in 0..split_idx {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
+                let start = unsafe { *offsets_ptr.add(r_idx) as usize };
                 let end = start + p_len;
                 let p = unsafe { sorted_set.get_unchecked(start..end) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
@@ -1789,7 +1837,7 @@ impl<'a> Solver<'a> {
             }
 
             for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let word_idx = r_idx >> 6;
                 let bit = 1u64 << (r_idx & 63);
                 if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
@@ -1803,7 +1851,7 @@ impl<'a> Solver<'a> {
                     return cost;
                 }
 
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
+                let start = unsafe { *offsets_ptr.add(r_idx) as usize };
                 let end = start + p_len;
                 let p = unsafe { sorted_set.get_unchecked(start..end) };
 
