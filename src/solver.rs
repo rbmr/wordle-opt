@@ -254,6 +254,33 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             0 => (0, true),
             1 => (1, true),
             2 => (3, true),
+            3 => {
+                let c0 = unsafe { *bucket.get_unchecked(0) };
+                let c1 = unsafe { *bucket.get_unchecked(1) };
+                let c2 = unsafe { *bucket.get_unchecked(2) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+
+                let g0 = unsafe { *dict.candidate_to_guess.get_unchecked(c0) };
+                let g0_ptr = unsafe { data_ptr.add(g0 * num_cand) };
+                if unsafe { *g0_ptr.add(c1) != *g0_ptr.add(c2) } {
+                    return (5, true);
+                }
+
+                let g1 = unsafe { *dict.candidate_to_guess.get_unchecked(c1) };
+                let g1_ptr = unsafe { data_ptr.add(g1 * num_cand) };
+                if unsafe { *g1_ptr.add(c0) != *g1_ptr.add(c2) } {
+                    return (5, true);
+                }
+
+                let g2 = unsafe { *dict.candidate_to_guess.get_unchecked(c2) };
+                let g2_ptr = unsafe { data_ptr.add(g2 * num_cand) };
+                if unsafe { *g2_ptr.add(c0) != *g2_ptr.add(c1) } {
+                    return (5, true);
+                }
+
+                (6, true)
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
