@@ -1093,15 +1093,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut valid_phase2_k = 0;
             let mut is_in_set =
                 std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
+            let is_in_set_ptr = is_in_set.as_mut_ptr();
+            let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+            let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
+            let set_ptr = set.as_ptr();
             let mut c_mask = 0u32;
             let mut multi_c_mask = 0u32;
-            for &c in set {
-                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
-                let m = unsafe { *self.matrix.candidate_masks.get_unchecked(c) };
+            for i in 0..c_len {
+                let c = unsafe { *set_ptr.add(i) };
+                let g = unsafe { *cand_to_guess_ptr.add(c) };
+                let m = unsafe { *cand_masks_ptr.add(c) };
                 multi_c_mask |= c_mask & m;
                 c_mask |= m;
                 unsafe {
-                    *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
+                    *is_in_set_ptr.add(g / 64) |= 1 << (g % 64);
                 }
             }
             let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
@@ -1138,7 +1143,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if block == 0 {
                     continue;
                 }
-                let mut b = block & !is_in_set[block_idx];
+                let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
                 while b != 0 {
                     let tz = b.trailing_zeros();
                     let g = block_idx * 64 + tz as usize;
@@ -1298,9 +1303,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let set_ptr = set.as_ptr();
             for i in 0..c_len {
                 let c = unsafe { *set_ptr.add(i) };
-                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
+                let g = unsafe { *cand_to_guess_ptr.add(c) };
                 unsafe {
-                    *is_in_set.get_unchecked_mut(g / 64) = 0;
+                    *is_in_set_ptr.add(g / 64) = 0;
                 }
             }
             self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
