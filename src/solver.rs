@@ -1436,28 +1436,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 eval_indices_slice.partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 })
             };
 
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                unsafe {
-                    *p_lbs_ptr.add(r_idx) = *parent_cap_bounds_ptr.add(p_len);
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-            }
-            num_p_lbs.set(num_eval);
-
             let mut exact_mask = [0u64; M];
             let mut cached_mask = [0u64; M];
             let mut num_exact = 0;
 
             for i in 0..num_eval {
                 let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                unsafe {
+                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
+                }
+
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                    let used_val = cached_val.max(lb);
-                    cost += used_val - lb;
+                    let used_val = cached_val.max(cap_lb);
+                    cost += used_val - cap_lb;
                     unsafe {
                         *p_lbs_ptr.add(r_idx) = used_val;
                     }
@@ -1475,13 +1470,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                        num_p_lbs.set(i + 1);
                         self.metrics
                             .pruned_by_bounds
                             .fetch_add(1, Ordering::Relaxed);
                         return cost;
                     }
+                } else {
+                    unsafe {
+                        *p_lbs_ptr.add(r_idx) = cap_lb;
+                    }
                 }
             }
+            num_p_lbs.set(num_eval);
 
             if num_exact == num_eval {
                 return cost;
