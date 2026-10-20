@@ -2223,19 +2223,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let p_slice = unsafe { std::slice::from_raw_parts(p_ptr, p_len) };
 
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let (used_val, is_exact) = if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
-                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    (cached_val.max(initial_lb), is_exact)
-                } else {
-                    let (quick_val, is_exact) =
-                        Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
-                    let used_val = quick_val.max(initial_lb);
-                    if is_exact {
-                        self.cache.insert_set(p_hash, p_slice, used_val, true);
-                    }
-                    cert_record!(4, p_slice, used_val, is_exact);
-                    (used_val, is_exact)
-                };
+                let (used_val, is_exact) =
+                    if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
+                        self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                        (cached_val.max(initial_lb), is_exact)
+                    } else {
+                        let (quick_val, is_exact) =
+                            Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
+                        let used_val = quick_val.max(initial_lb);
+                        if is_exact {
+                            self.cache.insert_set(p_hash, p_slice, used_val, true);
+                        }
+                        cert_record!(4, p_slice, used_val, is_exact);
+                        (used_val, is_exact)
+                    };
 
                 cost += used_val - initial_lb;
 
