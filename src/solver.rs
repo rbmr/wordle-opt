@@ -2145,7 +2145,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
             let mut num_eval = 0;
             let num_p_lbs = std::cell::Cell::new(0usize);
-            let hashes_populated = std::cell::Cell::new(false);
 
             struct GuessCleanup<'a> {
                 counts_ptr: *mut u16,
@@ -2156,7 +2155,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 eval_indices_ptr: *const u16,
                 num_non_empty: &'a std::cell::Cell<usize>,
                 num_p_lbs: &'a std::cell::Cell<usize>,
-                hashes_populated: &'a std::cell::Cell<bool>,
             }
 
             impl<'a> Drop for GuessCleanup<'a> {
@@ -2167,12 +2165,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         for i in 0..n_non_empty {
                             let r = *self.non_empty_indices_ptr.add(i) as usize;
                             *self.counts_ptr.add(r) = 0;
-                        }
-                        if self.hashes_populated.get() {
-                            for i in 0..n_non_empty {
-                                let r = *self.non_empty_indices_ptr.add(i) as usize;
-                                *self.hashes_ptr.add(r) = 0;
-                            }
+                            *self.hashes_ptr.add(r) = 0;
                         }
                         let n_p_lbs = self.num_p_lbs.get();
                         for i in 0..n_p_lbs {
@@ -2193,11 +2186,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 eval_indices_ptr,
                 num_non_empty: &num_non_empty,
                 num_p_lbs: &num_p_lbs,
-                hashes_populated: &hashes_populated,
             };
 
             let mut num_non_empty_local = 0usize;
             let set_ptr = set.as_ptr();
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             for i in 0..c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
@@ -2205,9 +2198,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *c_resp_ptr.add(i) = r as u16;
                     let cnt_ptr = counts_ptr.add(r);
                     let cnt = *cnt_ptr;
+                    let hash_ptr = hashes_ptr.add(r);
+                    let z = *zobrist_ptr.add(c);
                     if cnt == 0 {
                         *non_empty_indices_ptr.add(num_non_empty_local) = r as u16;
                         num_non_empty_local += 1;
+                        *hash_ptr = z;
+                    } else {
+                        *hash_ptr ^= z;
                     }
                     *cnt_ptr = cnt + 1;
                 }
@@ -2249,16 +2247,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             if max_p_len <= 2 {
                 return cost;
-            }
-
-            hashes_populated.set(true);
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            for i in 0..c_len {
-                let c = unsafe { *set_ptr.add(i) };
-                let r = unsafe { *c_resp_ptr.add(i) as usize };
-                unsafe {
-                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
-                }
             }
 
             let split_idx = if num_eval == 1 {
