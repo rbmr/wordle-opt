@@ -2135,17 +2135,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut eval_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
             let mut num_eval = 0;
-            let num_p_lbs = std::cell::Cell::new(0usize);
 
             struct GuessCleanup<'a> {
                 counts_ptr: *mut u16,
                 hashes_ptr: *mut u64,
-                p_lbs_ptr: *mut u32,
-                child_max_ks_ptr: *mut u16,
                 non_empty_indices_ptr: *const u16,
-                eval_indices_ptr: *const u16,
                 num_non_empty: &'a std::cell::Cell<usize>,
-                num_p_lbs: &'a std::cell::Cell<usize>,
             }
 
             impl<'a> Drop for GuessCleanup<'a> {
@@ -2158,12 +2153,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             *self.counts_ptr.add(r) = 0;
                             *self.hashes_ptr.add(r) = 0;
                         }
-                        let n_p_lbs = self.num_p_lbs.get();
-                        for i in 0..n_p_lbs {
-                            let r = *self.eval_indices_ptr.add(i) as usize;
-                            *self.p_lbs_ptr.add(r) = 0;
-                            *self.child_max_ks_ptr.add(r) = 0;
-                        }
                     }
                 }
             }
@@ -2171,12 +2160,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let _cleanup = GuessCleanup {
                 counts_ptr,
                 hashes_ptr,
-                p_lbs_ptr,
-                child_max_ks_ptr,
                 non_empty_indices_ptr,
-                eval_indices_ptr,
                 num_non_empty: &num_non_empty,
-                num_p_lbs: &num_p_lbs,
             };
 
             let mut num_non_empty_local = 0usize;
@@ -2385,6 +2370,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                unsafe {
+                    *child_max_ks_ptr.add(i) = 0;
+                }
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
@@ -2392,7 +2380,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let used_val = cached_val.max(cap_lb);
                     cost += used_val - cap_lb;
                     unsafe {
-                        *p_lbs_ptr.add(r_idx) = used_val;
+                        *p_lbs_ptr.add(i) = used_val;
                     }
                     let word_idx = r_idx >> 6;
                     let bit = 1u64 << (r_idx & 63);
@@ -2408,15 +2396,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                        num_p_lbs.set(i + 1);
                         self.metrics
                             .pruned_by_bounds
                             .fetch_add(1, Ordering::Relaxed);
                         return cost;
                     }
+                } else {
+                    unsafe {
+                        *p_lbs_ptr.add(i) = cap_lb;
+                    }
                 }
             }
-            num_p_lbs.set(num_eval);
 
             if num_exact == num_eval {
                 return cost;
@@ -2471,7 +2461,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
                 unsafe {
-                    *p_lbs_ptr.add(r_idx) = used_val;
+                    *p_lbs_ptr.add(i) = used_val;
                 }
                 if is_exact {
                     unsafe {
@@ -2534,14 +2524,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             cert_record!(8, p, lb, false);
                         } else {
                             unsafe {
-                                *child_max_ks_ptr.add(r_idx) = k as u16;
+                                *child_max_ks_ptr.add(i) = k as u16;
                             }
                             let tight_lb =
                                 crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                             let used_val = tight_lb.max(lb);
                             cost += used_val - lb;
                             unsafe {
-                                *p_lbs_ptr.add(r_idx) = used_val;
+                                *p_lbs_ptr.add(i) = used_val;
                             }
                             self.cache.insert_set(hash, p, used_val, false);
                             cert_record!(9, p, used_val, false);
@@ -2577,12 +2567,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
 
-                let stored_lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                let actual_lb = if stored_lb != 0 {
-                    stored_lb
-                } else {
-                    unsafe { *parent_cap_bounds_ptr.add(p_len) }
-                };
+                let actual_lb = unsafe { *p_lbs_ptr.add(i) };
                 let b = cost - actual_lb;
                 let new_beta = beta - b;
 
@@ -2594,7 +2579,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     return cost;
                 }
 
-                let stored_k = unsafe { *child_max_ks_ptr.add(r_idx) as usize };
+                let stored_k = unsafe { *child_max_ks_ptr.add(i) as usize };
                 let child_k = if stored_k != 0 {
                     stored_k
                 } else {
