@@ -2195,14 +2195,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
                 let p_ptr = p.as_mut_ptr() as *mut usize;
                 let mut p_idx = 0;
+                let mut p_hash = 0u64;
                 let r_target = entry.0;
                 let set_ptr = set.as_ptr();
+                let zobrist_ptr = self.matrix.zobrist.as_ptr();
                 for cand_idx in 0..c_len {
                     let c = unsafe { *set_ptr.add(cand_idx) };
                     let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                     if r == r_target {
                         unsafe {
                             *p_ptr.add(p_idx) = c;
+                            p_hash ^= *zobrist_ptr.add(c);
                         }
                         p_idx += 1;
                         if p_idx == p_len {
@@ -2238,8 +2241,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 self.current_cost_so_far += b;
-                let val = self.min_state_val(
+                let val = self.min_state_val_with_hash(
                     p_slice,
+                    p_hash,
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
@@ -2640,9 +2644,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 unsafe {
                     *child_max_ks_ptr.add(i) = 0;
                 }
-            }
-
-            for i in 0..split_idx {
                 let word_idx = i >> 6;
                 let bit = 1u64 << (i & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
@@ -2744,8 +2745,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 } else {
                     p_len.min(parent_max_k)
-                }
-                .max(2);
+                };
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 self.current_cost_so_far += b;
