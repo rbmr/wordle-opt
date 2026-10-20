@@ -2204,12 +2204,33 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     0
                 }
             } else {
-                let eval_indices_slice =
-                    unsafe { std::slice::from_raw_parts_mut(eval_indices_ptr, num_eval) };
-                eval_indices_slice.sort_unstable_by_key(|&r| {
-                    (std::cmp::Reverse(unsafe { *counts_ptr.add(r as usize) }), r)
-                });
-                eval_indices_slice.partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 })
+                for i in 1..num_eval {
+                    let r_curr = unsafe { *eval_indices_ptr.add(i) };
+                    let c_curr = unsafe { *counts_ptr.add(r_curr as usize) };
+                    let mut j = i;
+                    while j > 0 {
+                        let r_prev = unsafe { *eval_indices_ptr.add(j - 1) };
+                        let c_prev = unsafe { *counts_ptr.add(r_prev as usize) };
+                        if c_prev < c_curr || (c_prev == c_curr && r_prev > r_curr) {
+                            unsafe {
+                                *eval_indices_ptr.add(j) = r_prev;
+                            }
+                            j -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    unsafe {
+                        *eval_indices_ptr.add(j) = r_curr;
+                    }
+                }
+                let mut split = 0;
+                while split < num_eval
+                    && unsafe { *counts_ptr.add(*eval_indices_ptr.add(split) as usize) > 15 }
+                {
+                    split += 1;
+                }
+                split
             };
 
             let mut exact_mask = [0u64; M];
