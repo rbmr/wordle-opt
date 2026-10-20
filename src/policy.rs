@@ -748,6 +748,7 @@ impl<'a> OptimalPolicy<'a> {
                     if let Some((cached_val, true)) = self.cache.get(hash) {
                         return cached_val;
                     }
+                    let mut known_quick = 0;
                     if bucket.len() <= 15 {
                         let (q_val, is_exact) =
                             Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
@@ -756,6 +757,7 @@ impl<'a> OptimalPolicy<'a> {
                             cert_record!(14, bucket, q_val, true);
                             return q_val;
                         }
+                        known_quick = q_val;
                     }
                     let mut solver = Solver::new(
                         self.matrix,
@@ -775,6 +777,7 @@ impl<'a> OptimalPolicy<'a> {
                         bucket_greedy,
                         2,
                         bucket_k,
+                        known_quick,
                     );
                     let exact_val = val.min(bucket_greedy);
                     self.cache.insert_set(hash, bucket, exact_val, true);

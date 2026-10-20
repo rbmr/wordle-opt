@@ -958,9 +958,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         for &c in set {
             hash ^= unsafe { *zobrist_ptr.add(c) };
         }
-        self.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k)
+        self.min_state_val_with_hash(
+            set,
+            hash,
+            parent_active_guesses,
+            beta,
+            depth,
+            parent_max_k,
+            0,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn min_state_val_with_hash(
         &mut self,
         set: &[usize],
@@ -969,6 +978,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         beta: u32,
         depth: usize,
         parent_max_k: usize,
+        known_quick_lb: u32,
     ) -> u32 {
         let c_len = set.len();
         if c_len <= 2 {
@@ -1004,7 +1014,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         self.metrics
             .states_evaluated
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if c_len <= 15 {
+        if known_quick_lb != 0 {
+            cached_lower_bound = cached_lower_bound.max(known_quick_lb);
+        } else if c_len <= 15 {
             let (val, is_exact) = Self::quick_bucket_eval_specialized(self.matrix, self.dict, set);
             if is_exact {
                 self.cache.insert_set(hash, set, val, true);
@@ -2269,6 +2281,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     effective_beta,
                     depth + 1,
                     p_len.min(parent_max_k).max(2),
+                    used_val,
                 );
                 self.current_cost_so_far -= b;
 
@@ -2769,6 +2782,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 };
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
+                let known_quick = if i >= split_idx { actual_lb } else { 0 };
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
                     p,
@@ -2777,6 +2791,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     effective_beta,
                     depth + 1,
                     child_k,
+                    known_quick,
                 );
                 self.current_cost_so_far -= b;
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -2932,6 +2947,7 @@ impl<'a> Solver<'a> {
     }
 
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     pub fn min_state_val_with_hash(
         &mut self,
         set: &[usize],
@@ -2940,8 +2956,9 @@ impl<'a> Solver<'a> {
         beta: u32,
         depth: usize,
         parent_max_k: usize,
+        known_quick_lb: u32,
     ) -> u32 {
-        match_solver_mut!(self, s => s.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k))
+        match_solver_mut!(self, s => s.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k, known_quick_lb))
     }
 
     #[inline(always)]
