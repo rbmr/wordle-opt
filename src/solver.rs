@@ -1163,6 +1163,42 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
                         + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) },
                 )
+            } else if num_non_empty == 6 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                let count3 = unsafe { *counts_ptr.add(r3) } as u32;
+                let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                let count4 = unsafe { *counts_ptr.add(r4) } as u32;
+                let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    *counts_ptr.add(r4) = 0;
+                    *counts_ptr.add(r5) = 0;
+                }
+                let count5 = (c_len as u32 - 1) - count0 - count1 - count2 - count3 - count4;
+                (
+                    1 + count0 * count0
+                        + count1 * count1
+                        + count2 * count2
+                        + count3 * count3
+                        + count4 * count4
+                        + count5 * count5,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count5 as usize) },
+                )
             } else {
                 let mut exp = 1u32;
                 let mut lb = c_len as u32;
@@ -1517,6 +1553,54 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 valid_phase2_k = 5;
                             }
                             phase2_tuples.push((g, expected_rem, lb_cost, 5));
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
+                        }
+                        continue;
+                    }
+                    if num_non_empty == 6 {
+                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                        let count0 = unsafe { *counts_ptr.add(r0) };
+                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                        let count1 = unsafe { *counts_ptr.add(r1) };
+                        let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                        let count2 = unsafe { *counts_ptr.add(r2) };
+                        let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                        let count3 = unsafe { *counts_ptr.add(r3) };
+                        let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                        let count4 = unsafe { *counts_ptr.add(r4) };
+                        let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                        unsafe {
+                            *counts_ptr.add(r0) = 0;
+                            *counts_ptr.add(r1) = 0;
+                            *counts_ptr.add(r2) = 0;
+                            *counts_ptr.add(r3) = 0;
+                            *counts_ptr.add(r4) = 0;
+                            *counts_ptr.add(r5) = 0;
+                        }
+                        let c0 = count0 as u32;
+                        let c1 = count1 as u32;
+                        let c2 = count2 as u32;
+                        let c3 = count3 as u32;
+                        let c4 = count4 as u32;
+                        let c5 = (c_len as u32) - c0 - c1 - c2 - c3 - c4;
+                        let expected_rem =
+                            c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4 + c5 * c5;
+                        let lb_cost = (c_len as u32)
+                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) }
+                            + unsafe { *parent_cap_bounds_ptr.add(c5 as usize) };
+                        if 6 > local_max_k {
+                            local_max_k = 6;
+                        }
+                        if lb_cost < best_val {
+                            if 6 > valid_phase2_k {
+                                valid_phase2_k = 6;
+                            }
+                            phase2_tuples.push((g, expected_rem, lb_cost, 6));
                         } else {
                             min_val_found = min_val_found.min(lb_cost);
                         }
