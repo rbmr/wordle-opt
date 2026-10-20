@@ -1361,7 +1361,29 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             phase1_tuples[2] = t2;
             phase1_tuples[3] = t3;
         } else if phase1_tuples.len() > 4 {
-            phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+            let p1_ptr = phase1_tuples.as_mut_ptr();
+            let p1_len = phase1_tuples.len();
+            for j in 1..p1_len {
+                let key = unsafe { *p1_ptr.add(j) };
+                let mut k = j;
+                while k > 0 {
+                    let prev = unsafe { *p1_ptr.add(k - 1) };
+                    let prev_greater = prev.2 > key.2
+                        || (prev.2 == key.2
+                            && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
+                    if prev_greater {
+                        unsafe {
+                            *p1_ptr.add(k) = prev;
+                        }
+                        k -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                unsafe {
+                    *p1_ptr.add(k) = key;
+                }
+            }
         }
 
         for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
@@ -1762,7 +1784,29 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     phase2_tuples[2] = t2;
                     phase2_tuples[3] = t3;
                 } else if phase2_tuples.len() > 4 {
-                    phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
+                    let p2_ptr = phase2_tuples.as_mut_ptr();
+                    let p2_len = phase2_tuples.len();
+                    for j in 1..p2_len {
+                        let key = unsafe { *p2_ptr.add(j) };
+                        let mut k = j;
+                        while k > 0 {
+                            let prev = unsafe { *p2_ptr.add(k - 1) };
+                            let prev_greater = prev.2 > key.2
+                                || (prev.2 == key.2
+                                    && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
+                            if prev_greater {
+                                unsafe {
+                                    *p2_ptr.add(k) = prev;
+                                }
+                                k -= 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        unsafe {
+                            *p2_ptr.add(k) = key;
+                        }
+                    }
                 }
 
                 for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
