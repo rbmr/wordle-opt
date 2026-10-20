@@ -227,9 +227,43 @@ pub fn compute_max_branching_factor_seq_with_target(
         }
     }
 
+    let word_len = matrix.word_len;
     let mut c_mask = 0u32;
+    let mut c_all_mask = u32::MAX;
+    let mut at_mask = [0u32; 8];
+    let mut elsewhere_mask = [0u32; 8];
     for &c in candidates {
-        c_mask |= matrix.candidate_masks[c];
+        let m = unsafe { *matrix.candidate_masks.get_unchecked(c) };
+        c_mask |= m;
+        c_all_mask &= m;
+        if m != u32::MAX && word_len <= 8 {
+            let cg = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
+            let c_chars = unsafe { matrix.guess_chars.get_unchecked(cg) };
+            for i in 0..word_len {
+                let bit = 1u32 << c_chars[i];
+                at_mask[i] |= bit;
+                elsewhere_mask[i] |= m & !bit;
+            }
+        }
+    }
+    let has_profile = c_mask != u32::MAX && word_len <= 8;
+    let mut ge2_u = [0u32; 8];
+    let mut eq3_u = [0u32; 8];
+    let mut ge2_r = [0u32; 8];
+    let mut eq3_r = [0u32; 8];
+    if has_profile {
+        let b_u = !c_all_mask;
+        for i in 0..word_len {
+            let a = at_mask[i];
+            let e = elsewhere_mask[i];
+            let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
+            let ae = a & e;
+            let a_or_e = a | e;
+            ge2_u[i] = ae | (a_or_e & b_u);
+            eq3_u[i] = ae & b_u;
+            ge2_r[i] = ae | (a_or_e & b_r);
+            eq3_r[i] = ae & b_r;
+        }
     }
 
     let mid = candidates.len() / 2;
@@ -264,14 +298,14 @@ pub fn compute_max_branching_factor_seq_with_target(
             let g_ones = g_mask.count_ones();
             let overlap_count = overlap.count_ones();
 
-            let var_pos = if g_ones == matrix.word_len as u32 {
+            let var_pos = if g_ones == word_len as u32 {
                 overlap_count
             } else if overlap_count == g_ones {
-                matrix.word_len as u32
+                word_len as u32
             } else {
                 let chars = unsafe { matrix.guess_chars.get_unchecked(g) };
                 let mut vp = 0u32;
-                for i in 0..matrix.word_len.min(8) {
+                for i in 0..word_len.min(8) {
                     vp += (c_mask >> chars[i]) & 1;
                 }
                 vp
@@ -283,6 +317,38 @@ pub fn compute_max_branching_factor_seq_with_target(
                 || (var_pos <= 4 && max_k >= 81)
             {
                 continue;
+            }
+
+            if has_profile {
+                let chars = unsafe { matrix.guess_chars.get_unchecked(g) };
+                let (ge2, eq3) = if g_ones == word_len as u32 {
+                    (&ge2_u, &eq3_u)
+                } else {
+                    (&ge2_r, &eq3_r)
+                };
+                let prod = if word_len == 5 {
+                    let l0 = chars[0];
+                    let l1 = chars[1];
+                    let l2 = chars[2];
+                    let l3 = chars[3];
+                    let l4 = chars[4];
+                    let m0 = 1 + ((ge2[0] >> l0) & 1) + ((eq3[0] >> l0) & 1);
+                    let m1 = 1 + ((ge2[1] >> l1) & 1) + ((eq3[1] >> l1) & 1);
+                    let m2 = 1 + ((ge2[2] >> l2) & 1) + ((eq3[2] >> l2) & 1);
+                    let m3 = 1 + ((ge2[3] >> l3) & 1) + ((eq3[3] >> l3) & 1);
+                    let m4 = 1 + ((ge2[4] >> l4) & 1) + ((eq3[4] >> l4) & 1);
+                    m0 * m1 * m2 * m3 * m4
+                } else {
+                    let mut p = 1u32;
+                    for i in 0..word_len {
+                        let l = chars[i];
+                        p *= 1 + ((ge2[i] >> l) & 1) + ((eq3[i] >> l) & 1);
+                    }
+                    p
+                };
+                if prod as usize <= max_k {
+                    continue;
+                }
             }
 
             let mut mask = [0u64; 4];
@@ -345,14 +411,14 @@ pub fn compute_max_branching_factor_seq_with_target(
             let g_ones = g_mask.count_ones();
             let overlap_count = overlap.count_ones();
 
-            let var_pos = if g_ones == matrix.word_len as u32 {
+            let var_pos = if g_ones == word_len as u32 {
                 overlap_count
             } else if overlap_count == g_ones {
-                matrix.word_len as u32
+                word_len as u32
             } else {
                 let chars = unsafe { matrix.guess_chars.get_unchecked(g) };
                 let mut vp = 0u32;
-                for i in 0..matrix.word_len.min(8) {
+                for i in 0..word_len.min(8) {
                     vp += (c_mask >> chars[i]) & 1;
                 }
                 vp
@@ -364,6 +430,23 @@ pub fn compute_max_branching_factor_seq_with_target(
                 || (var_pos <= 4 && max_k >= 81)
             {
                 continue;
+            }
+
+            if has_profile {
+                let chars = unsafe { matrix.guess_chars.get_unchecked(g) };
+                let (ge2, eq3) = if g_ones == word_len as u32 {
+                    (&ge2_u, &eq3_u)
+                } else {
+                    (&ge2_r, &eq3_r)
+                };
+                let mut prod = 1u32;
+                for i in 0..word_len {
+                    let l = chars[i];
+                    prod *= 1 + ((ge2[i] >> l) & 1) + ((eq3[i] >> l) & 1);
+                }
+                if prod as usize <= max_k {
+                    continue;
+                }
             }
 
             let mut mask = [0u64; 36];
