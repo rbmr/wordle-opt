@@ -1905,8 +1905,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
         if c_len <= 16 {
-            let mut local_counts = std::mem::MaybeUninit::<[(u16, u8, u32); 16]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u8, u32);
+            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16); 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16);
             let mut num_non_empty = 0;
             let mut prev_idx = 0usize;
             let set_ptr = set.as_ptr();
@@ -1934,7 +1934,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if !found {
                     prev_idx = num_non_empty;
                     unsafe {
-                        *local_counts_ptr.add(num_non_empty) = (r, 1, 0);
+                        *local_counts_ptr.add(num_non_empty) = (r, 1);
                     }
                     num_non_empty += 1;
                 }
@@ -1959,7 +1959,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 cost += lb;
-                entry.2 = lb;
             }
 
             if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -2072,10 +2071,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let (quick_val, is_exact) =
                     Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
-                let lb = entry.2;
-                let used_val = quick_val.max(lb);
-                cost += used_val - lb;
-                entry.2 = used_val;
+                let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let used_val = quick_val.max(initial_lb);
+                cost += used_val - initial_lb;
                 cert_record!(4, p_slice, used_val, is_exact);
 
                 if is_exact {
@@ -2086,7 +2084,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
 
-                let b = cost - entry.2;
+                let b = cost - used_val;
                 let new_beta = beta - b;
                 let effective_beta =
                     new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
@@ -2112,7 +2110,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     return b + val;
                 }
                 cost = b + val;
-                entry.2 = val;
             }
             cost
         } else {
