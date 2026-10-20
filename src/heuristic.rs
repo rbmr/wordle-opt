@@ -210,6 +210,28 @@ pub fn min_k_for_target_bound(n: usize, max_k: usize, target_bound: u32) -> usiz
     high
 }
 
+#[inline(always)]
+fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
+    let min_vp = if max_k >= 2187 {
+        8
+    } else if max_k >= 729 {
+        7
+    } else if max_k >= 243 {
+        6
+    } else if max_k >= 81 {
+        5
+    } else if max_k >= 27 {
+        4
+    } else if max_k >= 9 {
+        3
+    } else if max_k >= 3 {
+        2
+    } else {
+        1
+    };
+    (word_len.saturating_sub(min_vp) + 1) as u32
+}
+
 /// Sequential version of `compute_max_branching_factor` with early stopping and target_k.
 pub fn compute_max_branching_factor_seq_with_target(
     matrix: &crate::matrix::ResponseMatrix,
@@ -297,6 +319,8 @@ pub fn compute_max_branching_factor_seq_with_target(
         };
 
         if has_profile && word_len == 5 {
+            let non_c_mask = !c_mask;
+            let mut min_non_overlap = min_non_overlap_for_len(5, max_k);
             let ge2_0 = ge2_64[0];
             let ge2_1 = ge2_64[1];
             let ge2_2 = ge2_64[2];
@@ -307,7 +331,11 @@ pub fn compute_max_branching_factor_seq_with_target(
             let eq3_2 = eq3_64[2];
             let eq3_3 = eq3_64[3];
             let eq3_4 = eq3_64[4];
-            for (g, chars) in matrix.guess_profile_chars.iter().enumerate() {
+            for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
+                if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
+                    continue;
+                }
+                let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let l0 = chars[0];
                 let l1 = chars[1];
                 let l2 = chars[2];
@@ -351,10 +379,17 @@ pub fn compute_max_branching_factor_seq_with_target(
                     if max_k >= effective_target {
                         break;
                     }
+                    min_non_overlap = min_non_overlap_for_len(5, max_k);
                 }
             }
         } else if has_profile {
-            for (g, chars) in matrix.guess_profile_chars.iter().enumerate() {
+            let non_c_mask = !c_mask;
+            let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+            for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
+                if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
+                    continue;
+                }
+                let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let mut prod = 1u32;
                 for i in 0..word_len {
                     let l = chars[i];
@@ -393,6 +428,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                     if max_k >= effective_target {
                         break;
                     }
+                    min_non_overlap = min_non_overlap_for_len(word_len, max_k);
                 }
             }
         } else {
@@ -454,12 +490,13 @@ pub fn compute_max_branching_factor_seq_with_target(
             (&heap_ptrs[..mid], &heap_ptrs[mid..])
         };
 
+        let non_c_mask = !c_mask;
+        let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
         for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
-            let overlap = g_mask & c_mask;
-            if overlap == 0 {
-                continue;
-            }
             if has_profile {
+                if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
+                    continue;
+                }
                 let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let mut prod = 1u32;
                 for i in 0..word_len {
@@ -469,6 +506,8 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if prod as usize <= max_k {
                     continue;
                 }
+            } else if (g_mask & c_mask) == 0 {
+                continue;
             }
 
             let mut mask = [0u64; 36];
@@ -494,6 +533,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if max_k >= effective_target {
                     break;
                 }
+                min_non_overlap = min_non_overlap_for_len(word_len, max_k);
             }
         }
     }
