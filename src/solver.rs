@@ -470,6 +470,97 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     (12, false)
                 }
             }
+            7 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT7: [[usize; 6]; 7] = [
+                    [1, 2, 3, 4, 5, 6],
+                    [2, 3, 4, 5, 6, 0],
+                    [3, 4, 5, 6, 0, 1],
+                    [4, 5, 6, 0, 1, 2],
+                    [5, 6, 0, 1, 2, 3],
+                    [6, 0, 1, 2, 3, 4],
+                    [0, 1, 2, 3, 4, 5],
+                ];
+                let c = [c0, c1, c2, c3, c4, c5, c6];
+                let mut best_inside = u32::MAX;
+
+                for i in 0..7 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id, ie, if_] = ROT7[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+                    let ce = c[ie];
+                    let cf = c[if_];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+                    let re = unsafe { *gi_ptr.add(ce) };
+                    let rf = unsafe { *gi_ptr.add(cf) };
+
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_ad = ra == rd;
+                    let eq_ae = ra == re;
+                    let eq_af = ra == rf;
+                    let eq_bc = rb == rc;
+                    let eq_bd = rb == rd;
+                    let eq_be = rb == re;
+                    let eq_bf = rb == rf;
+                    let eq_cd = rc == rd;
+                    let eq_ce = rc == re;
+                    let eq_cf = rc == rf;
+                    let eq_de = rd == re;
+                    let eq_df = rd == rf;
+                    let eq_ef = re == rf;
+
+                    let coll_mask = (eq_ab as u16)
+                        | ((eq_ac as u16) << 1)
+                        | ((eq_ad as u16) << 2)
+                        | ((eq_ae as u16) << 3)
+                        | ((eq_af as u16) << 4)
+                        | ((eq_bc as u16) << 5)
+                        | ((eq_bd as u16) << 6)
+                        | ((eq_be as u16) << 7)
+                        | ((eq_bf as u16) << 8)
+                        | ((eq_cd as u16) << 9)
+                        | ((eq_ce as u16) << 10)
+                        | ((eq_cf as u16) << 11)
+                        | ((eq_de as u16) << 12)
+                        | ((eq_df as u16) << 13)
+                        | ((eq_ef as u16) << 14);
+
+                    if coll_mask == 0 {
+                        return (13, true);
+                    }
+
+                    if best_inside != 14 && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside = 14;
+                    }
+                }
+
+                if best_inside == 14 {
+                    (14, true)
+                } else {
+                    (14, false)
+                }
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -3206,9 +3297,9 @@ mod solver_cache_tests {
         let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
-        // Test multiple small subsets of candidates (sizes 2..=6)
+        // Test multiple small subsets of candidates (sizes 2..=7)
         for offset in (0..30).step_by(5) {
-            for size in 2..=6 {
+            for size in 2..=7 {
                 let bucket: Vec<usize> = (offset..offset + size).collect();
                 let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
                 let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);
