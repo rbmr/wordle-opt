@@ -2212,12 +2212,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                if p_len > 2 {
-                    unsafe {
-                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
-                    }
-                    num_eval += 1;
-                }
                 cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
             }
 
@@ -2227,6 +2221,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
                 return cost;
+            }
+
+            for i in 0..num_non_empty_local {
+                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                if r_idx == WIN {
+                    continue;
+                }
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                if p_len > 2 {
+                    unsafe {
+                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
+                    }
+                    num_eval += 1;
+                }
             }
 
             if num_eval == 0 {
