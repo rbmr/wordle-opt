@@ -1907,28 +1907,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         if c_len <= 16 {
             let mut local_counts = std::mem::MaybeUninit::<[(u16, u16); 16]>::uninit();
             let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16);
-            let mut num_non_empty = 0;
-            let mut prev_idx = 0usize;
             let set_ptr = set.as_ptr();
-            for cand_idx in 0..c_len {
+            let c0 = unsafe { *set_ptr };
+            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() as u16 };
+            unsafe {
+                *local_counts_ptr = (r0, 1);
+            }
+            let mut num_non_empty = 1;
+            let mut prev_idx = 0usize;
+            for cand_idx in 1..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
+                if prev_entry.0 == r {
+                    prev_entry.1 += 1;
+                    continue;
+                }
                 let mut found = false;
-                if num_non_empty > 0 {
-                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
-                    if prev_entry.0 == r {
-                        prev_entry.1 += 1;
+                for i in 0..num_non_empty {
+                    let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                    if entry.0 == r {
+                        entry.1 += 1;
+                        prev_idx = i;
                         found = true;
-                    } else {
-                        for i in 0..num_non_empty {
-                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                            if entry.0 == r {
-                                entry.1 += 1;
-                                prev_idx = i;
-                                found = true;
-                                break;
-                            }
-                        }
+                        break;
                     }
                 }
                 if !found {
@@ -2184,6 +2186,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let mut cost = set.len() as u32;
+            let mut max_p_len = 0;
 
             for i in 0..num_non_empty_local {
                 let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
@@ -2191,6 +2194,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                if p_len > max_p_len {
+                    max_p_len = p_len;
+                }
                 cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
             }
 
@@ -2199,6 +2205,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.metrics
                     .pruned_by_bounds
                     .fetch_add(1, Ordering::Relaxed);
+                return cost;
+            }
+
+            if max_p_len <= 2 {
                 return cost;
             }
 
@@ -2214,10 +2224,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     num_eval += 1;
                 }
-            }
-
-            if num_eval == 0 {
-                return cost;
             }
 
             let split_idx = if num_eval == 1 {
