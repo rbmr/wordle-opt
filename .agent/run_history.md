@@ -543,8 +543,13 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-20 | `2e318f4` | pc01 | 500 | 1 | optimal | 0.520s | 1453 | 517 | 151 | — | fast-path 6-bucket partitions in min_state_val Phase 1 & 2; validation OK |
 | 2026-10-20 | `2e318f4` | pc01 | 1000 | 1 | optimal | 3.862s | 3124 | 1049 | 1180 | — | fast-path 6-bucket partitions in min_state_val Phase 1 & 2; pick time 3.7s; validation OK |
 | 2026-10-20 | `2e318f4` | pc01 | 2340 | — | optimal | 37.796s (0.01h) | 8001 | 2478 | 27964 | ~2.5GB | full N=2340 run (2026-10-20-2e318f4); fast-path 6-bucket partitions in min_state_val Phase 1 & 2; pick time 36.1s; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-20 | `9f0d089` | pc01 | 500 | 1 | optimal | 0.522s | 1453 | 517 | 145 | — | specialize n=8 candidate evaluation with bitmask comparisons in quick_bucket_eval_specialized; validation OK |
+| 2026-10-20 | `9f0d089` | pc01 | 1000 | 1 | optimal | 3.845s | 3124 | 1049 | 1134 | — | specialize n=8 candidate evaluation with bitmask comparisons; states down to 1134; build 3.845s; validation OK |
+| 2026-10-20 | `9f0d089` | pc01 | 2340 | — | optimal | 37.672s (0.01h) | 8001 | 2478 | 27912 | ~2.5GB | full N=2340 run (2026-10-20-9f0d089); specialize n=8 candidate evaluation with bitmask comparisons; pick time 36.0s; build 37.672s; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `9f0d089` rows demonstrated that specializing $n=8$ candidate evaluation in `SpecializedSolver::quick_bucket_eval_specialized` (replacing the general loop's 32-byte `seen_mask` stack zeroing, shifts, and memory reads/writes with compile-time `ROT8` rotations, 21 pairwise comparisons in a 21-bit `coll_mask`, and power-of-two single-collision checks `(coll_mask & (coll_mask - 1)) == 0`) reduced $N=1000$ evaluated states to **1,134** (down from 1,141 in `9eefd3d` and 1,180 in `2e318f4`) and matched the record build time at **3.845s** (pick time 3.7s). In the full $N=2340$ solve, pick time was **36.0s** (total build time **37.672s**), with total cost 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`) and validation passing cleanly.
 
 - The `2e318f4` rows evaluated fast-pathing 6-bucket partitions in `SpecializedSolver::min_state_val` Phase 1 and Phase 2 (directly loading leading bucket counts and computing `count5` algebraically). While exactness was strictly preserved (full solve cost 8001, golden sha256 `34f095c2…`), the additional 6-element unrolled branches added slight instruction cache footprint in `min_state_val` without pruning additional branches (full solve 37.796s vs 37.560s).
 
