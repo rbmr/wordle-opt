@@ -944,6 +944,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         }
     }
 
+    #[inline(always)]
     pub fn min_state_val(
         &mut self,
         set: &[usize],
@@ -952,14 +953,35 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         depth: usize,
         parent_max_k: usize,
     ) -> u32 {
+        let mut hash = 0;
+        let zobrist_ptr = self.matrix.zobrist.as_ptr();
+        for &c in set {
+            hash ^= unsafe { *zobrist_ptr.add(c) };
+        }
+        self.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k)
+    }
+
+    pub fn min_state_val_with_hash(
+        &mut self,
+        set: &[usize],
+        hash: u64,
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let c_len = set.len();
+        if c_len <= 2 {
+            return match c_len {
+                0 => 0,
+                1 => 1,
+                _ => 3,
+            };
+        }
+
         self.metrics
             .max_depth
             .fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
-
-        let mut hash = 0;
-        for &c in set {
-            hash ^= self.matrix.zobrist[c];
-        }
 
         let mut cached_lower_bound = 0;
         if let Some((cached_val, is_exact)) = self.cache.get(hash) {
@@ -982,17 +1004,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         self.metrics
             .states_evaluated
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let c_len = set.len();
-        if c_len == 0 {
-            return 0;
-        }
-        if c_len == 1 {
-            return 1;
-        }
-        if c_len == 2 {
-            return 3;
-        }
         if c_len <= 15 {
             let (val, is_exact) = Self::quick_bucket_eval_specialized(self.matrix, self.dict, set);
             if is_exact {
@@ -2736,9 +2747,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 .max(2);
 
+                let hash = unsafe { *hashes_ptr.add(r_idx) };
                 self.current_cost_so_far += b;
-                let val =
-                    self.min_state_val(p, active_guesses_slice, effective_beta, depth + 1, child_k);
+                let val = self.min_state_val_with_hash(
+                    p,
+                    hash,
+                    active_guesses_slice,
+                    effective_beta,
+                    depth + 1,
+                    child_k,
+                );
                 self.current_cost_so_far -= b;
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
@@ -2890,6 +2908,19 @@ impl<'a> Solver<'a> {
         parent_max_k: usize,
     ) -> u32 {
         match_solver_mut!(self, s => s.min_state_val(set, parent_active_guesses, beta, depth, parent_max_k))
+    }
+
+    #[inline(always)]
+    pub fn min_state_val_with_hash(
+        &mut self,
+        set: &[usize],
+        hash: u64,
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k))
     }
 
     #[inline(always)]

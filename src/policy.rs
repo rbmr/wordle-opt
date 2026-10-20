@@ -768,8 +768,9 @@ impl<'a> OptimalPolicy<'a> {
                     );
                     let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, bucket);
                     let bucket_k = bucket.len().min(self.max_k).max(2);
-                    let val = solver.min_state_val(
+                    let val = solver.min_state_val_with_hash(
                         bucket,
+                        hash,
                         self.all_guesses_bits,
                         bucket_greedy,
                         2,
