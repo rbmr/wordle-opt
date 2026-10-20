@@ -259,6 +259,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     let word_len = matrix.word_len;
     let mut c_mask = 0u32;
     let mut c_all_mask = u32::MAX;
+    let mut c_dup_mask = 0u32;
     let mut at_mask = [0u32; 8];
     let mut elsewhere_mask = [0u32; 8];
     for &c in candidates {
@@ -266,6 +267,7 @@ pub fn compute_max_branching_factor_seq_with_target(
         c_mask |= m;
         c_all_mask &= m;
         if m != u32::MAX && word_len <= 8 {
+            c_dup_mask |= unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
             let c_at = unsafe { matrix.candidate_at_masks.get_unchecked(c) };
             for i in 0..word_len {
                 let bit = c_at[i];
@@ -275,22 +277,44 @@ pub fn compute_max_branching_factor_seq_with_target(
         }
     }
     let has_profile = c_mask != u32::MAX && word_len <= 8;
-    let mut ge2_64 = [0u64; 8];
-    let mut eq3_64 = [0u64; 8];
+    let mut m_tab = [[1u8; 96]; 8];
     if has_profile {
         let b_u = !c_all_mask;
         for i in 0..word_len {
             let a = at_mask[i];
             let e = elsewhere_mask[i];
+            let e_dup = e & c_dup_mask;
             let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
             let ae = a & e;
             let a_or_e = a | e;
             let ge2_u = ae | (a_or_e & b_u);
             let eq3_u = ae & b_u;
-            let ge2_r = ae | (a_or_e & b_r);
-            let eq3_r = ae & b_r;
-            ge2_64[i] = (ge2_u as u64) | ((ge2_r as u64) << 32);
-            eq3_64[i] = (eq3_u as u64) | ((eq3_r as u64) << 32);
+            let ge2_1 = ae | (a_or_e & b_r);
+            let eq3_1 = ae & b_r;
+            let ae_dup = a & e_dup;
+            let a_or_e_dup = a | e_dup;
+            let ge2_2 = ae_dup | (a_or_e_dup & b_r);
+            let eq3_2 = ae_dup & b_r;
+
+            let tab_i = &mut m_tab[i];
+            let mut m = ge2_u;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                tab_i[l] = 2 + (((eq3_u >> l) & 1) as u8);
+            }
+            let mut m = ge2_1;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                tab_i[l + 32] = 2 + (((eq3_1 >> l) & 1) as u8);
+            }
+            let mut m = ge2_2;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
+            }
         }
     }
 
@@ -321,32 +345,24 @@ pub fn compute_max_branching_factor_seq_with_target(
         if has_profile && word_len == 5 {
             let non_c_mask = !c_mask;
             let mut min_non_overlap = min_non_overlap_for_len(5, max_k);
-            let ge2_0 = ge2_64[0];
-            let ge2_1 = ge2_64[1];
-            let ge2_2 = ge2_64[2];
-            let ge2_3 = ge2_64[3];
-            let ge2_4 = ge2_64[4];
-            let eq3_0 = eq3_64[0];
-            let eq3_1 = eq3_64[1];
-            let eq3_2 = eq3_64[2];
-            let eq3_3 = eq3_64[3];
-            let eq3_4 = eq3_64[4];
+            let tab0 = &m_tab[0];
+            let tab1 = &m_tab[1];
+            let tab2 = &m_tab[2];
+            let tab3 = &m_tab[3];
+            let tab4 = &m_tab[4];
             for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
                 if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
                 let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
-                let l0 = chars[0];
-                let l1 = chars[1];
-                let l2 = chars[2];
-                let l3 = chars[3];
-                let l4 = chars[4];
-                let m0 = 1 + (((ge2_0 >> l0) & 1) as u32) + (((eq3_0 >> l0) & 1) as u32);
-                let m1 = 1 + (((ge2_1 >> l1) & 1) as u32) + (((eq3_1 >> l1) & 1) as u32);
-                let m2 = 1 + (((ge2_2 >> l2) & 1) as u32) + (((eq3_2 >> l2) & 1) as u32);
-                let m3 = 1 + (((ge2_3 >> l3) & 1) as u32) + (((eq3_3 >> l3) & 1) as u32);
-                let m4 = 1 + (((ge2_4 >> l4) & 1) as u32) + (((eq3_4 >> l4) & 1) as u32);
-                if (m0 * m1 * m2 * m3 * m4) as usize <= max_k {
+                let prod = unsafe {
+                    (*tab0.get_unchecked(chars[0] as usize) as u32)
+                        * (*tab1.get_unchecked(chars[1] as usize) as u32)
+                        * (*tab2.get_unchecked(chars[2] as usize) as u32)
+                        * (*tab3.get_unchecked(chars[3] as usize) as u32)
+                        * (*tab4.get_unchecked(chars[4] as usize) as u32)
+                };
+                if prod as usize <= max_k {
                     continue;
                 }
 
@@ -392,8 +408,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let mut prod = 1u32;
                 for i in 0..word_len {
-                    let l = chars[i];
-                    prod *= 1 + (((ge2_64[i] >> l) & 1) as u32) + (((eq3_64[i] >> l) & 1) as u32);
+                    prod *= unsafe { *m_tab[i].get_unchecked(chars[i] as usize) as u32 };
                 }
                 if prod as usize <= max_k {
                     continue;
@@ -500,8 +515,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let mut prod = 1u32;
                 for i in 0..word_len {
-                    let l = chars[i];
-                    prod *= 1 + (((ge2_64[i] >> l) & 1) as u32) + (((eq3_64[i] >> l) & 1) as u32);
+                    prod *= unsafe { *m_tab[i].get_unchecked(chars[i] as usize) as u32 };
                 }
                 if prod as usize <= max_k {
                     continue;
@@ -1156,11 +1170,13 @@ mod target_bound_tests {
             let subset = &candidates[..size];
 
             let mut c_all_mask = u32::MAX;
+            let mut c_dup_mask = 0u32;
             let mut at_mask = [0u32; 8];
             let mut elsewhere_mask = [0u32; 8];
             for &c in subset {
                 let m = matrix.candidate_masks[c];
                 c_all_mask &= m;
+                c_dup_mask |= matrix.candidate_dup_masks[c];
                 let c_at = &matrix.candidate_at_masks[c];
                 for i in 0..5 {
                     let bit = c_at[i];
@@ -1169,29 +1185,49 @@ mod target_bound_tests {
                 }
             }
             let b_u = !c_all_mask;
-            let mut ge2_64 = [0u64; 8];
-            let mut eq3_64 = [0u64; 8];
+            let mut m_tab = [[1u8; 96]; 8];
             for i in 0..5 {
                 let a = at_mask[i];
                 let e = elsewhere_mask[i];
+                let e_dup = e & c_dup_mask;
                 let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
                 let ae = a & e;
                 let a_or_e = a | e;
                 let ge2_u = ae | (a_or_e & b_u);
                 let eq3_u = ae & b_u;
-                let ge2_r = ae | (a_or_e & b_r);
-                let eq3_r = ae & b_r;
-                ge2_64[i] = (ge2_u as u64) | ((ge2_r as u64) << 32);
-                eq3_64[i] = (eq3_u as u64) | ((eq3_r as u64) << 16 << 16);
+                let ge2_1 = ae | (a_or_e & b_r);
+                let eq3_1 = ae & b_r;
+                let ae_dup = a & e_dup;
+                let a_or_e_dup = a | e_dup;
+                let ge2_2 = ae_dup | (a_or_e_dup & b_r);
+                let eq3_2 = ae_dup & b_r;
+
+                let tab_i = &mut m_tab[i];
+                let mut m = ge2_u;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l] = 2 + (((eq3_u >> l) & 1) as u8);
+                }
+                let mut m = ge2_1;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 32] = 2 + (((eq3_1 >> l) & 1) as u8);
+                }
+                let mut m = ge2_2;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
+                }
             }
 
             for (g, chars) in matrix.guess_profile_chars.iter().enumerate() {
                 let mut prod = 1usize;
                 for i in 0..5 {
-                    let l = chars[i];
-                    let m =
-                        1 + (((ge2_64[i] >> l) & 1) as usize) + (((eq3_64[i] >> l) & 1) as usize);
-                    prod *= m;
+                    let l = chars[i] as usize;
+                    prod *= m_tab[i][l] as usize;
                 }
                 let mut mask = [0u64; 4];
                 for &c in subset {

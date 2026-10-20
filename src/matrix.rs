@@ -29,6 +29,7 @@ pub struct ResponseMatrix {
     pub guess_chars: Vec<[u8; 8]>,
     pub guess_profile_chars: Vec<[u8; 8]>,
     pub candidate_at_masks: Vec<[u32; 8]>,
+    pub candidate_dup_masks: Vec<u32>,
 }
 
 impl ResponseMatrix {
@@ -131,26 +132,40 @@ impl ResponseMatrix {
         let mut guess_profile_chars = Vec::with_capacity(num_guesses);
         for chars in &guess_chars {
             let mut pchars = [0u8; 8];
+            let mut seen = 0u32;
             for i in 0..k_len {
                 let l = chars[i];
-                let mut count = 0;
-                for j in 0..k_len {
-                    if chars[j] == l {
-                        count += 1;
+                let bit = 1u32 << (l & 31);
+                if (seen & bit) != 0 {
+                    pchars[i] = l + 64;
+                } else {
+                    seen |= bit;
+                    let mut count = 0;
+                    for j in 0..k_len {
+                        if chars[j] == l {
+                            count += 1;
+                        }
                     }
+                    pchars[i] = if count > 1 { l + 32 } else { l };
                 }
-                pchars[i] = if count > 1 { l + 32 } else { l };
             }
             guess_profile_chars.push(pchars);
         }
         let mut candidate_at_masks = Vec::with_capacity(num_candidates);
+        let mut candidate_dup_masks = Vec::with_capacity(num_candidates);
         for &cg in &candidate_to_guess {
             let chars = &guess_chars[cg];
             let mut at = [0u32; 8];
+            let mut seen = 0u32;
+            let mut dup = 0u32;
             for i in 0..k_len {
-                at[i] = 1u32 << (chars[i] & 31);
+                let bit = 1u32 << (chars[i] & 31);
+                at[i] = bit;
+                dup |= seen & bit;
+                seen |= bit;
             }
             candidate_at_masks.push(at);
+            candidate_dup_masks.push(dup);
         }
 
         Self {
@@ -170,6 +185,7 @@ impl ResponseMatrix {
             guess_chars,
             guess_profile_chars,
             candidate_at_masks,
+            candidate_dup_masks,
         }
     }
 
