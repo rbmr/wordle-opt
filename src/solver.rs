@@ -2203,37 +2203,41 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            for i in 0..num_non_empty {
-                let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                let p_len = entry.1 as usize;
-                if p_len <= 2 {
-                    break;
-                }
+            let mut num_eval = 0;
+            while num_eval < num_non_empty && unsafe { (*local_counts_ptr.add(num_eval)).1 > 2 } {
+                num_eval += 1;
+            }
 
-                let mut p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
-                let p_ptr = p.as_mut_ptr() as *mut usize;
+            let mut small_p = [[0usize; 16]; 5];
+            let mut small_p_len = [0u8; 5];
+            let mut small_p_hash = [0u64; 5];
+            let mut small_used_val = [0u32; 5];
+            let mut small_is_exact = [false; 5];
+            let mut all_exact = true;
+
+            for i in 0..num_eval {
+                let entry = unsafe { *local_counts_ptr.add(i) };
+                let p_len = entry.1 as usize;
+                let r_target = entry.0;
                 let mut p_idx = 0;
                 let mut p_hash = 0u64;
-                let r_target = entry.0;
                 let set_ptr = set.as_ptr();
                 let zobrist_ptr = self.matrix.zobrist.as_ptr();
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r_target {
                         let c = unsafe { *set_ptr.add(cand_idx) };
-                        unsafe {
-                            *p_ptr.add(p_idx) = c;
-                            p_hash ^= *zobrist_ptr.add(c);
-                        }
+                        small_p[i][p_idx] = c;
+                        p_hash ^= unsafe { *zobrist_ptr.add(c) };
                         p_idx += 1;
                         if p_idx == p_len {
                             break;
                         }
                     }
                 }
-
-                let p_slice = unsafe { std::slice::from_raw_parts(p_ptr, p_len) };
-
+                small_p_len[i] = p_len as u8;
+                small_p_hash[i] = p_hash;
+                let p_slice = &small_p[i][..p_len];
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let (used_val, is_exact) =
                     if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
@@ -2243,12 +2247,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
                         let used_val = quick_val.max(initial_lb);
-                        if is_exact {
-                            self.cache.insert_set(p_hash, p_slice, used_val, true);
-                        }
+                        self.cache.insert_set(p_hash, p_slice, used_val, is_exact);
                         cert_record!(4, p_slice, used_val, is_exact);
                         (used_val, is_exact)
                     };
+
+                small_used_val[i] = used_val;
+                small_is_exact[i] = is_exact;
+                if !is_exact {
+                    all_exact = false;
+                }
 
                 cost += used_val - initial_lb;
 
@@ -2259,13 +2267,24 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         .fetch_add(1, Ordering::Relaxed);
                     return cost;
                 }
+            }
 
-                if is_exact {
+            if all_exact {
+                return cost;
+            }
+
+            for i in 0..num_eval {
+                if small_is_exact[i] {
                     continue;
                 }
+                let p_len = small_p_len[i] as usize;
+                let p_slice = &small_p[i][..p_len];
+                let p_hash = small_p_hash[i];
+                let used_val = small_used_val[i];
 
                 let b = cost - used_val;
                 let new_beta = beta - b;
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 let effective_beta =
                     new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
 
