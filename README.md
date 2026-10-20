@@ -112,7 +112,7 @@ displayed. The file is read locally and is not uploaded anywhere.
 
 Both files contain one word per line.
 
-- Every word must have exactly 5 characters.
+- Words can be any length from 1 to 10 characters (Wordle defaults to 5), but all words across both files must have the same length.
 - Any characters are allowed, not just `a` to `z`. Letters are converted to
   lowercase, so `Crane` and `crane` are the same word.
 - Blank lines and duplicate words are ignored.

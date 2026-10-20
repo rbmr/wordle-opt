@@ -78,9 +78,9 @@ pub fn l3(n: usize, k: usize) -> u64 {
 }
 
 /// FNV-1a over both word lists, binding a certificate to the exact lists.
-pub fn digest<'a>(
-    guesses: impl IntoIterator<Item = &'a [u8; 5]>,
-    candidates: impl IntoIterator<Item = &'a [u8; 5]>,
+pub fn digest<'a, T: AsRef<[u8]> + 'a>(
+    guesses: impl IntoIterator<Item = &'a T>,
+    candidates: impl IntoIterator<Item = &'a T>,
 ) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     let mut eat = |b: u8| {
@@ -89,11 +89,11 @@ pub fn digest<'a>(
     };
     eat(b'G');
     for w in guesses {
-        w.iter().for_each(|&b| eat(b));
+        w.as_ref().iter().for_each(|&b| eat(b));
     }
     eat(b'C');
     for w in candidates {
-        w.iter().for_each(|&b| eat(b));
+        w.as_ref().iter().for_each(|&b| eat(b));
     }
     h
 }
