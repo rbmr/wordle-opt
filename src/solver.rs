@@ -2383,9 +2383,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                unsafe {
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
@@ -2414,10 +2411,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             .pruned_by_bounds
                             .fetch_add(1, Ordering::Relaxed);
                         return cost;
-                    }
-                } else {
-                    unsafe {
-                        *p_lbs_ptr.add(r_idx) = cap_lb;
                     }
                 }
             }
@@ -2472,7 +2465,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let (quick_val, is_exact) =
                     Self::quick_bucket_eval_specialized(self.matrix, self.dict, p);
-                let lb = unsafe { *p_lbs_ptr.add(r_idx) };
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let used_val = quick_val.max(lb);
                 cost += used_val - lb;
                 unsafe {
@@ -2513,7 +2506,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
 
-                let lb = unsafe { *p_lbs_ptr.add(r_idx) };
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
                 if target_k == 2 {
                     self.cache.insert_set(hash, p, lb, false);
@@ -2582,7 +2575,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
 
-                let b = cost - unsafe { *p_lbs_ptr.add(r_idx) };
+                let stored_lb = unsafe { *p_lbs_ptr.add(r_idx) };
+                let actual_lb = if stored_lb != 0 {
+                    stored_lb
+                } else {
+                    unsafe { *parent_cap_bounds_ptr.add(p_len) }
+                };
+                let b = cost - actual_lb;
                 let new_beta = beta - b;
 
                 let effective_beta =
@@ -2593,13 +2592,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     return cost;
                 }
 
+                let stored_k = unsafe { *child_max_ks_ptr.add(r_idx) as usize };
+                let child_k = if stored_k != 0 {
+                    stored_k
+                } else {
+                    p_len.min(parent_max_k)
+                }
+                .max(2);
+
                 self.current_cost_so_far += b;
                 let val = self.min_state_val(
                     p,
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
-                    (unsafe { *child_max_ks_ptr.add(r_idx) } as usize).max(2),
+                    child_k,
                 );
                 self.current_cost_so_far -= b;
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
