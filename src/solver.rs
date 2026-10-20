@@ -810,24 +810,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let data_ptr = matrix.data_ptr::<Elem>();
 
                 if M <= 4 {
-                    let mut init_seen_mask = [0u64; M];
-                    if WIN >> 6 < M {
-                        init_seen_mask[WIN >> 6] = 1u64 << (WIN & 63);
-                    }
-
                     let bucket_ptr = bucket.as_ptr();
                     let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
-                    for (ci_idx, &ci) in bucket.iter().enumerate() {
+                    for &ci in bucket {
                         let gi = unsafe { *cand_to_guess_ptr.add(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                        let mut seen_mask = init_seen_mask;
+                        let mut seen_mask = [0u64; M];
                         let seen_ptr = seen_mask.as_mut_ptr();
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                        let mut early_break = false;
-                        for i in 0..ci_idx {
+                        for i in 0..n {
                             let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             let word_idx = r >> 6;
@@ -836,28 +830,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions >= max_collisions {
-                                    early_break = true;
                                     break;
                                 }
                             } else {
                                 *word |= bit;
-                            }
-                        }
-                        if !early_break {
-                            for i in (ci_idx + 1)..n {
-                                let c = unsafe { *bucket_ptr.add(i) };
-                                let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                                let word_idx = r >> 6;
-                                let bit = 1u64 << (r & 63);
-                                let word = unsafe { &mut *seen_ptr.add(word_idx) };
-                                if (*word & bit) != 0 {
-                                    collisions += 1;
-                                    if collisions >= max_collisions {
-                                        break;
-                                    }
-                                } else {
-                                    *word |= bit;
-                                }
                             }
                         }
 
@@ -869,20 +845,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     }
                 } else {
-                    let win_r = WIN as u16;
                     let bucket_ptr = bucket.as_ptr();
-                    for (ci_idx, &ci) in bucket.iter().enumerate() {
+                    for &ci in bucket {
                         let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                         let mut seen = [0u16; 16];
-                        seen[0] = win_r;
-                        let mut seen_len = 1;
+                        let mut seen_len = 0;
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                        let mut early_break = false;
-                        for i in 0..ci_idx {
+                        for i in 0..n {
                             let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                             let mut duplicate = false;
@@ -895,34 +868,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             if duplicate {
                                 collisions += 1;
                                 if collisions >= max_collisions {
-                                    early_break = true;
                                     break;
                                 }
                             } else {
                                 seen[seen_len] = r;
                                 seen_len += 1;
-                            }
-                        }
-                        if !early_break {
-                            for i in (ci_idx + 1)..n {
-                                let c = unsafe { *bucket_ptr.add(i) };
-                                let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
-                                let mut duplicate = false;
-                                for &prev in &seen[..seen_len] {
-                                    if prev == r {
-                                        duplicate = true;
-                                        break;
-                                    }
-                                }
-                                if duplicate {
-                                    collisions += 1;
-                                    if collisions >= max_collisions {
-                                        break;
-                                    }
-                                } else {
-                                    seen[seen_len] = r;
-                                    seen_len += 1;
-                                }
                             }
                         }
 
