@@ -211,24 +211,11 @@ pub fn min_k_for_target_bound(n: usize, max_k: usize, target_bound: u32) -> usiz
 }
 
 #[inline(always)]
-fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
-    let min_vp = if max_k >= 2187 {
-        8
-    } else if max_k >= 729 {
-        7
-    } else if max_k >= 243 {
-        6
-    } else if max_k >= 81 {
-        5
-    } else if max_k >= 27 {
-        4
-    } else if max_k >= 9 {
-        3
-    } else if max_k >= 3 {
-        2
-    } else {
-        1
-    };
+fn min_non_overlap_from_vp(word_len: usize, max_k: usize, max_prod_by_vp: &[u32; 9]) -> u32 {
+    let mut min_vp = 1;
+    while min_vp <= word_len && (max_prod_by_vp[min_vp] as usize) <= max_k {
+        min_vp += 1;
+    }
     (word_len.saturating_sub(min_vp) + 1) as u32
 }
 
@@ -242,7 +229,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
+    let mut effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = initial_max_k;
     if max_k >= effective_target {
         return max_k;
@@ -263,28 +250,55 @@ pub fn compute_max_branching_factor_seq_with_target(
     let mut at_mask = [0u32; 8];
     let mut elsewhere_mask = [0u32; 8];
     let mut dup_elsewhere_mask = [0u32; 8];
-    for &c in candidates {
-        let m = unsafe { *matrix.candidate_masks.get_unchecked(c) };
-        c_mask |= m;
-        c_all_mask &= m;
-        if m != u32::MAX && word_len <= 8 {
-            let dup = unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
-            c_dup_mask |= dup;
-            let c_at = unsafe { matrix.candidate_at_masks.get_unchecked(c) };
-            for i in 0..word_len {
-                let bit = c_at[i];
-                at_mask[i] |= bit;
-                elsewhere_mask[i] |= m & !bit;
-                dup_elsewhere_mask[i] |= dup & !bit;
+    if word_len == 5 {
+        for &c in candidates {
+            let m = unsafe { *matrix.candidate_masks.get_unchecked(c) };
+            c_mask |= m;
+            c_all_mask &= m;
+            if m != u32::MAX {
+                let dup = unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
+                c_dup_mask |= dup;
+                let c_at = unsafe { matrix.candidate_at_masks.get_unchecked(c) };
+                for i in 0..5 {
+                    let bit = c_at[i];
+                    at_mask[i] |= bit;
+                    elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
+                }
+            }
+        }
+    } else {
+        for &c in candidates {
+            let m = unsafe { *matrix.candidate_masks.get_unchecked(c) };
+            c_mask |= m;
+            c_all_mask &= m;
+            if m != u32::MAX && word_len <= 8 {
+                let dup = unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
+                c_dup_mask |= dup;
+                let c_at = unsafe { matrix.candidate_at_masks.get_unchecked(c) };
+                for i in 0..word_len {
+                    let bit = c_at[i];
+                    at_mask[i] |= bit;
+                    elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
+                }
             }
         }
     }
     let has_profile = c_mask != u32::MAX && word_len <= 8;
-    let mut m_tab = [[1u8; 96]; 8];
     let mut active_letter_mask = 0u32;
+    let mut max_prod_by_vp = [1u32; 9];
+    let mut ge2_u_arr = [0u32; 8];
+    let mut eq3_u_arr = [0u32; 8];
+    let mut ge2_1_arr = [0u32; 8];
+    let mut eq3_1_arr = [0u32; 8];
+    let mut ge2_2_arr = [0u32; 8];
+    let mut eq3_2_arr = [0u32; 8];
     if has_profile {
         let b_u = !c_all_mask;
         let b_1_base = b_u | c_dup_mask;
+        let mut n3 = 0usize;
+        let mut n2 = 0usize;
         for i in 0..word_len {
             let a = at_mask[i];
             let e = elsewhere_mask[i];
@@ -301,26 +315,81 @@ pub fn compute_max_branching_factor_seq_with_target(
             let a_or_e_dup = a | e_dup;
             let ge2_2 = ae_dup | (a_or_e_dup & b_r);
             let eq3_2 = ae_dup & b_r;
-            active_letter_mask |= ge2_u | ge2_1 | ge2_2;
+            let ge2_all = ge2_1 | ge2_2;
+            let eq3_all = eq3_1 | eq3_2;
+            active_letter_mask |= ge2_all;
+            if eq3_all != 0 {
+                n3 += 1;
+            } else if ge2_all != 0 {
+                n2 += 1;
+            }
+            ge2_u_arr[i] = ge2_u;
+            eq3_u_arr[i] = eq3_u;
+            ge2_1_arr[i] = ge2_1;
+            eq3_1_arr[i] = eq3_1;
+            ge2_2_arr[i] = ge2_2;
+            eq3_2_arr[i] = eq3_2;
+        }
+        let mut p = 1u32;
+        for vp in 1..=word_len {
+            if vp <= n3 {
+                p *= 3;
+            } else if vp <= n3 + n2 {
+                p *= 2;
+            }
+            max_prod_by_vp[vp] = p;
+        }
+        effective_target = effective_target.min(max_prod_by_vp[word_len] as usize);
+        if max_k >= effective_target {
+            return max_k;
+        }
+    }
 
-            let tab_i = &mut m_tab[i];
-            let mut m = ge2_u;
-            while m != 0 {
-                let l = m.trailing_zeros() as usize;
-                m &= m - 1;
-                tab_i[l] = 2 + (((eq3_u >> l) & 1) as u8);
+    let mut m_tab = [[1u8; 96]; 8];
+    if has_profile {
+        if c_dup_mask == 0 {
+            for i in 0..word_len {
+                let tab_i = &mut m_tab[i];
+                let eq3_u = eq3_u_arr[i];
+                let mut m = ge2_u_arr[i];
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    let val = 2 + (((eq3_u >> l) & 1) as u8);
+                    tab_i[l] = val;
+                    tab_i[l + 32] = val;
+                }
+                let mut m = ge2_2_arr[i];
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 64] = 2;
+                }
             }
-            let mut m = ge2_1;
-            while m != 0 {
-                let l = m.trailing_zeros() as usize;
-                m &= m - 1;
-                tab_i[l + 32] = 2 + (((eq3_1 >> l) & 1) as u8);
-            }
-            let mut m = ge2_2;
-            while m != 0 {
-                let l = m.trailing_zeros() as usize;
-                m &= m - 1;
-                tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
+        } else {
+            for i in 0..word_len {
+                let tab_i = &mut m_tab[i];
+                let eq3_u = eq3_u_arr[i];
+                let mut m = ge2_u_arr[i];
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l] = 2 + (((eq3_u >> l) & 1) as u8);
+                }
+                let eq3_1 = eq3_1_arr[i];
+                let mut m = ge2_1_arr[i];
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 32] = 2 + (((eq3_1 >> l) & 1) as u8);
+                }
+                let eq3_2 = eq3_2_arr[i];
+                let mut m = ge2_2_arr[i];
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
+                }
             }
         }
     }
@@ -351,7 +420,7 @@ pub fn compute_max_branching_factor_seq_with_target(
 
         if has_profile && word_len == 5 {
             let non_c_mask = !active_letter_mask;
-            let mut min_non_overlap = min_non_overlap_for_len(5, max_k);
+            let mut min_non_overlap = min_non_overlap_from_vp(5, max_k, &max_prod_by_vp);
             let tab0 = &m_tab[0];
             let tab1 = &m_tab[1];
             let tab2 = &m_tab[2];
@@ -402,12 +471,12 @@ pub fn compute_max_branching_factor_seq_with_target(
                     if max_k >= effective_target {
                         break;
                     }
-                    min_non_overlap = min_non_overlap_for_len(5, max_k);
+                    min_non_overlap = min_non_overlap_from_vp(5, max_k, &max_prod_by_vp);
                 }
             }
         } else if has_profile {
             let non_c_mask = !active_letter_mask;
-            let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+            let mut min_non_overlap = min_non_overlap_from_vp(word_len, max_k, &max_prod_by_vp);
             for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
                 if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
@@ -450,7 +519,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                     if max_k >= effective_target {
                         break;
                     }
-                    min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+                    min_non_overlap = min_non_overlap_from_vp(word_len, max_k, &max_prod_by_vp);
                 }
             }
         } else {
@@ -513,7 +582,7 @@ pub fn compute_max_branching_factor_seq_with_target(
         };
 
         let non_c_mask = !active_letter_mask;
-        let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+        let mut min_non_overlap = min_non_overlap_from_vp(word_len, max_k, &max_prod_by_vp);
         for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
             if has_profile {
                 if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
@@ -554,7 +623,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if max_k >= effective_target {
                     break;
                 }
-                min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+                min_non_overlap = min_non_overlap_from_vp(word_len, max_k, &max_prod_by_vp);
             }
         }
     }
@@ -1271,6 +1340,20 @@ mod target_bound_tests {
                     non_overlap
                 );
             }
+            assert_eq!(
+                compute_max_branching_factor_seq(&matrix, subset),
+                compute_max_branching_factor(&matrix, subset)
+            );
         }
+
+        // Also test subsets with fixed Green positions (where n3 < 5 and n2 > 0).
+        let er_subset: Vec<usize> = (0..matrix.num_candidates)
+            .filter(|&c| dict.candidates[c].ends_with(b"er"))
+            .take(30)
+            .collect();
+        assert_eq!(
+            compute_max_branching_factor_seq(&matrix, &er_subset),
+            compute_max_branching_factor(&matrix, &er_subset)
+        );
     }
 }
