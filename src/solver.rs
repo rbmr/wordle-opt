@@ -1024,22 +1024,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return val;
             }
             cached_lower_bound = cached_lower_bound.max(val);
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cached_lower_bound >= beta
-                || self.current_cost_so_far + cached_lower_bound >= current_global_beta
-            {
-                self.cache.insert_set(hash, set, cached_lower_bound, false);
-                cert_record!(2, set, cached_lower_bound, false);
-                return cached_lower_bound;
-            }
         }
 
         let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
         let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
+        cached_lower_bound = cached_lower_bound.max(parent_lb);
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if parent_lb >= beta || self.current_cost_so_far + parent_lb >= current_global_beta {
-            cert_record!(3, set, parent_lb, false);
-            return parent_lb;
+        if cached_lower_bound >= beta
+            || self.current_cost_so_far + cached_lower_bound >= current_global_beta
+        {
+            self.cache.insert_set(hash, set, cached_lower_bound, false);
+            cert_record!(2, set, cached_lower_bound, false);
+            return cached_lower_bound;
         }
 
         let mut best_val = beta;
