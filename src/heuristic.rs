@@ -262,39 +262,46 @@ pub fn compute_max_branching_factor_seq_with_target(
     let mut c_dup_mask = 0u32;
     let mut at_mask = [0u32; 8];
     let mut elsewhere_mask = [0u32; 8];
+    let mut dup_elsewhere_mask = [0u32; 8];
     for &c in candidates {
         let m = unsafe { *matrix.candidate_masks.get_unchecked(c) };
         c_mask |= m;
         c_all_mask &= m;
         if m != u32::MAX && word_len <= 8 {
-            c_dup_mask |= unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
+            let dup = unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
+            c_dup_mask |= dup;
             let c_at = unsafe { matrix.candidate_at_masks.get_unchecked(c) };
             for i in 0..word_len {
                 let bit = c_at[i];
                 at_mask[i] |= bit;
                 elsewhere_mask[i] |= m & !bit;
+                dup_elsewhere_mask[i] |= dup & !bit;
             }
         }
     }
     let has_profile = c_mask != u32::MAX && word_len <= 8;
     let mut m_tab = [[1u8; 96]; 8];
+    let mut active_letter_mask = 0u32;
     if has_profile {
         let b_u = !c_all_mask;
+        let b_1_base = b_u | c_dup_mask;
         for i in 0..word_len {
             let a = at_mask[i];
             let e = elsewhere_mask[i];
-            let e_dup = e & c_dup_mask;
+            let e_dup = dup_elsewhere_mask[i];
             let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
+            let b_1 = b_r & b_1_base;
             let ae = a & e;
             let a_or_e = a | e;
             let ge2_u = ae | (a_or_e & b_u);
             let eq3_u = ae & b_u;
-            let ge2_1 = ae | (a_or_e & b_r);
-            let eq3_1 = ae & b_r;
+            let ge2_1 = ae | (a_or_e & b_1);
+            let eq3_1 = ae & b_1;
             let ae_dup = a & e_dup;
             let a_or_e_dup = a | e_dup;
             let ge2_2 = ae_dup | (a_or_e_dup & b_r);
             let eq3_2 = ae_dup & b_r;
+            active_letter_mask |= ge2_u | ge2_1 | ge2_2;
 
             let tab_i = &mut m_tab[i];
             let mut m = ge2_u;
@@ -343,7 +350,7 @@ pub fn compute_max_branching_factor_seq_with_target(
         };
 
         if has_profile && word_len == 5 {
-            let non_c_mask = !c_mask;
+            let non_c_mask = !active_letter_mask;
             let mut min_non_overlap = min_non_overlap_for_len(5, max_k);
             let tab0 = &m_tab[0];
             let tab1 = &m_tab[1];
@@ -399,7 +406,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 }
             }
         } else if has_profile {
-            let non_c_mask = !c_mask;
+            let non_c_mask = !active_letter_mask;
             let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
             for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
                 if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
@@ -505,7 +512,7 @@ pub fn compute_max_branching_factor_seq_with_target(
             (&heap_ptrs[..mid], &heap_ptrs[mid..])
         };
 
-        let non_c_mask = !c_mask;
+        let non_c_mask = !active_letter_mask;
         let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
         for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
             if has_profile {
@@ -1173,34 +1180,41 @@ mod target_bound_tests {
             let mut c_dup_mask = 0u32;
             let mut at_mask = [0u32; 8];
             let mut elsewhere_mask = [0u32; 8];
+            let mut dup_elsewhere_mask = [0u32; 8];
             for &c in subset {
                 let m = matrix.candidate_masks[c];
                 c_all_mask &= m;
-                c_dup_mask |= matrix.candidate_dup_masks[c];
+                let dup = matrix.candidate_dup_masks[c];
+                c_dup_mask |= dup;
                 let c_at = &matrix.candidate_at_masks[c];
                 for i in 0..5 {
                     let bit = c_at[i];
                     at_mask[i] |= bit;
                     elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
                 }
             }
             let b_u = !c_all_mask;
+            let b_1_base = b_u | c_dup_mask;
             let mut m_tab = [[1u8; 96]; 8];
+            let mut active_letter_mask = 0u32;
             for i in 0..5 {
                 let a = at_mask[i];
                 let e = elsewhere_mask[i];
-                let e_dup = e & c_dup_mask;
+                let e_dup = dup_elsewhere_mask[i];
                 let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
+                let b_1 = b_r & b_1_base;
                 let ae = a & e;
                 let a_or_e = a | e;
                 let ge2_u = ae | (a_or_e & b_u);
                 let eq3_u = ae & b_u;
-                let ge2_1 = ae | (a_or_e & b_r);
-                let eq3_1 = ae & b_r;
+                let ge2_1 = ae | (a_or_e & b_1);
+                let eq3_1 = ae & b_1;
                 let ae_dup = a & e_dup;
                 let a_or_e_dup = a | e_dup;
                 let ge2_2 = ae_dup | (a_or_e_dup & b_r);
                 let eq3_2 = ae_dup & b_r;
+                active_letter_mask |= ge2_u | ge2_1 | ge2_2;
 
                 let tab_i = &mut m_tab[i];
                 let mut m = ge2_u;
@@ -1223,12 +1237,14 @@ mod target_bound_tests {
                 }
             }
 
+            let non_c_mask = !active_letter_mask;
             for (g, chars) in matrix.guess_profile_chars.iter().enumerate() {
                 let mut prod = 1usize;
                 for i in 0..5 {
                     let l = chars[i] as usize;
                     prod *= m_tab[i][l] as usize;
                 }
+                let non_overlap = (matrix.guess_masks[g] & non_c_mask).count_ones();
                 let mut mask = [0u64; 4];
                 for &c in subset {
                     let r = matrix.get(g, c).0 as usize;
@@ -1245,6 +1261,14 @@ mod target_bound_tests {
                     dict.guesses[g],
                     actual_k,
                     prod
+                );
+                assert!(
+                    actual_k <= 3usize.pow(5u32.saturating_sub(non_overlap)),
+                    "g={} ({}) actual_k={} > 3^(5 - {})",
+                    g,
+                    dict.guesses[g],
+                    actual_k,
+                    non_overlap
                 );
             }
         }
