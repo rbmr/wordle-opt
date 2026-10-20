@@ -2601,13 +2601,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 .max(2);
 
                 self.current_cost_so_far += b;
-                let val = self.min_state_val(
-                    p,
-                    active_guesses_slice,
-                    effective_beta,
-                    depth + 1,
-                    child_k,
-                );
+                let val =
+                    self.min_state_val(p, active_guesses_slice, effective_beta, depth + 1, child_k);
                 self.current_cost_so_far -= b;
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
