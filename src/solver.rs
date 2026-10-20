@@ -100,7 +100,6 @@ pub struct SolverScratch {
     pub scratch_guess_hashes: [Vec<u64>; 32],
     pub scratch_guess_p_lbs: [Vec<u32>; 32],
     pub scratch_guess_child_max_ks: [Vec<u16>; 32],
-    pub scratch_c_responses: [Vec<u16>; 32],
     pub scratch_state_counts: Vec<u16>,
     pub scratch_useless_projs: Vec<u64>,
 }
@@ -120,7 +119,6 @@ impl SolverScratch {
             scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
             scratch_guess_p_lbs: std::array::from_fn(|_| Vec::new()),
             scratch_guess_child_max_ks: std::array::from_fn(|_| Vec::new()),
-            scratch_c_responses: std::array::from_fn(|_| Vec::new()),
             scratch_state_counts: Vec::new(),
             scratch_useless_projs: Vec::new(),
         };
@@ -161,9 +159,6 @@ impl SolverScratch {
             }
             if self.scratch_guess_child_max_ks[d].len() < num_responses {
                 self.scratch_guess_child_max_ks[d].resize(num_responses, 0);
-            }
-            if self.scratch_c_responses[d].len() < num_guesses {
-                self.scratch_c_responses[d].resize(num_guesses, 0);
             }
         }
         if self.scratch_state_counts.len() < num_responses {
@@ -2124,17 +2119,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
             cost
         } else {
-            let (counts_ptr, hashes_ptr, p_lbs_ptr, child_max_ks_ptr, c_resp_ptr) = {
+            let (counts_ptr, hashes_ptr, p_lbs_ptr, child_max_ks_ptr) = {
                 let s = self.scratch.as_mut().unwrap();
-                if s.scratch_c_responses[depth].len() < c_len {
-                    s.scratch_c_responses[depth].resize(c_len, 0);
-                }
                 (
                     s.scratch_guess_counts[depth].as_mut_ptr(),
                     s.scratch_guess_hashes[depth].as_mut_ptr(),
                     s.scratch_guess_p_lbs[depth].as_mut_ptr(),
                     s.scratch_guess_child_max_ks[depth].as_mut_ptr(),
-                    s.scratch_c_responses[depth].as_mut_ptr(),
                 )
             };
 
@@ -2195,7 +2186,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
-                    *c_resp_ptr.add(i) = r as u16;
                     let cnt_ptr = counts_ptr.add(r);
                     let cnt = *cnt_ptr;
                     let hash_ptr = hashes_ptr.add(r);
@@ -2459,7 +2449,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let set_ptr = set.as_ptr();
             for i in 0..c_len {
                 let c = unsafe { *set_ptr.add(i) };
-                let r_idx = unsafe { *c_resp_ptr.add(i) as usize };
+                let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
                 let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
                 let pos = unsafe { *pos_ptr as usize };
                 unsafe {
