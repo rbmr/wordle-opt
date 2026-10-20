@@ -636,8 +636,28 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-20 | `4b9c029` | pc01 | 500 | 1 | optimal | 0.468s | 1453 | 517 | 153 | — | tighten repeated-letter profile masks and active letter mask in heuristic; build 0.468s (new all-time record); validation OK |
 | 2026-10-20 | `4b9c029` | pc01 | 1000 | 1 | optimal | 3.248s | 3124 | 1049 | 1138 | — | tighten repeated-letter profile masks and active letter mask in heuristic; states 1,138; guesses 17,328; pick 3.1s (all-time record); build 3.248s (new all-time record, -15.9% vs 5aa6c5e); validation OK |
 | 2026-10-20 | `4b9c029` | pc01 | 2340 | — | optimal | 29.518s (0.01h) | 8001 | 2478 | 26555 | ~2.5GB | full N=2340 run (2026-10-20-4b9c029); tighten repeated-letter profile masks and active letter mask in heuristic; states 26,555; guesses 766,713; pick 27.9s; build 29.518s; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-20 | `f64864e` | pc01 | 500 | 1 | optimal | 0.464s | 1453 | 517 | 146 | — | cap branching-factor target and non-overlap threshold by per-position max multipliers; single run; validation OK |
+| 2026-10-20 | `f64864e` | pc01 | 1000 | 1 | optimal | 3.227s | 3124 | 1049 | 1125 | — | same commit, single run; superseded by the interleaved rows below; validation OK |
+| 2026-10-20 | `f64864e` | pc01 | 2340 | — | optimal | 28.944s (0.01h) | 8001 | 2478 | 26604 | ~2.5GB | full N=2340 run via run_full.sh (2026-10-20-f64864e); guesses 768,634; pick 27.3s; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-20 | `4b9c029` | pc01 | 1000 | 1 | optimal | 3.268s | 3124 | 1049 | 1124–1160 | — | interleaved A/B baseline vs f64864e, 2 rounds x 3 runs: 3.254 / 3.275 / 3.255 / 3.272 / 3.275 / 3.263s (median shown); validation OK |
+| 2026-10-20 | `f64864e` | pc01 | 1000 | 1 | optimal | 3.271s | 3124 | 1049 | 1125–1145 | — | interleaved A/B vs 4b9c029: 3.260 / 3.269 / 3.264 / 3.277 / 3.274 / 3.273s (median shown); no difference beyond spread; validation OK |
+| 2026-10-20 | `4b9c029` | pc01 | 2340 | — | optimal | 27.947s (0.01h) | 8001 | 2478 | 26690–26868 | — | interleaved A/B baseline, full list via deploy_and_bench (not run_full.sh): 27.779 / 27.808 / 28.131 / 27.951 / 27.942 / 27.960s (median shown); validation OK |
+| 2026-10-20 | `f64864e` | pc01 | 2340 | — | optimal | 27.955s (0.01h) | 8001 | 2478 | 26728–26810 | — | interleaved A/B, full list via deploy_and_bench (not run_full.sh): 27.880 / 27.948 / 27.920 / 27.961 / 27.990 / 27.987s (median shown); no difference beyond spread; validation OK |
 
 ## Notes
+
+- Correction (2026-10-20): the `4375206`, `4b9c029` and `f64864e` single-run rows
+  above were first described as "new all-time records" against single runs of
+  the previous commit (for example 0.468s vs 0.469s at N=500, 29.313s vs 29.953s
+  on the full list). Those differences are inside the run-to-run spread and were
+  not speedups by the standard in AGENTS.md. The interleaved `4b9c029` vs
+  `f64864e` rows show the per-position multiplier cap changes nothing measurable
+  (medians 3.268s vs 3.271s at N=1000, 27.947s vs 27.955s on the full list), so it
+  was reverted. The large steps in this series (`a5fa491` and `f5d6d21`, 38.0s to
+  about 30s on the full list) are far outside the spread; the smaller follow-ups
+  (`5ffbd44`, `4375206`, `4b9c029`) have not been shown to matter individually.
+  Note also that run_full.sh and deploy_and_bench full-list timings differ by
+  about a second (28.9s vs 27.9s at the same commit), so only compare like with like.
 
 - The `4b9c029` rows demonstrated that tightening the 1st repeated-letter Gray mask to `b_1 = b_r & (b_u | c_dup_mask)`, tracking per-position `dup_elsewhere_mask[i] |= dup & !bit` for 2nd+ repeated-letter occurrences, and computing `non_c_mask = !active_letter_mask` (so solved Green letters with no candidate duplicates are included in the 4-byte `POPCNT` pre-filter) set new all-time speed records at $N=500$ (**0.468s**, down from 0.469s) and $N=1000$ (**3.248s**, pick **3.1s**, CPU **49.4s**, down from 3.293s / CPU 50.2s on `4375206` and 3.860s on `5aa6c5e`, **-15.9%**), and completed the full $N=2340$ solve in **29.518s** (pick **27.9s**, CPU **447.3s**). Total cost was 8001, byte-for-byte identical to the golden tree (`sha256 34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`), and policy tree validation passed cleanly.
 
