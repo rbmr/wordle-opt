@@ -788,7 +788,7 @@ impl<'a> OptimalPolicy<'a> {
                 .root_guesses_done
                 .fetch_add(1, Ordering::Relaxed);
 
-            let global_beta = AtomicU32::new(first_guess_cost + 1);
+            let global_beta = AtomicU32::new(first_guess_cost);
             let global_best = AtomicU64::new((first_guess_cost as u64) << 32);
 
             let filtered_active: Vec<(usize, usize, u32)> = active[1..]
