@@ -27,6 +27,8 @@ pub struct ResponseMatrix {
     pub data_c_g_u8: Vec<u8>,
     pub candidate_to_guess: Vec<usize>,
     pub guess_chars: Vec<[u8; 8]>,
+    pub guess_profile_chars: Vec<[u8; 8]>,
+    pub candidate_at_masks: Vec<[u32; 8]>,
 }
 
 impl ResponseMatrix {
@@ -125,6 +127,31 @@ impl ResponseMatrix {
 
         let candidate_to_guess = dict.candidate_to_guess.clone();
         let guess_chars = dict.guess_chars.clone();
+        let k_len = word_len.min(8);
+        let mut guess_profile_chars = Vec::with_capacity(num_guesses);
+        for chars in &guess_chars {
+            let mut pchars = [0u8; 8];
+            for i in 0..k_len {
+                let l = chars[i];
+                let mut count = 0;
+                for j in 0..k_len {
+                    if chars[j] == l {
+                        count += 1;
+                    }
+                }
+                pchars[i] = if count > 1 { l + 32 } else { l };
+            }
+            guess_profile_chars.push(pchars);
+        }
+        let mut candidate_at_masks = Vec::with_capacity(num_candidates);
+        for &cg in &candidate_to_guess {
+            let chars = &guess_chars[cg];
+            let mut at = [0u32; 8];
+            for i in 0..k_len {
+                at[i] = 1u32 << (chars[i] & 31);
+            }
+            candidate_at_masks.push(at);
+        }
 
         Self {
             num_guesses,
@@ -141,6 +168,8 @@ impl ResponseMatrix {
             data_c_g_u8,
             candidate_to_guess,
             guess_chars,
+            guess_profile_chars,
+            candidate_at_masks,
         }
     }
 
