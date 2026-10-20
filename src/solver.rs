@@ -1907,17 +1907,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         if c_len <= 16 {
             let mut local_counts = std::mem::MaybeUninit::<[(u16, u8, u32); 16]>::uninit();
             let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u8, u32);
-            let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
-            let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let mut num_non_empty = 0;
             let mut prev_idx = 0usize;
             let set_ptr = set.as_ptr();
             for cand_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
-                unsafe {
-                    *c_responses_ptr.add(cand_idx) = r;
-                }
                 let mut found = false;
                 if num_non_empty > 0 {
                     let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
@@ -2060,10 +2055,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r_target = entry.0;
                 let set_ptr = set.as_ptr();
                 for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    let c = unsafe { *set_ptr.add(cand_idx) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                     if r == r_target {
                         unsafe {
-                            *p_ptr.add(p_idx) = *set_ptr.add(cand_idx);
+                            *p_ptr.add(p_idx) = c;
                         }
                         p_idx += 1;
                         if p_idx == p_len {
@@ -2083,6 +2079,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 cert_record!(4, p_slice, used_val, is_exact);
 
                 if is_exact {
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
                         return cost;
                     }
