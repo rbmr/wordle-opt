@@ -2501,10 +2501,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                unsafe {
-                    *child_max_ks_ptr.add(i) = 0;
-                }
-
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -2618,6 +2614,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             for i in 0..split_idx {
+                unsafe {
+                    *child_max_ks_ptr.add(i) = 0;
+                }
+            }
+
+            for i in 0..split_idx {
                 let word_idx = i >> 6;
                 let bit = 1u64 << (i & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
@@ -2710,9 +2712,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     return cost;
                 }
 
-                let stored_k = unsafe { *child_max_ks_ptr.add(i) as usize };
-                let child_k = if stored_k != 0 {
-                    stored_k
+                let child_k = if i < split_idx {
+                    let stored_k = unsafe { *child_max_ks_ptr.add(i) as usize };
+                    if stored_k != 0 {
+                        stored_k
+                    } else {
+                        p_len.min(parent_max_k)
+                    }
                 } else {
                     p_len.min(parent_max_k)
                 }
