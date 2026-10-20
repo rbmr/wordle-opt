@@ -2382,8 +2382,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     unsafe {
                         *p_lbs_ptr.add(i) = used_val;
                     }
-                    let word_idx = r_idx >> 6;
-                    let bit = 1u64 << (r_idx & 63);
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
                     if is_exact {
                         unsafe {
                             *exact_mask.get_unchecked_mut(word_idx) |= bit;
@@ -2444,12 +2444,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             for i in split_idx..num_eval {
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
@@ -2487,12 +2487,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             for i in 0..split_idx {
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
@@ -2550,12 +2550,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
                 if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
