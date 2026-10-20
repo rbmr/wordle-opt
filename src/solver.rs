@@ -2193,10 +2193,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if cnt == 0 {
                         *non_empty_indices_ptr.add(num_non_empty_local) = r as u16;
                         num_non_empty_local += 1;
-                        *hash_ptr = z;
-                    } else {
-                        *hash_ptr ^= z;
                     }
+                    *hash_ptr ^= z;
                     *cnt_ptr = cnt + 1;
                 }
             }
@@ -2207,7 +2205,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let mut cost = set.len() as u32;
-            let mut max_p_len = 0;
 
             for i in 0..num_non_empty_local {
                 let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
@@ -2215,9 +2212,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
                 if p_len > 2 {
                     unsafe {
                         *eval_indices_ptr.add(num_eval) = r_idx as u16;
@@ -2235,7 +2229,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            if max_p_len <= 2 {
+            if num_eval == 0 {
                 return cost;
             }
 
