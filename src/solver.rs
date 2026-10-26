@@ -100,6 +100,7 @@ pub struct SolverScratch {
     pub scratch_guess_hashes: [Vec<u64>; 32],
     pub scratch_guess_p_lbs: [Vec<u32>; 32],
     pub scratch_guess_child_max_ks: [Vec<u16>; 32],
+    pub scratch_z_tables: [Vec<u64>; 32],
     pub scratch_state_counts: Vec<u16>,
     pub scratch_useless_projs: Vec<u64>,
 }
@@ -119,6 +120,7 @@ impl SolverScratch {
             scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
             scratch_guess_p_lbs: std::array::from_fn(|_| Vec::new()),
             scratch_guess_child_max_ks: std::array::from_fn(|_| Vec::new()),
+            scratch_z_tables: std::array::from_fn(|_| Vec::new()),
             scratch_state_counts: Vec::new(),
             scratch_useless_projs: Vec::new(),
         };
@@ -159,6 +161,9 @@ impl SolverScratch {
             }
             if self.scratch_guess_child_max_ks[d].len() < num_responses {
                 self.scratch_guess_child_max_ks[d].resize(num_responses, 0);
+            }
+            if self.scratch_z_tables[d].len() < 40 * num_responses {
+                self.scratch_z_tables[d].resize(40 * num_responses, 0);
             }
         }
         if self.scratch_state_counts.len() < num_responses {
@@ -1051,6 +1056,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 z_vals[c_idx] = unsafe { *zobrist_ptr.add(c) };
             }
 
+            let z_tables_ptr = scratch_ref.scratch_z_tables[depth].as_mut_ptr();
+            for c_idx in 0..c_len {
+                let z = unsafe { *z_vals.get_unchecked(c_idx) };
+                let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                for r in 0..R {
+                    unsafe {
+                        *c_table_ptr.add(r) = z.wrapping_mul(r as u64 + 1);
+                    }
+                }
+            }
+
             let chunk_size = 512;
             for chunk_start in (0..num_guesses).step_by(chunk_size) {
                 let chunk_end = (chunk_start + chunk_size).min(num_guesses);
@@ -1073,24 +1089,38 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let projs_ptr = projs_chunk.as_mut_ptr();
                 for c_idx in 0..c_len {
                     let c = unsafe { *c_vals.get_unchecked(c_idx) };
-                    let z = unsafe { *z_vals.get_unchecked(c_idx) };
+                    let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
                     let c_off = c * num_guesses + chunk_start;
                     let c_ptr = unsafe { data_cg_ptr.add(c_off) };
-                    for i in 0..chunk_len {
-                        let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
+                    let mut i = 0;
+                    while i + 3 < chunk_len {
+                        let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
                         unsafe {
-                            *projs_ptr.add(i) ^= z.wrapping_mul(r + 1);
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
                         }
+                        i += 4;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r);
+                        }
+                        i += 1;
                     }
                 }
             }
 
             for r in 0..R {
                 let mut p = 0u64;
-                let m = r as u64 + 1;
                 for c_idx in 0..c_len {
-                    let z = unsafe { *z_vals.get_unchecked(c_idx) };
-                    p ^= z.wrapping_mul(m);
+                    let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                    p ^= unsafe { *c_table_ptr.add(r) };
                 }
                 if p == 0 {
                     p = 1;
