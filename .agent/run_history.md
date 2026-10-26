@@ -688,8 +688,19 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-26 | `d0e342b` | pc01 | 2340 | — | optimal | 24.515s (0.01h) | 8001 | 2478 | 26601 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-d0e342b); guesses 769,423; pick 22.9s; cpu 368.0s; root guesses @ 15s record 6811; all-time record; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-10-26 | `c34d93b` | pc01 | 1000 | 1 | optimal | 2.741s | 3124 | 1049 | 1109–1152 | — | CandidateProfile struct unifying candidate mask fields and unrolled 5-letter position loops, 3 runs: 2.745 / 2.741 / 2.741s (median shown); pick 2.6s; cpu 41.3s; validation OK |
 | 2026-10-26 | `c34d93b` | pc01 | 2340 | — | optimal | 24.493s (0.01h) | 8001 | 2478 | 26495 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-c34d93b); guesses 765,490; pick 22.9s; cpu 367.2s; root guesses @ 15s record 6859; all-time record; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-26 | `aa3f2c8` | pc01 | 1000 | 1 | optimal | 2.729s | 3124 | 1049 | 804–859 | — | chunk root guess atomic queue to reduce cache line contention, 3 runs: 2.740 / 2.729 / 2.721s (median shown); pick 2.6s; cpu 41.1s; validation OK |
+| 2026-10-26 | `aa3f2c8` | pc01 | 2340 | — | optimal | 24.458s (0.01h) | 8001 | 2478 | 26197 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-aa3f2c8); guesses 757,919; pick 22.9s; cpu 366.8s; root guesses @ 15s record 6875; all-time record; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `aa3f2c8` rows (chunks root guess atomic queue in `OptimalPolicy::scan` by fetching 4 guesses at a time via `CHUNK_SIZE = 4`, eliminating 75% of atomic `fetch_add` instructions on `next` across 16 Rayon worker threads and speeding up `global_beta` propagation) were benchmarked on `pc01`. At $N=1000$ seed 1, median build time improved to an all-time best **2.729s** (2.740 / 2.729 / 2.721s, pick **2.6s**, CPU work down to **41.1s**, states evaluated down from ~1,120 to 804–859). The standalone `run_full.sh` checkpoint (`2026-10-26-aa3f2c8`) achieved an all-time record breakthrough:
+  - Total solve time broke another milestone down to **24.458s** (**-35ms wall clock speedup** vs `c34d93b` 24.493s, **-57ms** vs `d0e342b` 24.515s, and **-399ms** vs `16f65ad` 24.857s).
+  - Pick time held at an all-time record **22.9s**.
+  - CPU work dropped to **366.8s** (**-0.4s CPU work reduction** vs `c34d93b` 367.2s, and **-1.2s** vs `d0e342b` 368.0s).
+  - Explored states dropped to **26,197** (down from 26,495 on `c34d93b`, 26,601 on `d0e342b`, and 26,592 on `16f65ad`).
+  - Evaluated guesses dropped to **757,919** (down from 765,490 on `c34d93b`, 769,423 on `d0e342b`, and 768,442 on `16f65ad`).
+  - Root guess throughput at 15s set an all-time record of **6,875** root guesses (up from 6,859 on `c34d93b`, 6,811 on `d0e342b`, 6,584 on `16f65ad`, and 5,928 on `a1fb308`).
+  - Total cost invariant at **8001**, mean guesses **3.419231**, and golden SHA-256 tree hash verified byte-for-byte identical (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
 - The `c34d93b` rows (unifies candidate mask fields `candidate_masks`, `candidate_dup_masks`, and `candidate_at_masks` into a single 64-byte cache-line-aligned `CandidateProfile` struct in `ResponseMatrix` and unrolls the position bitmask loop for `word_len == 5` in branching factor evaluations) were benchmarked on `pc01`. At $N=1000$ seed 1, median build time improved to an all-time best **2.741s** (2.745 / 2.741 / 2.741s, pick **2.6s**, CPU work down to **41.3s**, a -4ms wall clock speedup and -0.1s CPU work reduction vs `d0e342b`). The standalone `run_full.sh` checkpoint (`2026-10-26-c34d93b`) achieved another all-time record breakthrough:
   - Total solve time broke another milestone down to **24.493s** (**-22ms wall clock speedup** vs `d0e342b` 24.515s, **-364ms** vs `16f65ad` 24.857s, and **-2.029s** vs `a1fb308` 26.522s).
