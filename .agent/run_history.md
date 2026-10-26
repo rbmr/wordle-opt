@@ -679,8 +679,18 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-26 | `f75106f` | pc01 | 2340 | — | optimal | 27.180s (0.01h) | 8001 | 2478 | 26666 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-f75106f); guesses 769,531; pick 25.6s; cpu 410.3s; regressed vs 0503574; reverted; validation OK |
 | 2026-10-26 | `dade4fa` | pc01 | 1000 | 1 | optimal | 3.160s | 3124 | 1049 | 1081–1134 | — | cache candidate responses in stack array for c_len <= 16 in min_guess_val, 3 runs: 3.160 / 3.151 / 3.162s (median shown); pick 3.0s; cpu 48.0s; validation OK |
 | 2026-10-26 | `dade4fa` | pc01 | 2340 | — | optimal | 27.061s (0.01h) | 8001 | 2478 | 26534 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-dade4fa); guesses 769,382; pick 25.5s; cpu 408.6s; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-26 | `a1fb308` | pc01 | 1000 | 1 | optimal | 3.093s | 3124 | 1049 | 1136–1161 | — | 16-byte aligned GuessProfile unifying mask and profile chars, 3 runs: 3.093 / 3.092 / 3.097s (median shown); pick 2.9s; cpu 46.9s; validation OK |
+| 2026-10-26 | `a1fb308` | pc01 | 2340 | — | optimal | 26.522s (0.01h) | 8001 | 2478 | 26596 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-a1fb308); guesses 767,902; pick 24.9s; cpu 399.7s; root guesses @ 15s record 5928; sub-27s barrier broken; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `a1fb308` rows (unifies 4-byte `guess_masks` and 8-byte `guess_profile_chars` into a single 16-byte aligned `GuessProfile` struct in `ResponseMatrix`, eliminating split vector streaming, reducing register pressure by freeing up a base pointer register, and packing 4 full profiles per 64-byte cache line) were benchmarked on `pc01`. At $N=1000$ seed 1, median build time shattered the 3.10s barrier for the first time down to **3.093s** (3.093 / 3.092 / 3.097s, pick down to **2.9s**, CPU work down to **46.9s**, a -67ms wall clock speedup and -1.1s CPU work reduction vs `dade4fa`). The standalone `run_full.sh` checkpoint (`2026-10-26-a1fb308`) achieved a major breakthrough:
+  - Total solve time broke the 27-second barrier down to **26.522s** (**-0.498s wall clock speedup** vs `0503574` 27.020s, and **-1.180s** vs `46befce` 27.702s).
+  - Pick time broke below 25 seconds for the first time down to **24.9s** (down from 25.4s on `0503574` and 26.1s on `46befce`).
+  - CPU work broke below the 400s barrier down to **399.7s** (**-8.1s CPU work reduction** vs `0503574` 407.8s, and **-18.8s CPU work reduction** vs `46befce` 418.5s).
+  - Root guess throughput at 15s reached a new all-time high of **5,928** root guesses (vs 5,778 on `0503574` and 5,742 on `fa7f71d`).
+  - Total cost invariant at **8001**, mean guesses **3.419231**, and golden SHA-256 tree hash verified byte-for-byte identical (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+
 
 - The `dade4fa` rows (caches candidate responses in a stack-allocated 32-byte `[u16; 16]` array `c_responses` during initial candidate counting in `min_guess_val` for $c\_len \le 16$, eliminating repeated matrix lookups when partitioning candidates) were benchmarked on `pc01`. At $N=1000$ seed 1, median build time was **3.160s** (3.160 / 3.151 / 3.162s, pick **3.0s**, CPU work **48.0s**, faster than `0503574` median 3.170s and `9a1df38` median 3.162s). The standalone `run_full.sh` checkpoint (`2026-10-26-dade4fa`) completed in **27.061s** with pick time **25.5s**, CPU work **408.6s**, total cost **8001**, and golden tree SHA-256 hash verified byte-identical (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
 
