@@ -2413,69 +2413,63 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut num_non_empty_local = 0usize;
             let set_ptr = set.as_ptr();
             let mut i = 0;
-            while i + 1 < c_len {
+            while i + 3 < c_len {
                 let c0 = unsafe { *set_ptr.add(i) };
                 let c1 = unsafe { *set_ptr.add(i + 1) };
+                let c2 = unsafe { *set_ptr.add(i + 2) };
+                let c3 = unsafe { *set_ptr.add(i + 3) };
                 let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
                 let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
 
                 unsafe {
-                    let cnt_ptr0 = counts_ptr.add(r0);
-                    let cnt0 = *cnt_ptr0;
-                    if cnt0 == 0 {
-                        *non_empty_indices_ptr.add(num_non_empty_local) = r0 as u16;
-                        num_non_empty_local += 1;
-                    }
-                    *cnt_ptr0 = cnt0 + 1;
-
-                    let cnt_ptr1 = counts_ptr.add(r1);
-                    let cnt1 = *cnt_ptr1;
-                    if cnt1 == 0 {
-                        *non_empty_indices_ptr.add(num_non_empty_local) = r1 as u16;
-                        num_non_empty_local += 1;
-                    }
-                    *cnt_ptr1 = cnt1 + 1;
+                    *counts_ptr.add(r0) += 1;
+                    *counts_ptr.add(r1) += 1;
+                    *counts_ptr.add(r2) += 1;
+                    *counts_ptr.add(r3) += 1;
                 }
-                i += 2;
+                i += 4;
             }
-            if i < c_len {
+            while i < c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
-                    let cnt_ptr = counts_ptr.add(r);
-                    let cnt = *cnt_ptr;
-                    if cnt == 0 {
-                        *non_empty_indices_ptr.add(num_non_empty_local) = r as u16;
-                        num_non_empty_local += 1;
-                    }
-                    *cnt_ptr = cnt + 1;
+                    *counts_ptr.add(r) += 1;
                 }
-            }
-            num_non_empty.set(num_non_empty_local);
-
-            if num_non_empty_local == 1 {
-                return beta;
+                i += 1;
             }
 
             let mut cost = set.len() as u32;
             let mut max_p_len = 0;
 
-            for i in 0..num_non_empty_local {
-                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                if r_idx == WIN {
+            for r in 0..R {
+                let p_len = unsafe { *counts_ptr.add(r) as usize };
+                if p_len == 0 {
                     continue;
                 }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                unsafe {
+                    *non_empty_indices_ptr.add(num_non_empty_local) = r as u16;
+                    num_non_empty_local += 1;
+                }
+                if r == WIN {
+                    continue;
+                }
                 if p_len > max_p_len {
                     max_p_len = p_len;
                 }
                 cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 if p_len > 2 {
                     unsafe {
-                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
+                        *eval_indices_ptr.add(num_eval) = r as u16;
                     }
                     num_eval += 1;
                 }
+            }
+            num_non_empty.set(num_non_empty_local);
+
+            if num_non_empty_local == 1 {
+                return beta;
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
