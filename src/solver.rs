@@ -957,9 +957,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cached_val;
             } else {
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cached_val >= beta
-                    || self.current_cost_so_far + cached_val >= current_global_beta
-                {
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cached_val >= cutoff {
                     return cached_val;
                 }
                 cached_lower_bound = cached_val;
@@ -985,9 +984,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
         cached_lower_bound = cached_lower_bound.max(parent_lb);
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if cached_lower_bound >= beta
-            || self.current_cost_so_far + cached_lower_bound >= current_global_beta
-        {
+        let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+        if cached_lower_bound >= cutoff {
             self.cache.insert_set(hash, set, cached_lower_bound, false);
             cert_record!(2, set, cached_lower_bound, false);
             return cached_lower_bound;
@@ -1050,15 +1048,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let z_tables_ptr = scratch_ref.scratch_z_tables[depth].as_mut_ptr();
             let mut c_vals = [0usize; 40];
+            let mut dummy_projs = [0u64; R];
             for c_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(c_idx) };
                 c_vals[c_idx] = c;
                 let z = unsafe { *zobrist_ptr.add(c) };
                 let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
                 for r in 0..R {
+                    let val = z.wrapping_mul(r as u64 + 1);
                     unsafe {
-                        *c_table_ptr.add(r) = z.wrapping_mul(r as u64 + 1);
+                        *c_table_ptr.add(r) = val;
                     }
+                    dummy_projs[r] ^= val;
                 }
             }
 
@@ -1120,15 +1121,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             for r in 0..R {
-                let mut p = 0u64;
-                for c_idx in 0..c_len {
-                    let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-                    p ^= unsafe { *c_table_ptr.add(r) };
+                let mut proj = dummy_projs[r];
+                if proj == 0 {
+                    proj = 1;
                 }
-                if p == 0 {
-                    p = 1;
-                }
-                let proj = p;
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
                     let slot = unsafe { *table_ptr.add(idx) };
@@ -2323,7 +2319,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 cost += used_val - initial_lb;
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
                     self.metrics
                         .pruned_by_bounds
                         .fetch_add(1, Ordering::Relaxed);
@@ -2384,10 +2381,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 );
                 self.current_cost_so_far -= b;
 
-                if b + val >= beta
-                    || self.current_cost_so_far + b + val
-                        >= self.global_beta.load(Ordering::Relaxed)
-                {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if b + val >= cutoff {
                     return b + val;
                 }
                 cost = b + val;
@@ -2756,7 +2752,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
 
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
                         self.metrics
                             .pruned_by_bounds
                             .fetch_add(1, Ordering::Relaxed);
@@ -2804,7 +2802,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.cache.insert_set(hash, p, used_val, is_exact);
                 cert_record!(5, p, used_val, is_exact);
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
                     self.metrics
                         .pruned_by_bounds
                         .fetch_add(1, Ordering::Relaxed);
@@ -2875,7 +2874,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
                     self.metrics
                         .pruned_by_bounds
                         .fetch_add(1, Ordering::Relaxed);
@@ -2894,7 +2894,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + cost >= current_global_beta {
+                let cutoff = current_global_beta.saturating_sub(self.current_cost_so_far);
+                if cost >= cutoff {
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return cost;
                 }
@@ -2939,7 +2940,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 );
                 self.current_cost_so_far -= b;
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if b + val >= beta || self.current_cost_so_far + b + val >= current_global_beta {
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if b + val >= cutoff {
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return b + val;
                 }
