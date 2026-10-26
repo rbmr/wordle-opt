@@ -395,18 +395,25 @@ pub fn compute_max_branching_factor_seq_with_target(
             let tab2 = &m_tab[2];
             let tab3 = &m_tab[3];
             let tab4 = &m_tab[4];
-            for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
+            let masks_ptr = matrix.guess_masks.as_ptr();
+            let chars_ptr = matrix.guess_profile_chars.as_ptr();
+            let num_guesses = matrix.guess_masks.len();
+            for g in 0..num_guesses {
+                let g_mask = unsafe { *masks_ptr.add(g) };
                 if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
-                let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
-                let prod = unsafe {
+                let chars = unsafe { &*chars_ptr.add(g) };
+                let p01 = unsafe {
                     (*tab0.get_unchecked(chars[0] as usize) as u32)
                         * (*tab1.get_unchecked(chars[1] as usize) as u32)
-                        * (*tab2.get_unchecked(chars[2] as usize) as u32)
-                        * (*tab3.get_unchecked(chars[3] as usize) as u32)
-                        * (*tab4.get_unchecked(chars[4] as usize) as u32)
                 };
+                let p23 = unsafe {
+                    (*tab2.get_unchecked(chars[2] as usize) as u32)
+                        * (*tab3.get_unchecked(chars[3] as usize) as u32)
+                };
+                let p4 = unsafe { *tab4.get_unchecked(chars[4] as usize) as u32 };
+                let prod = (p01 * p23) * p4;
                 if prod as usize <= max_k {
                     continue;
                 }
