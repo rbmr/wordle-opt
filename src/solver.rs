@@ -2316,15 +2316,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     all_exact = false;
                 }
 
-                cost += used_val - initial_lb;
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                if cost >= cutoff {
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, Ordering::Relaxed);
-                    return cost;
+                if used_val > initial_lb {
+                    cost += used_val - initial_lb;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, Ordering::Relaxed);
+                        return cost;
+                    }
                 }
             }
 
@@ -2735,7 +2737,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
                     self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
                     let used_val = cached_val.max(cap_lb);
-                    cost += used_val - cap_lb;
                     unsafe {
                         *p_lbs_ptr.add(i) = used_val;
                     }
@@ -2751,15 +2752,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *cached_mask.get_unchecked_mut(word_idx) |= bit;
                     }
 
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    let cutoff =
-                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                    if cost >= cutoff {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
-                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                        return cost;
+                    if used_val > cap_lb {
+                        cost += used_val - cap_lb;
+                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                        let cutoff =
+                            beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                        if cost >= cutoff {
+                            self.metrics
+                                .pruned_by_bounds
+                                .fetch_add(1, Ordering::Relaxed);
+                            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                            return cost;
+                        }
                     }
                 } else {
                     unsafe {
@@ -2789,7 +2793,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     Self::quick_bucket_eval_specialized(self.matrix, self.dict, p);
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let used_val = quick_val.max(lb);
-                cost += used_val - lb;
                 unsafe {
                     *p_lbs_ptr.add(i) = used_val;
                 }
@@ -2801,14 +2804,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 self.cache.insert_set(hash, p, used_val, is_exact);
                 cert_record!(5, p, used_val, is_exact);
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                if cost >= cutoff {
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, Ordering::Relaxed);
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
+
+                if used_val > lb {
+                    cost += used_val - lb;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, Ordering::Relaxed);
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return cost;
+                    }
                 }
             }
 
@@ -2863,24 +2871,29 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let tight_lb =
                                 crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                             let used_val = tight_lb.max(lb);
-                            cost += used_val - lb;
                             unsafe {
                                 *p_lbs_ptr.add(i) = used_val;
                             }
                             self.cache.insert_set(hash, p, used_val, false);
                             cert_record!(9, p, used_val, false);
+
+                            if used_val > lb {
+                                cost += used_val - lb;
+                                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                                let cutoff = beta.min(
+                                    current_global_beta.saturating_sub(self.current_cost_so_far),
+                                );
+                                if cost >= cutoff {
+                                    self.metrics
+                                        .pruned_by_bounds
+                                        .fetch_add(1, Ordering::Relaxed);
+                                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
+                                        sorted_set;
+                                    return cost;
+                                }
+                            }
                         }
                     }
-                }
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                if cost >= cutoff {
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, Ordering::Relaxed);
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
                 }
             }
 
