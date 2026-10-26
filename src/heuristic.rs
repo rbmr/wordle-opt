@@ -309,18 +309,45 @@ pub fn compute_max_branching_factor_seq_with_target(
     let mut elsewhere_mask = [0u32; 8];
     let mut dup_elsewhere_mask = [0u32; 8];
     for &c in candidates {
-        let m = unsafe { *matrix.candidate_masks.get_unchecked(c) };
+        let cp = unsafe { matrix.candidate_profiles.get_unchecked(c) };
+        let m = cp.mask;
         c_mask |= m;
         c_all_mask &= m;
         if m != u32::MAX && word_len <= 8 {
-            let dup = unsafe { *matrix.candidate_dup_masks.get_unchecked(c) };
+            let dup = cp.dup_mask;
             c_dup_mask |= dup;
-            let c_at = unsafe { matrix.candidate_at_masks.get_unchecked(c) };
-            for i in 0..word_len {
-                let bit = c_at[i];
-                at_mask[i] |= bit;
-                elsewhere_mask[i] |= m & !bit;
-                dup_elsewhere_mask[i] |= dup & !bit;
+            if word_len == 5 {
+                let b0 = cp.at_mask[0];
+                at_mask[0] |= b0;
+                elsewhere_mask[0] |= m & !b0;
+                dup_elsewhere_mask[0] |= dup & !b0;
+
+                let b1 = cp.at_mask[1];
+                at_mask[1] |= b1;
+                elsewhere_mask[1] |= m & !b1;
+                dup_elsewhere_mask[1] |= dup & !b1;
+
+                let b2 = cp.at_mask[2];
+                at_mask[2] |= b2;
+                elsewhere_mask[2] |= m & !b2;
+                dup_elsewhere_mask[2] |= dup & !b2;
+
+                let b3 = cp.at_mask[3];
+                at_mask[3] |= b3;
+                elsewhere_mask[3] |= m & !b3;
+                dup_elsewhere_mask[3] |= dup & !b3;
+
+                let b4 = cp.at_mask[4];
+                at_mask[4] |= b4;
+                elsewhere_mask[4] |= m & !b4;
+                dup_elsewhere_mask[4] |= dup & !b4;
+            } else {
+                for i in 0..word_len {
+                    let bit = cp.at_mask[i];
+                    at_mask[i] |= bit;
+                    elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
+                }
             }
         }
     }

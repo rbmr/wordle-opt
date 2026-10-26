@@ -10,6 +10,15 @@ pub struct GuessProfile {
     pub _pad: [u8; 4],
 }
 
+#[repr(C, align(64))]
+#[derive(Clone, Copy, Default)]
+pub struct CandidateProfile {
+    pub mask: u32,
+    pub dup_mask: u32,
+    pub at_mask: [u32; 8],
+    pub _pad: [u32; 6],
+}
+
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
 ///
 /// The matrix is flattened into a 1D vector and stored in row-major order: `guess * num_candidates + candidate`.
@@ -24,6 +33,7 @@ pub struct ResponseMatrix {
     pub guess_masks: Vec<u32>,
     pub guess_profiles: Vec<GuessProfile>,
     pub candidate_masks: Vec<u32>,
+    pub candidate_profiles: Vec<CandidateProfile>,
     pub zobrist: Vec<u64>,
     pub data: Vec<Response>,
     /// Transposed matrix: `data_c_g[candidate * num_guesses + guess]`.
@@ -162,7 +172,8 @@ impl ResponseMatrix {
         }
         let mut candidate_at_masks = Vec::with_capacity(num_candidates);
         let mut candidate_dup_masks = Vec::with_capacity(num_candidates);
-        for &cg in &candidate_to_guess {
+        let mut candidate_profiles = Vec::with_capacity(num_candidates);
+        for (c_idx, &cg) in candidate_to_guess.iter().enumerate() {
             let chars = &guess_chars[cg];
             let mut at = [0u32; 8];
             let mut seen = 0u32;
@@ -175,6 +186,12 @@ impl ResponseMatrix {
             }
             candidate_at_masks.push(at);
             candidate_dup_masks.push(dup);
+            candidate_profiles.push(CandidateProfile {
+                mask: candidate_masks[c_idx],
+                dup_mask: dup,
+                at_mask: at,
+                _pad: [0; 6],
+            });
         }
 
         let mut guess_profiles = Vec::with_capacity(num_guesses);
@@ -195,6 +212,7 @@ impl ResponseMatrix {
             guess_masks,
             guess_profiles,
             candidate_masks,
+            candidate_profiles,
             zobrist,
             data,
             data_c_g,
