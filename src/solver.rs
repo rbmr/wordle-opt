@@ -1048,17 +1048,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
 
+            let z_tables_ptr = scratch_ref.scratch_z_tables[depth].as_mut_ptr();
             let mut c_vals = [0usize; 40];
-            let mut z_vals = [0u64; 40];
             for c_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(c_idx) };
                 c_vals[c_idx] = c;
-                z_vals[c_idx] = unsafe { *zobrist_ptr.add(c) };
-            }
-
-            let z_tables_ptr = scratch_ref.scratch_z_tables[depth].as_mut_ptr();
-            for c_idx in 0..c_len {
-                let z = unsafe { *z_vals.get_unchecked(c_idx) };
+                let z = unsafe { *zobrist_ptr.add(c) };
                 let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
                 for r in 0..R {
                     unsafe {
@@ -1093,18 +1088,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let c_off = c * num_guesses + chunk_start;
                     let c_ptr = unsafe { data_cg_ptr.add(c_off) };
                     let mut i = 0;
-                    while i + 3 < chunk_len {
+                    while i + 7 < chunk_len {
                         let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
                         let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
                         let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
                         let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(i + 4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(i + 5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(i + 6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(i + 7)).to_usize() };
                         unsafe {
                             *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
                             *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
                             *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
                             *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
                         }
-                        i += 4;
+                        i += 8;
                     }
                     while i < chunk_len {
                         let r = unsafe { (*c_ptr.add(i)).to_usize() };
@@ -2171,9 +2174,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return beta;
             }
 
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
             let mut cost = c_len as u32;
-            let mut max_p_len = 0;
+            if cost >= cutoff {
+                self.metrics
+                    .pruned_by_bounds
+                    .fetch_add(1, Ordering::Relaxed);
+                return cost;
+            }
 
+            let mut max_p_len = 0;
             let mut num_eval = 0;
             let mut eval_entries = [(0u16, 0u16); 5];
 
@@ -2189,17 +2199,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 cost += lb;
+                if cost >= cutoff {
+                    self.metrics
+                        .pruned_by_bounds
+                        .fetch_add(1, Ordering::Relaxed);
+                    return cost;
+                }
                 if p_len > 2 {
                     eval_entries[num_eval] = entry;
                     num_eval += 1;
                 }
-            }
-
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                return cost;
             }
 
             if max_p_len <= 2 {
