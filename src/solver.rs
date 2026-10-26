@@ -2698,19 +2698,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            let mut remaining_potential_gain = 0u32;
-            for j in 0..split_idx {
-                let word_idx = j >> 6;
-                let bit = 1u64 << (j & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) == 0 {
-                    let r_idx = unsafe { *eval_indices_ptr.add(j) as usize };
-                    let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                    let max_tight = crate::heuristic::tight_capacity_bound(p_len, 2, parent_max_k);
-                    remaining_potential_gain += max_tight.saturating_sub(lb);
-                }
-            }
-
             for i in 0..split_idx {
                 unsafe {
                     *child_max_ks_ptr.add(i) = 0;
@@ -2727,19 +2714,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
 
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let max_tight = crate::heuristic::tight_capacity_bound(p_len, 2, parent_max_k);
-                let this_max_gain = max_tight.saturating_sub(lb);
-                remaining_potential_gain = remaining_potential_gain.saturating_sub(this_max_gain);
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let needed_gain = beta
-                    .min(current_global_beta.saturating_sub(self.current_cost_so_far))
-                    .saturating_sub(cost);
-
-                if this_max_gain + remaining_potential_gain < needed_gain {
-                    break;
-                }
-
                 let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
                 if target_k == 2 {
                     self.cache.insert_set(hash, p, lb, false);
@@ -2787,13 +2761,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         .fetch_add(1, Ordering::Relaxed);
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return cost;
-                }
-
-                let needed_after = beta
-                    .min(current_global_beta.saturating_sub(self.current_cost_so_far))
-                    .saturating_sub(cost);
-                if remaining_potential_gain < needed_after {
-                    break;
                 }
             }
 
