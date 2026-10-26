@@ -233,6 +233,36 @@ fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
 }
 
 /// Sequential version of `compute_max_branching_factor` with early stopping and target_k.
+#[inline(always)]
+fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 8]) {
+    let n = ptrs.len();
+    let mut i = 0;
+    while i + 1 < n {
+        let r0 = unsafe { *(*ptrs.get_unchecked(i)).add(g) as usize };
+        let r1 = unsafe { *(*ptrs.get_unchecked(i + 1)).add(g) as usize };
+        unsafe {
+            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask.get_unchecked_mut(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+        }
+        i += 2;
+    }
+    if i < n {
+        let r0 = unsafe { *(*ptrs.get_unchecked(i)).add(g) as usize };
+        unsafe {
+            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+        }
+    }
+}
+
+#[inline(always)]
+fn combine_and_count_u8(mask: &[u64; 8]) -> usize {
+    let m0 = mask[0] | mask[4];
+    let m1 = mask[1] | mask[5];
+    let m2 = mask[2] | mask[6];
+    let m3 = mask[3] | mask[7];
+    (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
+}
+
 pub fn compute_max_branching_factor_seq_with_target(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
@@ -373,30 +403,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
-                let mut mask = [0u64; 4];
-                for &c_base in c_half1_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                let half_unique: usize = (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize;
+                let mut mask = [0u64; 8];
+                count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
+                let half_unique = combine_and_count_u8(&mask);
                 if half_unique + rem_len <= max_k {
                     continue;
                 }
-                for &c_base in c_half2_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                let k: usize = (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize;
+                count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
+                let k = combine_and_count_u8(&mask);
                 if k > max_k {
                     max_k = k;
                     if max_k >= effective_target {
@@ -421,30 +435,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
-                let mut mask = [0u64; 4];
-                for &c_base in c_half1_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                let half_unique: usize = (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize;
+                let mut mask = [0u64; 8];
+                count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
+                let half_unique = combine_and_count_u8(&mask);
                 if half_unique + rem_len <= max_k {
                     continue;
                 }
-                for &c_base in c_half2_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                let k: usize = (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize;
+                count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
+                let k = combine_and_count_u8(&mask);
                 if k > max_k {
                     max_k = k;
                     if max_k >= effective_target {
@@ -459,30 +457,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if overlap == 0 {
                     continue;
                 }
-                let mut mask = [0u64; 4];
-                for &c_base in c_half1_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                let half_unique: usize = (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize;
+                let mut mask = [0u64; 8];
+                count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
+                let half_unique = combine_and_count_u8(&mask);
                 if half_unique + rem_len <= max_k {
                     continue;
                 }
-                for &c_base in c_half2_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                let k: usize = (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize;
+                count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
+                let k = combine_and_count_u8(&mask);
                 if k > max_k {
                     max_k = k;
                     if max_k >= effective_target {
