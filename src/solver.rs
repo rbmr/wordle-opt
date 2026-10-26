@@ -1460,7 +1460,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             phase1_tuples[1] = t1;
             phase1_tuples[2] = t2;
             phase1_tuples[3] = t3;
-        } else if phase1_tuples.len() > 4 {
+        } else if phase1_tuples.len() > 4 && phase1_tuples.len() <= 32 {
             let p1_ptr = phase1_tuples.as_mut_ptr();
             let p1_len = phase1_tuples.len();
             for j in 1..p1_len {
@@ -1484,6 +1484,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *p1_ptr.add(k) = key;
                 }
             }
+        } else if phase1_tuples.len() > 32 {
+            phase1_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
         }
 
         for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
@@ -1530,266 +1532,315 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             && self.current_cost_so_far + phase2_effective_lb < current_global_beta
         {
             let mut valid_phase2_k = 0;
-            let mut is_in_set =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
-            let is_in_set_ptr = is_in_set.as_mut_ptr();
-            let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
-            let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
-            let set_ptr = set.as_ptr();
-            let mut c_mask = 0u32;
-            let mut multi_c_mask = 0u32;
-            for i in 0..c_len {
-                let c = unsafe { *set_ptr.add(i) };
-                let g = unsafe { *cand_to_guess_ptr.add(c) };
-                let m = unsafe { *cand_masks_ptr.add(c) };
-                multi_c_mask |= c_mask & m;
-                c_mask |= m;
-                unsafe {
-                    *is_in_set_ptr.add(g / 64) |= 1 << (g % 64);
-                }
-            }
-            let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
-            let num_guesses = self.dict.guesses.len();
-            let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
-            let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
-            let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
-            let heap_c_ptrs = if c_len > 256 {
-                let mut v = Vec::with_capacity(c_len);
+            let k_to_beat_best =
+                (3 * c_len as u32).saturating_sub(best_val.saturating_sub(1)) as usize;
+            let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+            if c_len >= min_k_needed {
+                let mut max_allowed_duplicates = c_len - min_k_needed;
+                let mut is_in_set =
+                    std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
+                let is_in_set_ptr = is_in_set.as_mut_ptr();
+                let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+                let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
                 let set_ptr = set.as_ptr();
+                let mut c_mask = 0u32;
+                let mut multi_c_mask = 0u32;
                 for i in 0..c_len {
                     let c = unsafe { *set_ptr.add(i) };
-                    v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-                }
-                Some(v)
-            } else {
-                None
-            };
-            let c_ptrs: &[*const Elem] = if c_len <= 256 {
-                let set_ptr = set.as_ptr();
-                for i in 0..c_len {
-                    let c = unsafe { *set_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    let m = unsafe { *cand_masks_ptr.add(c) };
+                    multi_c_mask |= c_mask & m;
+                    c_mask |= m;
                     unsafe {
-                        *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                        *is_in_set_ptr.add(g / 64) |= 1 << (g % 64);
                     }
                 }
-                unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
-            } else {
-                heap_c_ptrs.as_ref().unwrap()
-            };
+                let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
+                let num_guesses = self.dict.guesses.len();
+                let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
+                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
+                let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
+                let heap_c_ptrs = if c_len > 256 {
+                    let mut v = Vec::with_capacity(c_len);
+                    let set_ptr = set.as_ptr();
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+                let c_ptrs: &[*const Elem] = if c_len <= 256 {
+                    let set_ptr = set.as_ptr();
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        unsafe {
+                            *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                        }
+                    }
+                    unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
+                } else {
+                    heap_c_ptrs.as_ref().unwrap()
+                };
 
-            let c_ptrs_ptr = c_ptrs.as_ptr();
-            for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-                if block == 0 {
-                    continue;
-                }
-                let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
-                while b != 0 {
-                    let tz = b.trailing_zeros();
-                    let g = block_idx * 64 + tz as usize;
-                    b &= b - 1;
-
-                    let g_mask = unsafe { *guess_masks_ptr.add(g) };
-                    let shared = g_mask & c_mask;
-                    if (shared & (shared - 1)) == 0 && (shared & multi_c_mask) == 0 {
+                let c_ptrs_ptr = c_ptrs.as_ptr();
+                'guess_loop: for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
+                    if block == 0 {
                         continue;
                     }
+                    let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
+                    while b != 0 {
+                        let tz = b.trailing_zeros();
+                        let g = block_idx * 64 + tz as usize;
+                        b &= b - 1;
 
-                    let mut num_non_empty = 0;
-                    for c_idx in 0..c_len {
-                        let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                        let r = unsafe { (*c_base.add(g)).to_usize() };
-                        unsafe {
-                            let cnt_ptr = counts_ptr.add(r);
-                            let cnt = *cnt_ptr;
-                            if cnt == 0 {
-                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                num_non_empty += 1;
-                            }
-                            *cnt_ptr = cnt + 1;
-                        }
-                    }
-                    if num_non_empty == 1 {
-                        unsafe {
-                            let r_idx = *non_empty_indices_ptr.add(0) as usize;
-                            *counts_ptr.add(r_idx) = 0;
-                        }
-                        continue;
-                    }
-                    if num_non_empty == 2 {
-                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
-                        let count0 = unsafe { *counts_ptr.add(r0) };
-                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
-                        unsafe {
-                            *counts_ptr.add(r0) = 0;
-                            *counts_ptr.add(r1) = 0;
-                        }
-                        if count0 == 1 || count0 == (c_len as u16 - 1) {
+                        let g_mask = unsafe { *guess_masks_ptr.add(g) };
+                        let shared = g_mask & c_mask;
+                        if (shared & (shared - 1)) == 0 && (shared & multi_c_mask) == 0 {
                             continue;
                         }
-                        let c0 = count0 as u32;
-                        let c1 = (c_len as u32) - c0;
-                        let expected_rem = c0 * c0 + c1 * c1;
-                        let lb_cost = (c_len as u32)
-                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) };
-                        if 2 > local_max_k {
-                            local_max_k = 2;
+
+                        let mut num_non_empty = 0;
+                        let mut duplicates = 0;
+                        let mut aborted = false;
+                        for c_idx in 0..c_len {
+                            let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                            let r = unsafe { (*c_base.add(g)).to_usize() };
+                            unsafe {
+                                let cnt_ptr = counts_ptr.add(r);
+                                let cnt = *cnt_ptr;
+                                if cnt == 0 {
+                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                    num_non_empty += 1;
+                                } else {
+                                    duplicates += 1;
+                                    if duplicates > max_allowed_duplicates {
+                                        for i in 0..num_non_empty {
+                                            let r_idx = *non_empty_indices_ptr.add(i) as usize;
+                                            *counts_ptr.add(r_idx) = 0;
+                                        }
+                                        aborted = true;
+                                        break;
+                                    }
+                                }
+                                *cnt_ptr = cnt + 1;
+                            }
+                        }
+                        if aborted {
+                            min_val_found = min_val_found.min(best_val);
+                            continue;
+                        }
+                        if num_non_empty == 1 {
+                            unsafe {
+                                let r_idx = *non_empty_indices_ptr.add(0) as usize;
+                                *counts_ptr.add(r_idx) = 0;
+                            }
+                            continue;
+                        }
+                        if num_non_empty == 2 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                            }
+                            if count0 == 1 || count0 == (c_len as u16 - 1) {
+                                continue;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = (c_len as u32) - c0;
+                            let expected_rem = c0 * c0 + c1 * c1;
+                            let lb_cost = (c_len as u32)
+                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) };
+                            if 2 > local_max_k {
+                                local_max_k = 2;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            }
+                            if lb_cost < best_val {
+                                if 2 > valid_phase2_k {
+                                    valid_phase2_k = 2;
+                                }
+                                phase2_tuples.push((g, expected_rem, lb_cost, 2));
+                            } else {
+                                min_val_found = min_val_found.min(lb_cost);
+                            }
+                            if min_k_needed > c_len {
+                                break 'guess_loop;
+                            }
+                            continue;
+                        }
+                        if num_non_empty == 3 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = (c_len as u32) - c0 - c1;
+                            let expected_rem = c0 * c0 + c1 * c1 + c2 * c2;
+                            let lb_cost = (c_len as u32)
+                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) };
+                            if 3 > local_max_k {
+                                local_max_k = 3;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            }
+                            if lb_cost < best_val {
+                                if 3 > valid_phase2_k {
+                                    valid_phase2_k = 3;
+                                }
+                                phase2_tuples.push((g, expected_rem, lb_cost, 3));
+                            } else {
+                                min_val_found = min_val_found.min(lb_cost);
+                            }
+                            if min_k_needed > c_len {
+                                break 'guess_loop;
+                            }
+                            continue;
+                        }
+                        if num_non_empty == 4 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = (c_len as u32) - c0 - c1 - c2;
+                            let expected_rem = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+                            let lb_cost = (c_len as u32)
+                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) };
+                            if 4 > local_max_k {
+                                local_max_k = 4;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            }
+                            if lb_cost < best_val {
+                                if 4 > valid_phase2_k {
+                                    valid_phase2_k = 4;
+                                }
+                                phase2_tuples.push((g, expected_rem, lb_cost, 4));
+                            } else {
+                                min_val_found = min_val_found.min(lb_cost);
+                            }
+                            if min_k_needed > c_len {
+                                break 'guess_loop;
+                            }
+                            continue;
+                        }
+                        if num_non_empty == 5 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            let count3 = unsafe { *counts_ptr.add(r3) };
+                            let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                                *counts_ptr.add(r4) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = count3 as u32;
+                            let c4 = (c_len as u32) - c0 - c1 - c2 - c3;
+                            let expected_rem = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4;
+                            let lb_cost = (c_len as u32)
+                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) };
+                            if 5 > local_max_k {
+                                local_max_k = 5;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            }
+                            if lb_cost < best_val {
+                                if 5 > valid_phase2_k {
+                                    valid_phase2_k = 5;
+                                }
+                                phase2_tuples.push((g, expected_rem, lb_cost, 5));
+                            } else {
+                                min_val_found = min_val_found.min(lb_cost);
+                            }
+                            if min_k_needed > c_len {
+                                break 'guess_loop;
+                            }
+                            continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut lb_cost = c_len as u32;
+                        for i in 0..num_non_empty {
+                            let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                            let count = unsafe { *counts_ptr.add(r_idx) };
+                            unsafe {
+                                *counts_ptr.add(r_idx) = 0;
+                            }
+                            expected_rem += (count as u32) * (count as u32);
+                            debug_assert_ne!(r_idx, WIN);
+                            lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
+                        }
+                        if num_non_empty > local_max_k {
+                            local_max_k = num_non_empty;
+                            min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                            max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                         }
                         if lb_cost < best_val {
-                            if 2 > valid_phase2_k {
-                                valid_phase2_k = 2;
+                            if num_non_empty > valid_phase2_k {
+                                valid_phase2_k = num_non_empty;
                             }
-                            phase2_tuples.push((g, expected_rem, lb_cost, 2));
+                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
                         } else {
                             min_val_found = min_val_found.min(lb_cost);
                         }
-                        continue;
-                    }
-                    if num_non_empty == 3 {
-                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
-                        let count0 = unsafe { *counts_ptr.add(r0) };
-                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
-                        let count1 = unsafe { *counts_ptr.add(r1) };
-                        let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
-                        unsafe {
-                            *counts_ptr.add(r0) = 0;
-                            *counts_ptr.add(r1) = 0;
-                            *counts_ptr.add(r2) = 0;
+                        if min_k_needed > c_len {
+                            break 'guess_loop;
                         }
-                        let c0 = count0 as u32;
-                        let c1 = count1 as u32;
-                        let c2 = (c_len as u32) - c0 - c1;
-                        let expected_rem = c0 * c0 + c1 * c1 + c2 * c2;
-                        let lb_cost = (c_len as u32)
-                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) };
-                        if 3 > local_max_k {
-                            local_max_k = 3;
-                        }
-                        if lb_cost < best_val {
-                            if 3 > valid_phase2_k {
-                                valid_phase2_k = 3;
-                            }
-                            phase2_tuples.push((g, expected_rem, lb_cost, 3));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
-                        }
-                        continue;
-                    }
-                    if num_non_empty == 4 {
-                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
-                        let count0 = unsafe { *counts_ptr.add(r0) };
-                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
-                        let count1 = unsafe { *counts_ptr.add(r1) };
-                        let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
-                        let count2 = unsafe { *counts_ptr.add(r2) };
-                        let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
-                        unsafe {
-                            *counts_ptr.add(r0) = 0;
-                            *counts_ptr.add(r1) = 0;
-                            *counts_ptr.add(r2) = 0;
-                            *counts_ptr.add(r3) = 0;
-                        }
-                        let c0 = count0 as u32;
-                        let c1 = count1 as u32;
-                        let c2 = count2 as u32;
-                        let c3 = (c_len as u32) - c0 - c1 - c2;
-                        let expected_rem = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
-                        let lb_cost = (c_len as u32)
-                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) };
-                        if 4 > local_max_k {
-                            local_max_k = 4;
-                        }
-                        if lb_cost < best_val {
-                            if 4 > valid_phase2_k {
-                                valid_phase2_k = 4;
-                            }
-                            phase2_tuples.push((g, expected_rem, lb_cost, 4));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
-                        }
-                        continue;
-                    }
-                    if num_non_empty == 5 {
-                        let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
-                        let count0 = unsafe { *counts_ptr.add(r0) };
-                        let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
-                        let count1 = unsafe { *counts_ptr.add(r1) };
-                        let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
-                        let count2 = unsafe { *counts_ptr.add(r2) };
-                        let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
-                        let count3 = unsafe { *counts_ptr.add(r3) };
-                        let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
-                        unsafe {
-                            *counts_ptr.add(r0) = 0;
-                            *counts_ptr.add(r1) = 0;
-                            *counts_ptr.add(r2) = 0;
-                            *counts_ptr.add(r3) = 0;
-                            *counts_ptr.add(r4) = 0;
-                        }
-                        let c0 = count0 as u32;
-                        let c1 = count1 as u32;
-                        let c2 = count2 as u32;
-                        let c3 = count3 as u32;
-                        let c4 = (c_len as u32) - c0 - c1 - c2 - c3;
-                        let expected_rem = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4;
-                        let lb_cost = (c_len as u32)
-                            + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
-                            + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) };
-                        if 5 > local_max_k {
-                            local_max_k = 5;
-                        }
-                        if lb_cost < best_val {
-                            if 5 > valid_phase2_k {
-                                valid_phase2_k = 5;
-                            }
-                            phase2_tuples.push((g, expected_rem, lb_cost, 5));
-                        } else {
-                            min_val_found = min_val_found.min(lb_cost);
-                        }
-                        continue;
-                    }
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
-                    for i in 0..num_non_empty {
-                        let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                        let count = unsafe { *counts_ptr.add(r_idx) };
-                        unsafe {
-                            *counts_ptr.add(r_idx) = 0;
-                        }
-                        expected_rem += (count as u32) * (count as u32);
-                        debug_assert_ne!(r_idx, WIN);
-                        lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                    }
-                    if num_non_empty > local_max_k {
-                        local_max_k = num_non_empty;
-                    }
-                    if lb_cost < best_val {
-                        if num_non_empty > valid_phase2_k {
-                            valid_phase2_k = num_non_empty;
-                        }
-                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                    } else {
-                        min_val_found = min_val_found.min(lb_cost);
                     }
                 }
-            }
-            let set_ptr = set.as_ptr();
-            for i in 0..c_len {
-                let c = unsafe { *set_ptr.add(i) };
-                let g = unsafe { *cand_to_guess_ptr.add(c) };
-                unsafe {
-                    *is_in_set_ptr.add(g / 64) = 0;
+                let set_ptr = set.as_ptr();
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    unsafe {
+                        *is_in_set_ptr.add(g / 64) = 0;
+                    }
                 }
+                self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
+            } else {
+                min_val_found = min_val_found.min(best_val);
             }
-            self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
 
             let base_lb = unsafe {
                 *self
@@ -1883,7 +1934,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     phase2_tuples[1] = t1;
                     phase2_tuples[2] = t2;
                     phase2_tuples[3] = t3;
-                } else if phase2_tuples.len() > 4 {
+                } else if phase2_tuples.len() > 4 && phase2_tuples.len() <= 32 {
                     let p2_ptr = phase2_tuples.as_mut_ptr();
                     let p2_len = phase2_tuples.len();
                     for j in 1..p2_len {
@@ -1907,6 +1958,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             *p2_ptr.add(k) = key;
                         }
                     }
+                } else if phase2_tuples.len() > 32 {
+                    phase2_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
                 }
 
                 for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
