@@ -57,36 +57,48 @@ pub fn sort_guesses_by_expected_remaining(
 }
 
 #[inline(always)]
-fn combine_and_count_u8(mask: &[u64; 8]) -> usize {
-    let m0 = mask[0] | mask[4];
-    let m1 = mask[1] | mask[5];
-    let m2 = mask[2] | mask[6];
-    let m3 = mask[3] | mask[7];
+fn combine_and_count_u8(mask: &[u64; 16]) -> usize {
+    let m0 = mask[0] | mask[4] | mask[8] | mask[12];
+    let m1 = mask[1] | mask[5] | mask[9] | mask[13];
+    let m2 = mask[2] | mask[6] | mask[10] | mask[14];
+    let m3 = mask[3] | mask[7] | mask[11] | mask[15];
     (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
 }
 
 #[inline(always)]
-fn count_unique_responses_from_row_u8(g_ptr: *const u8, candidates: &[usize], mask: &mut [u64; 8]) {
+fn count_unique_responses_from_row_u8(
+    g_ptr: *const u8,
+    candidates: &[usize],
+    mask: &mut [u64; 16],
+) {
     let n = candidates.len();
     let mut c_it = candidates.as_ptr();
-    let c_end = unsafe { c_it.add(n & !1) };
+    let c_end4 = unsafe { c_it.add(n & !3) };
     let mask_ptr = mask.as_mut_ptr();
-    while c_it < c_end {
+    while c_it < c_end4 {
         let c0 = unsafe { *c_it };
         let c1 = unsafe { *c_it.add(1) };
+        let c2 = unsafe { *c_it.add(2) };
+        let c3 = unsafe { *c_it.add(3) };
         let r0 = unsafe { *g_ptr.add(c0) as usize };
         let r1 = unsafe { *g_ptr.add(c1) as usize };
+        let r2 = unsafe { *g_ptr.add(c2) as usize };
+        let r3 = unsafe { *g_ptr.add(c3) as usize };
         unsafe {
             *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
             *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
-            c_it = c_it.add(2);
+            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
+            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
+            c_it = c_it.add(4);
         }
     }
-    if (n & 1) != 0 {
-        let c0 = unsafe { *c_end };
+    let c_end = unsafe { candidates.as_ptr().add(n) };
+    while c_it < c_end {
+        let c0 = unsafe { *c_it };
         let r0 = unsafe { *g_ptr.add(c0) as usize };
         unsafe {
             *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            c_it = c_it.add(1);
         }
     }
 }
@@ -106,7 +118,7 @@ pub fn compute_max_branching_factor(
             .into_par_iter()
             .map(|g| {
                 let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
-                let mut mask = [0u64; 8];
+                let mut mask = [0u64; 16];
                 count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
                 combine_and_count_u8(&mask)
             })
@@ -148,7 +160,7 @@ pub fn compute_candidate_branching_factor_with_target(
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
-            let mut mask = [0u64; 8];
+            let mut mask = [0u64; 16];
             count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
             let k = combine_and_count_u8(&mask);
             if k > max_k {
@@ -253,27 +265,35 @@ fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
 
 /// Sequential version of `compute_max_branching_factor` with early stopping and target_k.
 #[inline(always)]
-fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 8]) {
+fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 16]) {
     let n = ptrs.len();
     let mut p_it = ptrs.as_ptr();
-    let p_end = unsafe { p_it.add(n & !1) };
+    let p_end4 = unsafe { p_it.add(n & !3) };
     let mask_ptr = mask.as_mut_ptr();
-    while p_it < p_end {
+    while p_it < p_end4 {
         let c_ptr0 = unsafe { *p_it };
         let c_ptr1 = unsafe { *p_it.add(1) };
+        let c_ptr2 = unsafe { *p_it.add(2) };
+        let c_ptr3 = unsafe { *p_it.add(3) };
         let r0 = unsafe { *c_ptr0.add(g) as usize };
         let r1 = unsafe { *c_ptr1.add(g) as usize };
+        let r2 = unsafe { *c_ptr2.add(g) as usize };
+        let r3 = unsafe { *c_ptr3.add(g) as usize };
         unsafe {
             *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
             *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
-            p_it = p_it.add(2);
+            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
+            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
+            p_it = p_it.add(4);
         }
     }
-    if (n & 1) != 0 {
-        let c_ptr0 = unsafe { *p_end };
+    let p_end = unsafe { ptrs.as_ptr().add(n) };
+    while p_it < p_end {
+        let c_ptr0 = unsafe { *p_it };
         let r0 = unsafe { *c_ptr0.add(g) as usize };
         unsafe {
             *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            p_it = p_it.add(1);
         }
     }
 }
@@ -444,7 +464,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
-                let mut mask = [0u64; 8];
+                let mut mask = [0u64; 16];
                 if rem_len < max_k {
                     count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
                     let half_unique = combine_and_count_u8(&mask);
@@ -479,7 +499,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
-                let mut mask = [0u64; 8];
+                let mut mask = [0u64; 16];
                 if rem_len < max_k {
                     count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
                     let half_unique = combine_and_count_u8(&mask);
@@ -505,7 +525,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if overlap == 0 {
                     continue;
                 }
-                let mut mask = [0u64; 8];
+                let mut mask = [0u64; 16];
                 if rem_len < max_k {
                     count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
                     let half_unique = combine_and_count_u8(&mask);
