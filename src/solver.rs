@@ -2094,22 +2094,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
         if c_len <= 16 {
-            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16); 16]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16);
+            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16, u64); 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16, u64);
             let set_ptr = set.as_ptr();
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let c0 = unsafe { *set_ptr };
             let r0 = unsafe { (*g_ptr.add(c0)).to_usize() as u16 };
+            let z0 = unsafe { *zobrist_ptr.add(c0) };
             unsafe {
-                *local_counts_ptr = (r0, 1);
+                *local_counts_ptr = (r0, 1, z0);
             }
             let mut num_non_empty = 1;
             let mut prev_idx = 0usize;
             for cand_idx in 1..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                let z = unsafe { *zobrist_ptr.add(c) };
                 let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
                 if prev_entry.0 == r {
                     prev_entry.1 += 1;
+                    prev_entry.2 ^= z;
                     continue;
                 }
                 let mut found = false;
@@ -2117,6 +2121,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let entry = unsafe { &mut *local_counts_ptr.add(i) };
                     if entry.0 == r {
                         entry.1 += 1;
+                        entry.2 ^= z;
                         prev_idx = i;
                         found = true;
                         break;
@@ -2125,7 +2130,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if !found {
                     prev_idx = num_non_empty;
                     unsafe {
-                        *local_counts_ptr.add(num_non_empty) = (r, 1);
+                        *local_counts_ptr.add(num_non_empty) = (r, 1, z);
                     }
                     num_non_empty += 1;
                 }
@@ -2240,6 +2245,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut small_p = [[0usize; 16]; 5];
             let mut small_p_len = [0u8; 5];
             let mut small_p_hash = [0u64; 5];
+            let mut small_p_extracted = [false; 5];
             let mut small_used_val = [0u32; 5];
             let mut small_is_exact = [false; 5];
             let mut all_exact = true;
@@ -2247,32 +2253,31 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             for i in 0..num_eval {
                 let entry = unsafe { *local_counts_ptr.add(i) };
                 let p_len = entry.1 as usize;
-                let r_target = entry.0;
-                let mut p_idx = 0;
-                let mut p_hash = 0u64;
-                let set_ptr = set.as_ptr();
-                let zobrist_ptr = self.matrix.zobrist.as_ptr();
-                for cand_idx in 0..c_len {
-                    let c = unsafe { *set_ptr.add(cand_idx) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
-                    if r == r_target {
-                        small_p[i][p_idx] = c;
-                        p_hash ^= unsafe { *zobrist_ptr.add(c) };
-                        p_idx += 1;
-                        if p_idx == p_len {
-                            break;
-                        }
-                    }
-                }
+                let p_hash = entry.2;
                 small_p_len[i] = p_len as u8;
                 small_p_hash[i] = p_hash;
-                let p_slice = &small_p[i][..p_len];
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let (used_val, is_exact) =
                     if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
                         self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
                         (cached_val.max(initial_lb), is_exact)
                     } else {
+                        let r_target = entry.0;
+                        let mut p_idx = 0;
+                        let set_ptr = set.as_ptr();
+                        for cand_idx in 0..c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                            if r == r_target {
+                                small_p[i][p_idx] = c;
+                                p_idx += 1;
+                                if p_idx == p_len {
+                                    break;
+                                }
+                            }
+                        }
+                        small_p_extracted[i] = true;
+                        let p_slice = &small_p[i][..p_len];
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
                         let used_val = quick_val.max(initial_lb);
@@ -2307,6 +2312,24 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
                 let p_len = small_p_len[i] as usize;
+                if !small_p_extracted[i] {
+                    let entry = unsafe { *local_counts_ptr.add(i) };
+                    let r_target = entry.0;
+                    let mut p_idx = 0;
+                    let set_ptr = set.as_ptr();
+                    for cand_idx in 0..c_len {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                        if r == r_target {
+                            small_p[i][p_idx] = c;
+                            p_idx += 1;
+                            if p_idx == p_len {
+                                break;
+                            }
+                        }
+                    }
+                    small_p_extracted[i] = true;
+                }
                 let p_slice = &small_p[i][..p_len];
                 let p_hash = small_p_hash[i];
                 let used_val = small_used_val[i];
