@@ -828,6 +828,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                         for i in 0..n {
                             let c = unsafe { *bucket_ptr.add(i) };
+                            if c == ci {
+                                continue;
+                            }
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
@@ -862,6 +865,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                         for i in 0..n {
                             let c = unsafe { *bucket_ptr.add(i) };
+                            if c == ci {
+                                continue;
+                            }
                             let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                             let mut duplicate = false;
                             for &prev in &seen[..seen_len] {
