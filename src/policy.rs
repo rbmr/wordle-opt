@@ -801,6 +801,7 @@ impl<'a> OptimalPolicy<'a> {
                 .map(|(i, &(g, _, base_lb))| (i + 1, g, base_lb))
                 .collect();
 
+            const CHUNK_SIZE: usize = 4;
             let next = AtomicUsize::new(0);
             (0..rayon::current_num_threads())
                 .into_par_iter()
@@ -818,42 +819,48 @@ impl<'a> OptimalPolicy<'a> {
                     );
 
                     loop {
-                        let i = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(&(orig_idx, g, base_lb)) = filtered_active.get(i) else {
+                        let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
+                        if start_idx >= filtered_active.len() {
                             break;
-                        };
-
-                        let best_packed = global_best.load(Ordering::Relaxed);
-                        let best_val = (best_packed >> 32) as u32;
-                        let best_idx = (best_packed & 0xFFFFFFFF) as usize;
-                        let guess_beta = if orig_idx < best_idx {
-                            best_val + 1
-                        } else {
-                            best_val
-                        };
-
-                        if base_lb >= guess_beta {
-                            continue;
                         }
+                        let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
 
-                        let v = solver.min_guess_val(
-                            candidates,
-                            self.all_guesses_bits,
-                            g,
-                            guess_beta,
-                            1,
-                            self.max_k,
-                        );
-                        self.metrics
-                            .root_guesses_done
-                            .fetch_add(1, Ordering::Relaxed);
+                        for i in start_idx..end_idx {
+                            let (orig_idx, g, base_lb) =
+                                unsafe { *filtered_active.get_unchecked(i) };
 
-                        if v < guess_beta {
-                            let packed = ((v as u64) << 32) | (orig_idx as u64);
-                            let old = global_best.fetch_min(packed, Ordering::Relaxed);
-                            let old_val = (old >> 32) as u32;
-                            if v < old_val {
-                                global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                            let best_packed = global_best.load(Ordering::Relaxed);
+                            let best_val = (best_packed >> 32) as u32;
+                            let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                            let guess_beta = if orig_idx < best_idx {
+                                best_val + 1
+                            } else {
+                                best_val
+                            };
+
+                            if base_lb >= guess_beta {
+                                continue;
+                            }
+
+                            let v = solver.min_guess_val(
+                                candidates,
+                                self.all_guesses_bits,
+                                g,
+                                guess_beta,
+                                1,
+                                self.max_k,
+                            );
+                            self.metrics
+                                .root_guesses_done
+                                .fetch_add(1, Ordering::Relaxed);
+
+                            if v < guess_beta {
+                                let packed = ((v as u64) << 32) | (orig_idx as u64);
+                                let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                                let old_val = (old >> 32) as u32;
+                                if v < old_val {
+                                    global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                                }
                             }
                         }
                     }
