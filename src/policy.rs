@@ -129,6 +129,35 @@ pub(crate) fn active_guesses(
                     for &g in chunk {
                         let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
                         let mut i = 0;
+                        while i + 7 < c_len {
+                            let c0 = unsafe { *c_ptr.add(i) };
+                            let c1 = unsafe { *c_ptr.add(i + 1) };
+                            let c2 = unsafe { *c_ptr.add(i + 2) };
+                            let c3 = unsafe { *c_ptr.add(i + 3) };
+                            let c4 = unsafe { *c_ptr.add(i + 4) };
+                            let c5 = unsafe { *c_ptr.add(i + 5) };
+                            let c6 = unsafe { *c_ptr.add(i + 6) };
+                            let c7 = unsafe { *c_ptr.add(i + 7) };
+                            let r0 = unsafe { *g_ptr.add(c0) as usize };
+                            let r1 = unsafe { *g_ptr.add(c1) as usize };
+                            let r2 = unsafe { *g_ptr.add(c2) as usize };
+                            let r3 = unsafe { *g_ptr.add(c3) as usize };
+                            let r4 = unsafe { *g_ptr.add(c4) as usize };
+                            let r5 = unsafe { *g_ptr.add(c5) as usize };
+                            let r6 = unsafe { *g_ptr.add(c6) as usize };
+                            let r7 = unsafe { *g_ptr.add(c7) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) += 1;
+                                *counts_ptr.add(r1) += 1;
+                                *counts_ptr.add(r2) += 1;
+                                *counts_ptr.add(r3) += 1;
+                                *counts_ptr.add(r4) += 1;
+                                *counts_ptr.add(r5) += 1;
+                                *counts_ptr.add(r6) += 1;
+                                *counts_ptr.add(r7) += 1;
+                            }
+                            i += 8;
+                        }
                         while i + 3 < c_len {
                             let c0 = unsafe { *c_ptr.add(i) };
                             let c1 = unsafe { *c_ptr.add(i + 1) };
@@ -258,6 +287,27 @@ pub(crate) fn active_guesses(
 
             for g in surviving_guesses {
                 let mut i = 0;
+                while i + 7 < c_len {
+                    let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
+                    let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) as usize };
+                    let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) as usize };
+                    let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) as usize };
+                    let r4 = unsafe { *(*stack_c_ptrs_ptr.add(i + 4)).add(g) as usize };
+                    let r5 = unsafe { *(*stack_c_ptrs_ptr.add(i + 5)).add(g) as usize };
+                    let r6 = unsafe { *(*stack_c_ptrs_ptr.add(i + 6)).add(g) as usize };
+                    let r7 = unsafe { *(*stack_c_ptrs_ptr.add(i + 7)).add(g) as usize };
+                    unsafe {
+                        *counts_ptr.add(r0) += 1;
+                        *counts_ptr.add(r1) += 1;
+                        *counts_ptr.add(r2) += 1;
+                        *counts_ptr.add(r3) += 1;
+                        *counts_ptr.add(r4) += 1;
+                        *counts_ptr.add(r5) += 1;
+                        *counts_ptr.add(r6) += 1;
+                        *counts_ptr.add(r7) += 1;
+                    }
+                    i += 8;
+                }
                 while i + 3 < c_len {
                     let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
                     let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) as usize };
