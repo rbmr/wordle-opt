@@ -2094,17 +2094,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
         if c_len <= 16 {
-            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16, u64); 16]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16, u64);
+            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16); 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16);
             let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let set_ptr = set.as_ptr();
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let c0 = unsafe { *set_ptr };
             let r0 = unsafe { (*g_ptr.add(c0)).to_usize() as u16 };
-            let z0 = unsafe { *zobrist_ptr.add(c0) };
             unsafe {
-                *local_counts_ptr = (r0, 1, z0);
+                *local_counts_ptr = (r0, 1);
                 *c_responses_ptr = r0;
             }
             let mut num_non_empty = 1;
@@ -2115,11 +2113,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 unsafe {
                     *c_responses_ptr.add(cand_idx) = r;
                 }
-                let z = unsafe { *zobrist_ptr.add(c) };
                 let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
                 if prev_entry.0 == r {
                     prev_entry.1 += 1;
-                    prev_entry.2 ^= z;
                     continue;
                 }
                 let mut found = false;
@@ -2127,7 +2123,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let entry = unsafe { &mut *local_counts_ptr.add(i) };
                     if entry.0 == r {
                         entry.1 += 1;
-                        entry.2 ^= z;
                         prev_idx = i;
                         found = true;
                         break;
@@ -2136,7 +2131,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if !found {
                     prev_idx = num_non_empty;
                     unsafe {
-                        *local_counts_ptr.add(num_non_empty) = (r, 1, z);
+                        *local_counts_ptr.add(num_non_empty) = (r, 1);
                     }
                     num_non_empty += 1;
                 }
@@ -2150,7 +2145,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut max_p_len = 0;
 
             let mut num_eval = 0;
-            let mut eval_entries = [(0u16, 0u16, 0u64); 5];
+            let mut eval_entries = [(0u16, 0u16); 5];
 
             for i in 0..num_non_empty {
                 let entry = unsafe { *local_counts_ptr.add(i) };
@@ -2223,6 +2218,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let mut eval_hashes = [0u64; 5];
+            for cand_idx in 0..c_len {
+                let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                for j in 0..num_eval {
+                    if eval_entries[j].0 == r {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[j] ^= unsafe { *zobrist_ptr.add(c) };
+                        break;
+                    }
+                }
+            }
+
             let mut small_p = [[0usize; 16]; 5];
             let mut small_p_len = [0u8; 5];
             let mut small_p_hash = [0u64; 5];
@@ -2234,7 +2242,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             for i in 0..num_eval {
                 let entry = eval_entries[i];
                 let p_len = entry.1 as usize;
-                let p_hash = entry.2;
+                let p_hash = eval_hashes[i];
                 small_p_len[i] = p_len as u8;
                 small_p_hash[i] = p_hash;
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
