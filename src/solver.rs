@@ -817,7 +817,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if M <= 4 {
                     let bucket_ptr = bucket.as_ptr();
                     let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
-                    for &ci in bucket {
+                    for (idx, &ci) in bucket.iter().enumerate() {
                         let gi = unsafe { *cand_to_guess_ptr.add(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
@@ -827,21 +827,24 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
                         for i in 0..n {
-                            let c = unsafe { *bucket_ptr.add(i) };
-                            if c == ci {
+                            if i == idx {
                                 continue;
                             }
+                            let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             let word_idx = r >> 6;
                             let bit = 1u64 << (r & 63);
-                            let word = unsafe { &mut *seen_ptr.add(word_idx) };
-                            if (*word & bit) != 0 {
+                            let word_ptr = unsafe { seen_ptr.add(word_idx) };
+                            let word_val = unsafe { *word_ptr };
+                            if (word_val & bit) != 0 {
                                 collisions += 1;
                                 if collisions >= max_collisions {
                                     break;
                                 }
                             } else {
-                                *word |= bit;
+                                unsafe {
+                                    *word_ptr = word_val | bit;
+                                }
                             }
                         }
 
@@ -854,8 +857,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 } else {
                     let bucket_ptr = bucket.as_ptr();
-                    for &ci in bucket {
-                        let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
+                    let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+                    for (idx, &ci) in bucket.iter().enumerate() {
+                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
                         let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
                         let mut seen = [0u16; 16];
@@ -864,10 +868,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
                         for i in 0..n {
-                            let c = unsafe { *bucket_ptr.add(i) };
-                            if c == ci {
+                            if i == idx {
                                 continue;
                             }
+                            let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
                             let mut duplicate = false;
                             for &prev in &seen[..seen_len] {
@@ -2344,6 +2348,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if small_is_exact[i] {
                     continue;
                 }
+                let used_val = small_used_val[i];
+                let b = cost - used_val;
+                let new_beta = beta.saturating_sub(b);
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let effective_beta =
+                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                if effective_beta == 0 {
+                    return cost;
+                }
+
                 let p_len = small_p_len[i] as usize;
                 if !small_p_extracted[i] {
                     let entry = eval_entries[i];
@@ -2365,17 +2380,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let p_slice = &small_p[i][..p_len];
                 let p_hash = small_p_hash[i];
-                let used_val = small_used_val[i];
-
-                let b = cost - used_val;
-                let new_beta = beta - b;
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let effective_beta =
-                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
-
-                if effective_beta == 0 {
-                    return cost;
-                }
 
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
