@@ -2424,6 +2424,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     max_p_len = p_len;
                 }
                 cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                if p_len > 2 {
+                    unsafe {
+                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
+                    }
+                    num_eval += 1;
+                }
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -2436,20 +2442,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             if max_p_len <= 2 {
                 return cost;
-            }
-
-            for i in 0..num_non_empty_local {
-                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                if r_idx == WIN {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                if p_len > 2 {
-                    unsafe {
-                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
-                    }
-                    num_eval += 1;
-                }
             }
 
             let split_idx = if num_eval == 1 {
