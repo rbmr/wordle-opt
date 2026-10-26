@@ -2389,7 +2389,37 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut num_non_empty_local = 0usize;
             let set_ptr = set.as_ptr();
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            for i in 0..c_len {
+            let mut i = 0;
+            while i + 1 < c_len {
+                let c0 = unsafe { *set_ptr.add(i) };
+                let c1 = unsafe { *set_ptr.add(i + 1) };
+                let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                let z0 = unsafe { *zobrist_ptr.add(c0) };
+                let z1 = unsafe { *zobrist_ptr.add(c1) };
+
+                unsafe {
+                    let cnt_ptr0 = counts_ptr.add(r0);
+                    let cnt0 = *cnt_ptr0;
+                    if cnt0 == 0 {
+                        *non_empty_indices_ptr.add(num_non_empty_local) = r0 as u16;
+                        num_non_empty_local += 1;
+                    }
+                    *cnt_ptr0 = cnt0 + 1;
+                    *hashes_ptr.add(r0) ^= z0;
+
+                    let cnt_ptr1 = counts_ptr.add(r1);
+                    let cnt1 = *cnt_ptr1;
+                    if cnt1 == 0 {
+                        *non_empty_indices_ptr.add(num_non_empty_local) = r1 as u16;
+                        num_non_empty_local += 1;
+                    }
+                    *cnt_ptr1 = cnt1 + 1;
+                    *hashes_ptr.add(r1) ^= z1;
+                }
+                i += 2;
+            }
+            if i < c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
                 unsafe {
@@ -2644,7 +2674,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let set_ptr = set.as_ptr();
-            for i in 0..c_len {
+            let mut i = 0;
+            while i + 1 < c_len {
+                let c0 = unsafe { *set_ptr.add(i) };
+                let c1 = unsafe { *set_ptr.add(i + 1) };
+                let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                unsafe {
+                    let pos_ptr0 = current_offsets_ptr.add(r0);
+                    let pos0 = *pos_ptr0 as usize;
+                    *sorted_set_ptr.add(pos0) = c0;
+                    *pos_ptr0 += 1;
+
+                    let pos_ptr1 = current_offsets_ptr.add(r1);
+                    let pos1 = *pos_ptr1 as usize;
+                    *sorted_set_ptr.add(pos1) = c1;
+                    *pos_ptr1 += 1;
+                }
+                i += 2;
+            }
+            if i < c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
                 let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
