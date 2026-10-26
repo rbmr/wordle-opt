@@ -94,6 +94,7 @@ pub struct SolverScratch {
     pub scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     pub scratch_hash_table: [Vec<u64>; 32],
     pub scratch_added_indices: [Vec<usize>; 32],
+    pub scratch_projs: [Vec<u64>; 32],
     pub scratch_active_bits: [Vec<u64>; 32],
     pub scratch_guess_counts: [Vec<u16>; 32],
     pub scratch_guess_hashes: [Vec<u64>; 32],
@@ -112,6 +113,7 @@ impl SolverScratch {
             scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
             scratch_hash_table: std::array::from_fn(|_| Vec::new()),
             scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
+            scratch_projs: std::array::from_fn(|_| Vec::new()),
             scratch_active_bits: std::array::from_fn(|_| Vec::new()),
             scratch_guess_counts: std::array::from_fn(|_| Vec::new()),
             scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
@@ -136,6 +138,9 @@ impl SolverScratch {
             }
             if self.scratch_sorted_sets[d].len() < num_guesses {
                 self.scratch_sorted_sets[d].resize(num_guesses, 0);
+            }
+            if self.scratch_projs[d].len() < num_guesses {
+                self.scratch_projs[d].resize(num_guesses, 0);
             }
             if self.scratch_hash_table[d].len() < table_len {
                 self.scratch_hash_table[d].resize(table_len, 0);
@@ -1025,6 +1030,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             added_indices.clear();
             let num_guesses = self.dict.guesses.len();
 
+            let projs = &mut scratch_ref.scratch_projs[depth];
+            let projs_raw_ptr = projs.as_ptr();
+
             let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
             let table_size = (((active_count + R as u32) * 2).next_power_of_two() as usize)
                 .clamp(1024, table.len());
@@ -1035,12 +1043,46 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
 
-            let mut c_base_ptrs = [data_cg_ptr; 40];
+            let mut c_vals = [0usize; 40];
             let mut z_vals = [0u64; 40];
             for c_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(c_idx) };
-                c_base_ptrs[c_idx] = unsafe { data_cg_ptr.add(c * num_guesses) };
+                c_vals[c_idx] = c;
                 z_vals[c_idx] = unsafe { *zobrist_ptr.add(c) };
+            }
+
+            let chunk_size = 512;
+            for chunk_start in (0..num_guesses).step_by(chunk_size) {
+                let chunk_end = (chunk_start + chunk_size).min(num_guesses);
+                let b_start = chunk_start / 64;
+                let b_end = chunk_end.div_ceil(64);
+                let mut has_active = false;
+                for b in b_start..b_end {
+                    if unsafe { *parent_active_guesses.get_unchecked(b) } != 0 {
+                        has_active = true;
+                        break;
+                    }
+                }
+                if !has_active {
+                    continue;
+                }
+
+                let projs_chunk = &mut projs[chunk_start..chunk_end];
+                projs_chunk.fill(0);
+                let chunk_len = chunk_end - chunk_start;
+                let projs_ptr = projs_chunk.as_mut_ptr();
+                for c_idx in 0..c_len {
+                    let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                    let z = unsafe { *z_vals.get_unchecked(c_idx) };
+                    let c_off = c * num_guesses + chunk_start;
+                    let c_ptr = unsafe { data_cg_ptr.add(c_off) };
+                    for i in 0..chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
+                        unsafe {
+                            *projs_ptr.add(i) ^= z.wrapping_mul(r + 1);
+                        }
+                    }
+                }
             }
 
             for r in 0..R {
@@ -1072,47 +1114,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let bits_ptr = bits.as_mut_ptr();
-            let mut projs_block = [0u64; 64];
-
             for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
                 if block == 0 {
                     continue;
                 }
-                projs_block.fill(0);
-                let chunk_start = block_idx * 64;
-                let chunk_len = 64.min(num_guesses.saturating_sub(chunk_start));
-
-                if chunk_len == 64 {
-                    for c_idx in 0..c_len {
-                        let c_ptr = unsafe { c_base_ptrs.get_unchecked(c_idx).add(chunk_start) };
-                        let z = unsafe { *z_vals.get_unchecked(c_idx) };
-                        for i in 0..64 {
-                            let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
-                            unsafe {
-                                *projs_block.get_unchecked_mut(i) ^= z.wrapping_mul(r + 1);
-                            }
-                        }
-                    }
-                } else {
-                    for c_idx in 0..c_len {
-                        let c_ptr = unsafe { c_base_ptrs.get_unchecked(c_idx).add(chunk_start) };
-                        let z = unsafe { *z_vals.get_unchecked(c_idx) };
-                        for i in 0..chunk_len {
-                            let r = unsafe { (*c_ptr.add(i)).to_usize() as u64 };
-                            unsafe {
-                                *projs_block.get_unchecked_mut(i) ^= z.wrapping_mul(r + 1);
-                            }
-                        }
-                    }
-                }
-
                 let mut b = block;
                 let mut kept_mask = 0u64;
                 while b != 0 {
                     let tz = b.trailing_zeros();
+                    let g = block_idx * 64 + tz as usize;
                     b &= b - 1;
 
-                    let proj = unsafe { *projs_block.get_unchecked(tz as usize) };
+                    let proj = unsafe { *projs_raw_ptr.add(g) };
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                     loop {
                         let slot = unsafe { *table_ptr.add(idx) };
