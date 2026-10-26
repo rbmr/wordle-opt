@@ -2,6 +2,14 @@
 use crate::core::Response;
 use crate::dict::Dictionary;
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Default)]
+pub struct GuessProfile {
+    pub mask: u32,
+    pub chars: [u8; 8],
+    pub _pad: [u8; 4],
+}
+
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
 ///
 /// The matrix is flattened into a 1D vector and stored in row-major order: `guess * num_candidates + candidate`.
@@ -14,6 +22,7 @@ pub struct ResponseMatrix {
     pub num_responses: usize,
     pub win_response: Response,
     pub guess_masks: Vec<u32>,
+    pub guess_profiles: Vec<GuessProfile>,
     pub candidate_masks: Vec<u32>,
     pub zobrist: Vec<u64>,
     pub data: Vec<Response>,
@@ -168,6 +177,15 @@ impl ResponseMatrix {
             candidate_dup_masks.push(dup);
         }
 
+        let mut guess_profiles = Vec::with_capacity(num_guesses);
+        for g in 0..num_guesses {
+            guess_profiles.push(GuessProfile {
+                mask: guess_masks[g],
+                chars: guess_profile_chars[g],
+                _pad: [0; 4],
+            });
+        }
+
         Self {
             num_guesses,
             num_candidates,
@@ -175,6 +193,7 @@ impl ResponseMatrix {
             num_responses,
             win_response,
             guess_masks,
+            guess_profiles,
             candidate_masks,
             zobrist,
             data,

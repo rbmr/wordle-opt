@@ -395,17 +395,16 @@ pub fn compute_max_branching_factor_seq_with_target(
             let tab2 = &m_tab[2];
             let tab3 = &m_tab[3];
             let tab4 = &m_tab[4];
-            for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
-                if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
+            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+                if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
-                let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let prod = unsafe {
-                    (*tab0.get_unchecked(chars[0] as usize) as u32)
-                        * (*tab1.get_unchecked(chars[1] as usize) as u32)
-                        * (*tab2.get_unchecked(chars[2] as usize) as u32)
-                        * (*tab3.get_unchecked(chars[3] as usize) as u32)
-                        * (*tab4.get_unchecked(chars[4] as usize) as u32)
+                    (*tab0.get_unchecked(p.chars[0] as usize) as u32)
+                        * (*tab1.get_unchecked(p.chars[1] as usize) as u32)
+                        * (*tab2.get_unchecked(p.chars[2] as usize) as u32)
+                        * (*tab3.get_unchecked(p.chars[3] as usize) as u32)
+                        * (*tab4.get_unchecked(p.chars[4] as usize) as u32)
                 };
                 if prod as usize <= max_k {
                     continue;
@@ -430,14 +429,13 @@ pub fn compute_max_branching_factor_seq_with_target(
         } else if has_profile {
             let non_c_mask = !active_letter_mask;
             let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
-            for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
-                if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
+            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+                if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
-                let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let mut prod = 1u32;
                 for i in 0..word_len {
-                    prod *= unsafe { *m_tab[i].get_unchecked(chars[i] as usize) as u32 };
+                    prod *= unsafe { *m_tab[i].get_unchecked(p.chars[i] as usize) as u32 };
                 }
                 if prod as usize <= max_k {
                     continue;
@@ -460,8 +458,8 @@ pub fn compute_max_branching_factor_seq_with_target(
                 }
             }
         } else {
-            for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
-                let overlap = g_mask & c_mask;
+            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+                let overlap = p.mask & c_mask;
                 if overlap == 0 {
                     continue;
                 }
@@ -504,20 +502,19 @@ pub fn compute_max_branching_factor_seq_with_target(
 
         let non_c_mask = !active_letter_mask;
         let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
-        for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
+        for (g, p) in matrix.guess_profiles.iter().enumerate() {
             if has_profile {
-                if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
+                if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
-                let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
                 let mut prod = 1u32;
                 for i in 0..word_len {
-                    prod *= unsafe { *m_tab[i].get_unchecked(chars[i] as usize) as u32 };
+                    prod *= unsafe { *m_tab[i].get_unchecked(p.chars[i] as usize) as u32 };
                 }
                 if prod as usize <= max_k {
                     continue;
                 }
-            } else if (g_mask & c_mask) == 0 {
+            } else if (p.mask & c_mask) == 0 {
                 continue;
             }
 
