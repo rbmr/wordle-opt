@@ -2143,8 +2143,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut cost = c_len as u32;
             let mut max_p_len = 0;
 
+            let mut num_eval = 0;
+            let mut eval_entries = [(0u16, 0u16, 0u64); 5];
+
             for i in 0..num_non_empty {
-                let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                let entry = unsafe { *local_counts_ptr.add(i) };
                 let r_idx = entry.0 as usize;
                 if r_idx == WIN {
                     continue;
@@ -2155,6 +2158,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 cost += lb;
+                if p_len > 2 {
+                    eval_entries[num_eval] = entry;
+                    num_eval += 1;
+                }
             }
 
             if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
@@ -2168,78 +2175,46 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            if num_non_empty == 2 {
-                let e0 = unsafe { *local_counts_ptr };
-                let e1 = unsafe { *local_counts_ptr.add(1) };
-                if e0.1 < e1.1 {
-                    unsafe {
-                        *local_counts_ptr = e1;
-                        *local_counts_ptr.add(1) = e0;
-                    }
+            if num_eval == 2 {
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
                 }
-            } else if num_non_empty == 3 {
-                let mut e0 = unsafe { *local_counts_ptr };
-                let mut e1 = unsafe { *local_counts_ptr.add(1) };
-                let mut e2 = unsafe { *local_counts_ptr.add(2) };
-                if e0.1 < e1.1 {
-                    std::mem::swap(&mut e0, &mut e1);
+            } else if num_eval == 3 {
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
                 }
-                if e1.1 < e2.1 {
-                    std::mem::swap(&mut e1, &mut e2);
+                if eval_entries[1].1 < eval_entries[2].1 {
+                    eval_entries.swap(1, 2);
                 }
-                if e0.1 < e1.1 {
-                    std::mem::swap(&mut e0, &mut e1);
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
                 }
-                unsafe {
-                    *local_counts_ptr = e0;
-                    *local_counts_ptr.add(1) = e1;
-                    *local_counts_ptr.add(2) = e2;
+            } else if num_eval == 4 {
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
                 }
-            } else if num_non_empty == 4 {
-                let mut e0 = unsafe { *local_counts_ptr };
-                let mut e1 = unsafe { *local_counts_ptr.add(1) };
-                let mut e2 = unsafe { *local_counts_ptr.add(2) };
-                let mut e3 = unsafe { *local_counts_ptr.add(3) };
-                if e0.1 < e1.1 {
-                    std::mem::swap(&mut e0, &mut e1);
+                if eval_entries[2].1 < eval_entries[3].1 {
+                    eval_entries.swap(2, 3);
                 }
-                if e2.1 < e3.1 {
-                    std::mem::swap(&mut e2, &mut e3);
+                if eval_entries[0].1 < eval_entries[2].1 {
+                    eval_entries.swap(0, 2);
                 }
-                if e0.1 < e2.1 {
-                    std::mem::swap(&mut e0, &mut e2);
+                if eval_entries[1].1 < eval_entries[3].1 {
+                    eval_entries.swap(1, 3);
                 }
-                if e1.1 < e3.1 {
-                    std::mem::swap(&mut e1, &mut e3);
+                if eval_entries[1].1 < eval_entries[2].1 {
+                    eval_entries.swap(1, 2);
                 }
-                if e1.1 < e2.1 {
-                    std::mem::swap(&mut e1, &mut e2);
-                }
-                unsafe {
-                    *local_counts_ptr = e0;
-                    *local_counts_ptr.add(1) = e1;
-                    *local_counts_ptr.add(2) = e2;
-                    *local_counts_ptr.add(3) = e3;
-                }
-            } else if num_non_empty > 4 {
-                for j in 1..num_non_empty {
-                    let key = unsafe { *local_counts_ptr.add(j) };
+            } else if num_eval == 5 {
+                for j in 1..5 {
+                    let key = eval_entries[j];
                     let mut k = j;
-                    while k > 0 && unsafe { (*local_counts_ptr.add(k - 1)).1 < key.1 } {
-                        unsafe {
-                            *local_counts_ptr.add(k) = *local_counts_ptr.add(k - 1);
-                        }
+                    while k > 0 && eval_entries[k - 1].1 < key.1 {
+                        eval_entries[k] = eval_entries[k - 1];
                         k -= 1;
                     }
-                    unsafe {
-                        *local_counts_ptr.add(k) = key;
-                    }
+                    eval_entries[k] = key;
                 }
-            }
-
-            let mut num_eval = 0;
-            while num_eval < num_non_empty && unsafe { (*local_counts_ptr.add(num_eval)).1 > 2 } {
-                num_eval += 1;
             }
 
             let mut small_p = [[0usize; 16]; 5];
@@ -2251,7 +2226,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut all_exact = true;
 
             for i in 0..num_eval {
-                let entry = unsafe { *local_counts_ptr.add(i) };
+                let entry = eval_entries[i];
                 let p_len = entry.1 as usize;
                 let p_hash = entry.2;
                 small_p_len[i] = p_len as u8;
@@ -2313,7 +2288,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 let p_len = small_p_len[i] as usize;
                 if !small_p_extracted[i] {
-                    let entry = unsafe { *local_counts_ptr.add(i) };
+                    let entry = eval_entries[i];
                     let r_target = entry.0;
                     let mut p_idx = 0;
                     let set_ptr = set.as_ptr();
