@@ -56,6 +56,39 @@ pub fn sort_guesses_by_expected_remaining(
     guesses.sort_by_cached_key(|&g| compute_expected_remaining(matrix, candidates, g));
 }
 
+#[inline(always)]
+fn combine_and_count_u8(mask: &[u64; 8]) -> usize {
+    let m0 = mask[0] | mask[4];
+    let m1 = mask[1] | mask[5];
+    let m2 = mask[2] | mask[6];
+    let m3 = mask[3] | mask[7];
+    (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
+}
+
+#[inline(always)]
+fn count_unique_responses_from_row_u8(g_ptr: *const u8, candidates: &[usize], mask: &mut [u64; 8]) {
+    let n = candidates.len();
+    let mut i = 0;
+    while i + 1 < n {
+        let c0 = unsafe { *candidates.get_unchecked(i) };
+        let c1 = unsafe { *candidates.get_unchecked(i + 1) };
+        let r0 = unsafe { *g_ptr.add(c0) as usize };
+        let r1 = unsafe { *g_ptr.add(c1) as usize };
+        unsafe {
+            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask.get_unchecked_mut(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+        }
+        i += 2;
+    }
+    if i < n {
+        let c0 = unsafe { *candidates.get_unchecked(i) };
+        let r0 = unsafe { *g_ptr.add(c0) as usize };
+        unsafe {
+            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+        }
+    }
+}
+
 /// Computes the maximum number of distinct response patterns (branches)
 /// that ANY guess can generate across the given candidate set.
 ///
@@ -71,17 +104,9 @@ pub fn compute_max_branching_factor(
             .into_par_iter()
             .map(|g| {
                 let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
-                let mut mask = [0u64; 4];
-                for &c in candidates {
-                    let r = unsafe { *g_ptr.add(c) as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-                (mask[0].count_ones()
-                    + mask[1].count_ones()
-                    + mask[2].count_ones()
-                    + mask[3].count_ones()) as usize
+                let mut mask = [0u64; 8];
+                count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
+                combine_and_count_u8(&mask)
             })
             .max()
             .unwrap_or(0)
@@ -121,17 +146,9 @@ pub fn compute_candidate_branching_factor_with_target(
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
-            let mut mask = [0u64; 4];
-            for &other in candidates {
-                let r = unsafe { *g_ptr.add(other) as usize };
-                unsafe {
-                    *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                }
-            }
-            let k: usize = (mask[0].count_ones()
-                + mask[1].count_ones()
-                + mask[2].count_ones()
-                + mask[3].count_ones()) as usize;
+            let mut mask = [0u64; 8];
+            count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
+            let k = combine_and_count_u8(&mask);
             if k > max_k {
                 max_k = k;
                 if max_k >= effective_target {
@@ -252,15 +269,6 @@ fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 8]) 
             *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
         }
     }
-}
-
-#[inline(always)]
-fn combine_and_count_u8(mask: &[u64; 8]) -> usize {
-    let m0 = mask[0] | mask[4];
-    let m1 = mask[1] | mask[5];
-    let m2 = mask[2] | mask[6];
-    let m3 = mask[3] | mask[7];
-    (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
 }
 
 pub fn compute_max_branching_factor_seq_with_target(
