@@ -225,19 +225,27 @@ pub(crate) fn active_guesses(
     } else {
         let mut out = Vec::with_capacity(surviving_guesses.len());
         let cap_bounds_ptr = cap_bounds.as_ptr();
-        let num_candidates = matrix.num_candidates;
+        let num_guesses = matrix.num_guesses;
 
         if matrix.num_responses <= 256 {
-            let data_ptr = matrix.data_u8.as_ptr();
+            let data_c_g_ptr = matrix.data_c_g_u8.as_ptr();
+            let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const u8; 48]>::uninit();
+            let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const u8;
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
+            }
+            let c_ptrs = unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, candidates.len()) };
+
             let mut counts = [0u16; 256];
             let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 256]>::uninit();
             let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
 
             for g in surviving_guesses {
-                let g_row = unsafe { data_ptr.add(g * num_candidates) };
                 let mut num_non_empty = 0;
-                for &c in candidates {
-                    let r = unsafe { *g_row.add(c) as usize };
+                for &c_base in c_ptrs {
+                    let r = unsafe { *c_base.add(g) as usize };
                     let cnt = unsafe { *counts.get_unchecked(r) };
                     if cnt == 0 {
                         unsafe {
@@ -274,16 +282,25 @@ pub(crate) fn active_guesses(
                 out.push((g, expected_rem, base_lb));
             }
         } else {
-            let data_ptr = matrix.data.as_ptr();
+            let data_c_g_ptr = matrix.data_c_g.as_ptr();
+            let mut stack_c_ptrs =
+                std::mem::MaybeUninit::<[*const crate::core::Response; 48]>::uninit();
+            let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
+            }
+            let c_ptrs = unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, candidates.len()) };
+
             let mut counts = [0u16; 2187];
             let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
             let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
 
             for g in surviving_guesses {
-                let g_row = unsafe { data_ptr.add(g * num_candidates) };
                 let mut num_non_empty = 0;
-                for &c in candidates {
-                    let r = unsafe { (*g_row.add(c)).0 as usize };
+                for &c_base in c_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
                     let cnt = unsafe { *counts.get_unchecked(r) };
                     if cnt == 0 {
                         unsafe {

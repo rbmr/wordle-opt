@@ -1592,9 +1592,35 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
-                let num_candidates = self.dict.candidates.len();
-                let data_ptr = self.matrix.data_ptr::<Elem>();
+                let num_guesses = self.dict.guesses.len();
+                let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
+                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
+                let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
+                let heap_c_ptrs = if c_len > 256 {
+                    let mut v = Vec::with_capacity(c_len);
+                    let set_ptr = set.as_ptr();
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+                let c_ptrs: &[*const Elem] = if c_len <= 256 {
+                    let set_ptr = set.as_ptr();
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        unsafe {
+                            *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                        }
+                    }
+                    unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
+                } else {
+                    heap_c_ptrs.as_ref().unwrap()
+                };
 
+                let c_ptrs_ptr = c_ptrs.as_ptr();
                 'guess_loop: for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
                     if block == 0 {
                         continue;
@@ -1611,13 +1637,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             continue;
                         }
 
-                        let g_ptr = unsafe { data_ptr.add(g * num_candidates) };
                         let mut num_non_empty = 0;
                         let mut duplicates = 0;
                         let mut aborted = false;
                         for c_idx in 0..c_len {
-                            let c = unsafe { *set_ptr.add(c_idx) };
-                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                            let r = unsafe { (*c_base.add(g)).to_usize() };
                             unsafe {
                                 let cnt_ptr = counts_ptr.add(r);
                                 let cnt = *cnt_ptr;
