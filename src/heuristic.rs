@@ -357,18 +357,33 @@ pub fn compute_max_branching_factor_seq_with_target(
             let tab2 = &m_tab[2];
             let tab3 = &m_tab[3];
             let tab4 = &m_tab[4];
+            let mut cutoff0 = (max_k / 81) as u32;
+            let mut cutoff1 = (max_k / 27) as u32;
+            let mut cutoff2 = (max_k / 9) as u32;
+            let mut cutoff3 = (max_k / 3) as u32;
+
             for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
                 if (g_mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
                 let chars = unsafe { matrix.guess_profile_chars.get_unchecked(g) };
-                let prod = unsafe {
-                    (*tab0.get_unchecked(chars[0] as usize) as u32)
-                        * (*tab1.get_unchecked(chars[1] as usize) as u32)
-                        * (*tab2.get_unchecked(chars[2] as usize) as u32)
-                        * (*tab3.get_unchecked(chars[3] as usize) as u32)
-                        * (*tab4.get_unchecked(chars[4] as usize) as u32)
-                };
+                let t0 = unsafe { *tab0.get_unchecked(chars[0] as usize) as u32 };
+                if t0 <= cutoff0 {
+                    continue;
+                }
+                let p01 = t0 * unsafe { *tab1.get_unchecked(chars[1] as usize) as u32 };
+                if p01 <= cutoff1 {
+                    continue;
+                }
+                let p012 = p01 * unsafe { *tab2.get_unchecked(chars[2] as usize) as u32 };
+                if p012 <= cutoff2 {
+                    continue;
+                }
+                let p0123 = p012 * unsafe { *tab3.get_unchecked(chars[3] as usize) as u32 };
+                if p0123 <= cutoff3 {
+                    continue;
+                }
+                let prod = p0123 * unsafe { *tab4.get_unchecked(chars[4] as usize) as u32 };
                 if prod as usize <= max_k {
                     continue;
                 }
@@ -403,6 +418,10 @@ pub fn compute_max_branching_factor_seq_with_target(
                         break;
                     }
                     min_non_overlap = min_non_overlap_for_len(5, max_k);
+                    cutoff0 = (max_k / 81) as u32;
+                    cutoff1 = (max_k / 27) as u32;
+                    cutoff2 = (max_k / 9) as u32;
+                    cutoff3 = (max_k / 3) as u32;
                 }
             }
         } else if has_profile {
