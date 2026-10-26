@@ -73,38 +73,8 @@ fn count_unique_responses_from_row_u8(
 ) {
     let n = candidates.len();
     let mut c_it = candidates.as_ptr();
-    let c_end8 = unsafe { c_it.add(n & !7) };
+    let c_end4 = unsafe { c_it.add(n & !3) };
     let mask_ptr = mask.as_mut_ptr();
-    while c_it < c_end8 {
-        let c0 = unsafe { *c_it };
-        let c1 = unsafe { *c_it.add(1) };
-        let c2 = unsafe { *c_it.add(2) };
-        let c3 = unsafe { *c_it.add(3) };
-        let c4 = unsafe { *c_it.add(4) };
-        let c5 = unsafe { *c_it.add(5) };
-        let c6 = unsafe { *c_it.add(6) };
-        let c7 = unsafe { *c_it.add(7) };
-        let r0 = unsafe { *g_ptr.add(c0) as usize };
-        let r1 = unsafe { *g_ptr.add(c1) as usize };
-        let r2 = unsafe { *g_ptr.add(c2) as usize };
-        let r3 = unsafe { *g_ptr.add(c3) as usize };
-        let r4 = unsafe { *g_ptr.add(c4) as usize };
-        let r5 = unsafe { *g_ptr.add(c5) as usize };
-        let r6 = unsafe { *g_ptr.add(c6) as usize };
-        let r7 = unsafe { *g_ptr.add(c7) as usize };
-        unsafe {
-            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
-            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
-            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
-            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
-            *mask_ptr.add(r4 >> 6) |= 1u64 << (r4 & 63);
-            *mask_ptr.add(4 + (r5 >> 6)) |= 1u64 << (r5 & 63);
-            *mask_ptr.add(8 + (r6 >> 6)) |= 1u64 << (r6 & 63);
-            *mask_ptr.add(12 + (r7 >> 6)) |= 1u64 << (r7 & 63);
-            c_it = c_it.add(8);
-        }
-    }
-    let c_end4 = unsafe { candidates.as_ptr().add(n & !3) };
     while c_it < c_end4 {
         let c0 = unsafe { *c_it };
         let c1 = unsafe { *c_it.add(1) };
@@ -298,38 +268,8 @@ fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
 fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 16]) {
     let n = ptrs.len();
     let mut p_it = ptrs.as_ptr();
-    let p_end8 = unsafe { p_it.add(n & !7) };
+    let p_end4 = unsafe { p_it.add(n & !3) };
     let mask_ptr = mask.as_mut_ptr();
-    while p_it < p_end8 {
-        let c_ptr0 = unsafe { *p_it };
-        let c_ptr1 = unsafe { *p_it.add(1) };
-        let c_ptr2 = unsafe { *p_it.add(2) };
-        let c_ptr3 = unsafe { *p_it.add(3) };
-        let c_ptr4 = unsafe { *p_it.add(4) };
-        let c_ptr5 = unsafe { *p_it.add(5) };
-        let c_ptr6 = unsafe { *p_it.add(6) };
-        let c_ptr7 = unsafe { *p_it.add(7) };
-        let r0 = unsafe { *c_ptr0.add(g) as usize };
-        let r1 = unsafe { *c_ptr1.add(g) as usize };
-        let r2 = unsafe { *c_ptr2.add(g) as usize };
-        let r3 = unsafe { *c_ptr3.add(g) as usize };
-        let r4 = unsafe { *c_ptr4.add(g) as usize };
-        let r5 = unsafe { *c_ptr5.add(g) as usize };
-        let r6 = unsafe { *c_ptr6.add(g) as usize };
-        let r7 = unsafe { *c_ptr7.add(g) as usize };
-        unsafe {
-            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
-            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
-            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
-            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
-            *mask_ptr.add(r4 >> 6) |= 1u64 << (r4 & 63);
-            *mask_ptr.add(4 + (r5 >> 6)) |= 1u64 << (r5 & 63);
-            *mask_ptr.add(8 + (r6 >> 6)) |= 1u64 << (r6 & 63);
-            *mask_ptr.add(12 + (r7 >> 6)) |= 1u64 << (r7 & 63);
-            p_it = p_it.add(8);
-        }
-    }
-    let p_end4 = unsafe { ptrs.as_ptr().add(n & !3) };
     while p_it < p_end4 {
         let c_ptr0 = unsafe { *p_it };
         let c_ptr1 = unsafe { *p_it.add(1) };
