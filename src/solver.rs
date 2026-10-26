@@ -2358,13 +2358,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
             let mut num_eval = 0;
 
-            let has_hashes = std::cell::Cell::new(false);
             struct GuessCleanup<'a> {
                 counts_ptr: *mut u16,
                 hashes_ptr: *mut u64,
                 non_empty_indices_ptr: *const u16,
                 num_non_empty: &'a std::cell::Cell<usize>,
-                has_hashes: &'a std::cell::Cell<bool>,
             }
 
             impl<'a> Drop for GuessCleanup<'a> {
@@ -2372,13 +2370,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 fn drop(&mut self) {
                     unsafe {
                         let n_non_empty = self.num_non_empty.get();
-                        let clean_hashes = self.has_hashes.get();
                         for i in 0..n_non_empty {
                             let r = *self.non_empty_indices_ptr.add(i) as usize;
                             *self.counts_ptr.add(r) = 0;
-                            if clean_hashes {
-                                *self.hashes_ptr.add(r) = 0;
-                            }
+                            *self.hashes_ptr.add(r) = 0;
                         }
                     }
                 }
@@ -2389,11 +2384,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 hashes_ptr,
                 non_empty_indices_ptr,
                 num_non_empty: &num_non_empty,
-                has_hashes: &has_hashes,
             };
 
             let mut num_non_empty_local = 0usize;
             let set_ptr = set.as_ptr();
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             for i in 0..c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
@@ -2405,6 +2400,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         num_non_empty_local += 1;
                     }
                     *cnt_ptr = cnt + 1;
+                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
                 }
             }
             num_non_empty.set(num_non_empty_local);
@@ -2581,16 +2577,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 split
             };
-
-            has_hashes.set(true);
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            for i in 0..c_len {
-                let c = unsafe { *set_ptr.add(i) };
-                let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                unsafe {
-                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
-                }
-            }
 
             let mut exact_mask = [0u64; M];
             let mut cached_mask = [0u64; M];
