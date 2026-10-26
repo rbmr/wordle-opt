@@ -114,55 +114,69 @@ pub(crate) fn active_guesses(
     let cap_bounds = &capacity_bounds_2d[max_k];
     let mut out: Vec<(usize, u32, u32)> = if candidates.len() >= 48 {
         if matrix.num_responses <= 256 {
+            let win_response = matrix.win_response.0 as usize;
+            let c_len = candidates.len();
             surviving_guesses
                 .par_chunks(256)
                 .flat_map_iter(|chunk| {
+                    let c_ptr = candidates.as_ptr();
                     let mut counts = [0u16; 256];
-                    let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 256]>::uninit();
-                    let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+                    let counts_ptr = counts.as_mut_ptr();
                     let cap_bounds_ptr = cap_bounds.as_ptr();
                     let matrix_data_ptr = matrix.data_u8.as_ptr();
                     let mut chunk_out = Vec::with_capacity(chunk.len());
 
                     for &g in chunk {
                         let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
-                        let mut num_non_empty = 0;
-                        for &c in candidates {
-                            let r = unsafe { *g_ptr.add(c) as usize };
-                            let cnt = unsafe { *counts.get_unchecked(r) };
-                            if cnt == 0 {
-                                unsafe {
-                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                }
-                                num_non_empty += 1;
-                            }
+                        let mut i = 0;
+                        while i + 3 < c_len {
+                            let c0 = unsafe { *c_ptr.add(i) };
+                            let c1 = unsafe { *c_ptr.add(i + 1) };
+                            let c2 = unsafe { *c_ptr.add(i + 2) };
+                            let c3 = unsafe { *c_ptr.add(i + 3) };
+                            let r0 = unsafe { *g_ptr.add(c0) as usize };
+                            let r1 = unsafe { *g_ptr.add(c1) as usize };
+                            let r2 = unsafe { *g_ptr.add(c2) as usize };
+                            let r3 = unsafe { *g_ptr.add(c3) as usize };
                             unsafe {
-                                *counts.get_unchecked_mut(r) = cnt + 1;
+                                *counts_ptr.add(r0) += 1;
+                                *counts_ptr.add(r1) += 1;
+                                *counts_ptr.add(r2) += 1;
+                                *counts_ptr.add(r3) += 1;
                             }
+                            i += 4;
                         }
-                        if num_non_empty <= 1 {
-                            for i in 0..num_non_empty {
-                                let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                                unsafe {
-                                    *counts.get_unchecked_mut(r) = 0;
-                                }
+                        while i < c_len {
+                            let c = unsafe { *c_ptr.add(i) };
+                            let r = unsafe { *g_ptr.add(c) as usize };
+                            unsafe {
+                                *counts_ptr.add(r) += 1;
                             }
-                            continue;
+                            i += 1;
                         }
+
+                        let mut num_non_empty = 0;
                         let mut expected_rem = 0u32;
-                        let mut base_lb = candidates.len() as u32;
-                        for i in 0..num_non_empty {
-                            let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                            let v = unsafe { *counts.get_unchecked(r) as usize };
+                        let mut base_lb = c_len as u32;
+
+                        for r in 0..256 {
+                            let v = unsafe { *counts_ptr.add(r) as usize };
+                            if v == 0 {
+                                continue;
+                            }
+                            num_non_empty += 1;
                             expected_rem += (v as u32) * (v as u32);
-                            if r != matrix.win_response.0 as usize {
+                            if r != win_response {
                                 base_lb += unsafe { *cap_bounds_ptr.add(v) };
                             }
                             unsafe {
-                                *counts.get_unchecked_mut(r) = 0;
+                                *counts_ptr.add(r) = 0;
                             }
                         }
-                        chunk_out.push((g, expected_rem, base_lb));
+
+                        if num_non_empty > 1 {
+                            chunk_out.push((g, expected_rem, base_lb));
+                        }
                     }
                     chunk_out
                 })
