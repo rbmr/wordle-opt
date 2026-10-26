@@ -2096,6 +2096,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         if c_len <= 16 {
             let mut local_counts = std::mem::MaybeUninit::<[(u16, u16, u64); 16]>::uninit();
             let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16, u64);
+            let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
+            let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let set_ptr = set.as_ptr();
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let c0 = unsafe { *set_ptr };
@@ -2103,12 +2105,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let z0 = unsafe { *zobrist_ptr.add(c0) };
             unsafe {
                 *local_counts_ptr = (r0, 1, z0);
+                *c_responses_ptr = r0;
             }
             let mut num_non_empty = 1;
             let mut prev_idx = 0usize;
             for cand_idx in 1..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                unsafe {
+                    *c_responses_ptr.add(cand_idx) = r;
+                }
                 let z = unsafe { *zobrist_ptr.add(c) };
                 let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
                 if prev_entry.0 == r {
@@ -2241,9 +2247,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut p_idx = 0;
                         let set_ptr = set.as_ptr();
                         for cand_idx in 0..c_len {
-                            let c = unsafe { *set_ptr.add(cand_idx) };
-                            let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                            let r = unsafe { *c_responses_ptr.add(cand_idx) };
                             if r == r_target {
+                                let c = unsafe { *set_ptr.add(cand_idx) };
                                 small_p[i][p_idx] = c;
                                 p_idx += 1;
                                 if p_idx == p_len {
@@ -2293,9 +2299,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut p_idx = 0;
                     let set_ptr = set.as_ptr();
                     for cand_idx in 0..c_len {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                        let r = unsafe { *c_responses_ptr.add(cand_idx) };
                         if r == r_target {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
                             small_p[i][p_idx] = c;
                             p_idx += 1;
                             if p_idx == p_len {
