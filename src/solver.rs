@@ -25,6 +25,20 @@ impl std::borrow::Borrow<[usize]> for CandidateSet {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+struct EvalEntry {
+    p_len: u16,
+    r_idx: u16,
+}
+
+impl EvalEntry {
+    #[inline(always)]
+    fn should_swap(a: Self, b: Self) -> bool {
+        a.p_len < b.p_len || (a.p_len == b.p_len && a.r_idx > b.r_idx)
+    }
+}
+
 /// Instrumentation counters for a single `Solver::solve` run, used for
 /// benchmarking and progress reporting. Not part of the solving logic itself.
 /// Counters to measure the performance and branching factor of the search.
@@ -2354,8 +2368,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut non_empty_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
             let num_non_empty = std::cell::Cell::new(0usize);
-            let mut eval_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
-            let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
+            let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; R]>::uninit();
+            let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
             let mut num_eval = 0;
 
             struct GuessCleanup<'a> {
@@ -2424,7 +2438,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 if p_len > 2 {
                     unsafe {
-                        *eval_indices_ptr.add(num_eval) = r_idx as u16;
+                        *eval_entries_ptr.add(num_eval) = EvalEntry {
+                            p_len: p_len as u16,
+                            r_idx: r_idx as u16,
+                        };
                     }
                     num_eval += 1;
                 }
@@ -2443,57 +2460,44 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let split_idx = if num_eval == 1 {
-                let r0 = unsafe { *eval_indices_ptr as usize };
-                if unsafe { *counts_ptr.add(r0) > 15 } {
-                    1
-                } else {
-                    0
-                }
+                let e0 = unsafe { *eval_entries_ptr };
+                if e0.p_len > 15 { 1 } else { 0 }
             } else if num_eval == 2 {
-                let mut r0 = unsafe { *eval_indices_ptr };
-                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
-                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
-                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
-                if c0 < c1 || (c0 == c1 && r0 > r1) {
-                    std::mem::swap(&mut r0, &mut r1);
-                    std::mem::swap(&mut c0, &mut c1);
+                let mut e0 = unsafe { *eval_entries_ptr };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                if EvalEntry::should_swap(e0, e1) {
+                    std::mem::swap(&mut e0, &mut e1);
                     unsafe {
-                        *eval_indices_ptr = r0;
-                        *eval_indices_ptr.add(1) = r1;
+                        *eval_entries_ptr = e0;
+                        *eval_entries_ptr.add(1) = e1;
                     }
                 }
-                if c0 > 15 {
-                    if c1 > 15 { 2 } else { 1 }
+                if e0.p_len > 15 {
+                    if e1.p_len > 15 { 2 } else { 1 }
                 } else {
                     0
                 }
             } else if num_eval == 3 {
-                let mut r0 = unsafe { *eval_indices_ptr };
-                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
-                let mut r2 = unsafe { *eval_indices_ptr.add(2) };
-                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
-                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
-                let mut c2 = unsafe { *counts_ptr.add(r2 as usize) };
-                if c0 < c1 || (c0 == c1 && r0 > r1) {
-                    std::mem::swap(&mut r0, &mut r1);
-                    std::mem::swap(&mut c0, &mut c1);
+                let mut e0 = unsafe { *eval_entries_ptr };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                if EvalEntry::should_swap(e0, e1) {
+                    std::mem::swap(&mut e0, &mut e1);
                 }
-                if c1 < c2 || (c1 == c2 && r1 > r2) {
-                    std::mem::swap(&mut r1, &mut r2);
-                    std::mem::swap(&mut c1, &mut c2);
+                if EvalEntry::should_swap(e1, e2) {
+                    std::mem::swap(&mut e1, &mut e2);
                 }
-                if c0 < c1 || (c0 == c1 && r0 > r1) {
-                    std::mem::swap(&mut r0, &mut r1);
-                    std::mem::swap(&mut c0, &mut c1);
+                if EvalEntry::should_swap(e0, e1) {
+                    std::mem::swap(&mut e0, &mut e1);
                 }
                 unsafe {
-                    *eval_indices_ptr = r0;
-                    *eval_indices_ptr.add(1) = r1;
-                    *eval_indices_ptr.add(2) = r2;
+                    *eval_entries_ptr = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
                 }
-                if c0 > 15 {
-                    if c1 > 15 {
-                        if c2 > 15 { 3 } else { 2 }
+                if e0.p_len > 15 {
+                    if e1.p_len > 15 {
+                        if e2.p_len > 15 { 3 } else { 2 }
                     } else {
                         1
                     }
@@ -2501,44 +2505,35 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     0
                 }
             } else if num_eval == 4 {
-                let mut r0 = unsafe { *eval_indices_ptr };
-                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
-                let mut r2 = unsafe { *eval_indices_ptr.add(2) };
-                let mut r3 = unsafe { *eval_indices_ptr.add(3) };
-                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
-                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
-                let mut c2 = unsafe { *counts_ptr.add(r2 as usize) };
-                let mut c3 = unsafe { *counts_ptr.add(r3 as usize) };
-                if c0 < c1 || (c0 == c1 && r0 > r1) {
-                    std::mem::swap(&mut r0, &mut r1);
-                    std::mem::swap(&mut c0, &mut c1);
+                let mut e0 = unsafe { *eval_entries_ptr };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                if EvalEntry::should_swap(e0, e1) {
+                    std::mem::swap(&mut e0, &mut e1);
                 }
-                if c2 < c3 || (c2 == c3 && r2 > r3) {
-                    std::mem::swap(&mut r2, &mut r3);
-                    std::mem::swap(&mut c2, &mut c3);
+                if EvalEntry::should_swap(e2, e3) {
+                    std::mem::swap(&mut e2, &mut e3);
                 }
-                if c0 < c2 || (c0 == c2 && r0 > r2) {
-                    std::mem::swap(&mut r0, &mut r2);
-                    std::mem::swap(&mut c0, &mut c2);
+                if EvalEntry::should_swap(e0, e2) {
+                    std::mem::swap(&mut e0, &mut e2);
                 }
-                if c1 < c3 || (c1 == c3 && r1 > r3) {
-                    std::mem::swap(&mut r1, &mut r3);
-                    std::mem::swap(&mut c1, &mut c3);
+                if EvalEntry::should_swap(e1, e3) {
+                    std::mem::swap(&mut e1, &mut e3);
                 }
-                if c1 < c2 || (c1 == c2 && r1 > r2) {
-                    std::mem::swap(&mut r1, &mut r2);
-                    std::mem::swap(&mut c1, &mut c2);
+                if EvalEntry::should_swap(e1, e2) {
+                    std::mem::swap(&mut e1, &mut e2);
                 }
                 unsafe {
-                    *eval_indices_ptr = r0;
-                    *eval_indices_ptr.add(1) = r1;
-                    *eval_indices_ptr.add(2) = r2;
-                    *eval_indices_ptr.add(3) = r3;
+                    *eval_entries_ptr = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
                 }
-                if c0 > 15 {
-                    if c1 > 15 {
-                        if c2 > 15 {
-                            if c3 > 15 { 4 } else { 3 }
+                if e0.p_len > 15 {
+                    if e1.p_len > 15 {
+                        if e2.p_len > 15 {
+                            if e3.p_len > 15 { 4 } else { 3 }
                         } else {
                             2
                         }
@@ -2550,15 +2545,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             } else {
                 for i in 1..num_eval {
-                    let r_curr = unsafe { *eval_indices_ptr.add(i) };
-                    let c_curr = unsafe { *counts_ptr.add(r_curr as usize) };
+                    let e_curr = unsafe { *eval_entries_ptr.add(i) };
                     let mut j = i;
                     while j > 0 {
-                        let r_prev = unsafe { *eval_indices_ptr.add(j - 1) };
-                        let c_prev = unsafe { *counts_ptr.add(r_prev as usize) };
-                        if c_prev < c_curr || (c_prev == c_curr && r_prev > r_curr) {
+                        let e_prev = unsafe { *eval_entries_ptr.add(j - 1) };
+                        if EvalEntry::should_swap(e_prev, e_curr) {
                             unsafe {
-                                *eval_indices_ptr.add(j) = r_prev;
+                                *eval_entries_ptr.add(j) = e_prev;
                             }
                             j -= 1;
                         } else {
@@ -2566,13 +2559,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     }
                     unsafe {
-                        *eval_indices_ptr.add(j) = r_curr;
+                        *eval_entries_ptr.add(j) = e_curr;
                     }
                 }
                 let mut split = 0;
-                while split < num_eval
-                    && unsafe { *counts_ptr.add(*eval_indices_ptr.add(split) as usize) > 15 }
-                {
+                while split < num_eval && unsafe { (*eval_entries_ptr.add(split)).p_len > 15 } {
                     split += 1;
                 }
                 split
@@ -2583,8 +2574,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut num_exact = 0;
 
             for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                let r_idx = entry.r_idx as usize;
+                let p_len = entry.p_len as usize;
                 let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
@@ -2661,8 +2653,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                let r_idx = entry.r_idx as usize;
+                let p_len = entry.p_len as usize;
                 let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
@@ -2707,8 +2700,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                let r_idx = entry.r_idx as usize;
+                let p_len = entry.p_len as usize;
                 let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
                 let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
@@ -2770,8 +2764,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
-                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                let r_idx = entry.r_idx as usize;
+                let p_len = entry.p_len as usize;
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if self.current_cost_so_far + cost >= current_global_beta {
