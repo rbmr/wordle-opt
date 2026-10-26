@@ -395,7 +395,7 @@ pub fn compute_max_branching_factor_seq_with_target(
             let tab2 = &m_tab[2];
             let tab3 = &m_tab[3];
             let tab4 = &m_tab[4];
-            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+            for p in &matrix.guess_profiles {
                 if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
@@ -410,6 +410,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
+                let g = p.g as usize;
                 let mut mask = [0u64; 8];
                 count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
                 let half_unique = combine_and_count_u8(&mask);
@@ -429,7 +430,7 @@ pub fn compute_max_branching_factor_seq_with_target(
         } else if has_profile {
             let non_c_mask = !active_letter_mask;
             let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
-            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+            for p in &matrix.guess_profiles {
                 if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
@@ -441,6 +442,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
+                let g = p.g as usize;
                 let mut mask = [0u64; 8];
                 count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
                 let half_unique = combine_and_count_u8(&mask);
@@ -458,11 +460,12 @@ pub fn compute_max_branching_factor_seq_with_target(
                 }
             }
         } else {
-            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+            for p in &matrix.guess_profiles {
                 let overlap = p.mask & c_mask;
                 if overlap == 0 {
                     continue;
                 }
+                let g = p.g as usize;
                 let mut mask = [0u64; 8];
                 count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
                 let half_unique = combine_and_count_u8(&mask);
@@ -502,7 +505,7 @@ pub fn compute_max_branching_factor_seq_with_target(
 
         let non_c_mask = !active_letter_mask;
         let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
-        for (g, p) in matrix.guess_profiles.iter().enumerate() {
+        for p in &matrix.guess_profiles {
             if has_profile {
                 if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
@@ -518,6 +521,7 @@ pub fn compute_max_branching_factor_seq_with_target(
                 continue;
             }
 
+            let g = p.g as usize;
             let mut mask = [0u64; 36];
             for &c_base in c_half1_ptrs {
                 let r = unsafe { (*c_base.add(g)).0 as usize };
@@ -541,7 +545,9 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if max_k >= effective_target {
                     break;
                 }
-                min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+                if has_profile {
+                    min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+                }
             }
         }
     }
