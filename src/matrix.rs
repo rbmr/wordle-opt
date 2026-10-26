@@ -7,7 +7,7 @@ use crate::dict::Dictionary;
 pub struct GuessProfile {
     pub mask: u32,
     pub chars: [u8; 8],
-    pub g: u32,
+    pub _pad: [u8; 4],
 }
 
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
@@ -177,45 +177,14 @@ impl ResponseMatrix {
             candidate_dup_masks.push(dup);
         }
 
-        // Score guesses by distinct letter frequencies across the candidate set
-        // so that guesses with high partitioning power appear first during branching scans.
-        let mut letter_freq = [0u32; 256];
-        for candidate in &dict.candidates {
-            let mut seen = 0u32;
-            for &b in candidate.as_bytes() {
-                let bit = 1u32 << (b & 31);
-                if (seen & bit) == 0 {
-                    seen |= bit;
-                    letter_freq[b as usize] += 1;
-                }
-            }
-        }
-        let guess_score = |g: usize| -> u32 {
-            let mut score = 0u32;
-            let mut seen = 0u32;
-            for &b in dict.guesses[g].as_bytes() {
-                let bit = 1u32 << (b & 31);
-                if (seen & bit) == 0 {
-                    seen |= bit;
-                    score += letter_freq[b as usize];
-                }
-            }
-            score
-        };
-
         let mut guess_profiles = Vec::with_capacity(num_guesses);
         for g in 0..num_guesses {
             guess_profiles.push(GuessProfile {
                 mask: guess_masks[g],
                 chars: guess_profile_chars[g],
-                g: g as u32,
+                _pad: [0; 4],
             });
         }
-        guess_profiles.sort_unstable_by(|a, b| {
-            guess_score(b.g as usize)
-                .cmp(&guess_score(a.g as usize))
-                .then_with(|| a.g.cmp(&b.g))
-        });
 
         Self {
             num_guesses,
