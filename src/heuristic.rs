@@ -145,9 +145,8 @@ pub fn compute_candidate_branching_factor_with_target(
     let mut max_k = 0;
     if matrix.num_responses <= 256 {
         let data_ptr = matrix.data_u8.as_ptr();
-        let cp_ptr = matrix.candidate_profiles.as_ptr();
         for &c in candidates {
-            let g = unsafe { (*cp_ptr.add(c)).guess_idx };
+            let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
             let mut mask = [0u64; 8];
             count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
@@ -161,9 +160,8 @@ pub fn compute_candidate_branching_factor_with_target(
         }
     } else {
         let data_ptr = matrix.data.as_ptr();
-        let cp_ptr = matrix.candidate_profiles.as_ptr();
         for &c in candidates {
-            let g = unsafe { (*cp_ptr.add(c)).guess_idx };
+            let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
             let mut mask = [0u64; 36];
             for &other in candidates {
