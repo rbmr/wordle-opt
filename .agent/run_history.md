@@ -684,8 +684,18 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-26 | `aa5ec9d` | pc01 | 1000 | 1 | optimal | 3.094s | 3124 | 1049 | 1116 | — | revert sorting GuessProfile by letter frequency; restores streaming cache stride in branching scans; pick 2.9s; cpu 46.9s; validation OK |
 | 2026-10-26 | `16f65ad` | pc01 | 1000 | 1 | optimal | 2.783s | 3124 | 1049 | 1112–1152 | — | gate halfway popcount when rem_len >= max_k in branching scans, 3 runs: 2.791 / 2.783 / 2.774s (median shown); pick 2.6s; cpu 42.0s; validation OK |
 | 2026-10-26 | `16f65ad` | pc01 | 2340 | — | optimal | 24.857s (0.01h) | 8001 | 2478 | 26592 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-16f65ad); guesses 768,442; pick 23.2s; cpu 371.8s; root guesses @ 15s record 6584; sub-25s barrier broken; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-10-26 | `d0e342b` | pc01 | 1000 | 1 | optimal | 2.745s | 3124 | 1049 | 1114–1149 | — | pointer increment loops in unique response counting, 3 runs: 2.746 / 2.739 / 2.745s (median shown); pick 2.6s; cpu 41.4s; validation OK |
+| 2026-10-26 | `d0e342b` | pc01 | 2340 | — | optimal | 24.515s (0.01h) | 8001 | 2478 | 26601 | ~2.55GB | full N=2340 run via run_full.sh (2026-10-26-d0e342b); guesses 769,423; pick 22.9s; cpu 368.0s; root guesses @ 15s record 6811; all-time record; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `d0e342b` rows (replaces indexed slice loops with pointer increment loops in `count_unique_responses_u8` and `count_unique_responses_from_row_u8`, reducing register pressure and index scaling arithmetic in inner loops) were benchmarked on `pc01`. At $N=1000$ seed 1, median build time improved to an all-time best **2.745s** (2.746 / 2.739 / 2.745s, pick **2.6s**, CPU work down to **41.4s**, a -38ms wall clock speedup and -0.6s CPU work reduction vs `16f65ad`). The standalone `run_full.sh` checkpoint (`2026-10-26-d0e342b`) achieved an all-time record breakthrough:
+  - Total solve time broke another milestone down to **24.515s** (**-342ms wall clock speedup** vs `16f65ad` 24.857s, and **-2.007s** vs `a1fb308` 26.522s).
+  - Pick time dropped below 23s for the first time down to **22.9s** (down from 23.2s on `16f65ad` and 24.9s on `a1fb308`).
+  - CPU work dropped to **368.0s** (**-3.8s CPU work reduction** vs `16f65ad` 371.8s, and **-31.7s CPU work reduction** vs `a1fb308` 399.7s).
+  - Root guess throughput at 15s set an all-time record of **6,811** root guesses (up from 6,584 on `16f65ad` and 5,928 on `a1fb308`).
+  - Total cost invariant at **8001**, mean guesses **3.419231**, and golden SHA-256 tree hash verified byte-for-byte identical (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+
 
 - The `16f65ad` rows (gates the halfway popcount and split in `compute_max_branching_factor_seq_with_target` strictly to when `rem_len < max_k`, scanning all candidates in a single contiguous pass when `rem_len >= max_k` because `half_unique + rem_len >= 1 + rem_len > max_k` mathematically precludes early pruning) were benchmarked on `pc01`. At $N=1000$ seed 1, median build time shattered the 3.0s and 2.8s barriers down to **2.783s** (2.791 / 2.783 / 2.774s, pick down to **2.6s**, CPU work down to **42.0s**, a -310ms wall clock speedup and -4.9s CPU work reduction vs `a1fb308`). The standalone `run_full.sh` checkpoint (`2026-10-26-16f65ad`) achieved an all-time record breakthrough:
   - Total solve time shattered the 25-second barrier down to **24.857s** (**-1.665s wall clock speedup** vs `a1fb308` 26.522s, and **-2.163s** vs `0503574` 27.020s).
