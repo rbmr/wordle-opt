@@ -250,50 +250,55 @@ pub(crate) fn active_guesses(
                     *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                 }
             }
-            let c_ptrs = unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, candidates.len()) };
 
             let mut counts = [0u16; 256];
-            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 256]>::uninit();
-            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+            let counts_ptr = counts.as_mut_ptr();
+            let c_len = candidates.len();
+            let win_response = matrix.win_response.0 as usize;
 
             for g in surviving_guesses {
-                let mut num_non_empty = 0;
-                for &c_base in c_ptrs {
-                    let r = unsafe { *c_base.add(g) as usize };
-                    let cnt = unsafe { *counts.get_unchecked(r) };
-                    if cnt == 0 {
-                        unsafe {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                        }
-                        num_non_empty += 1;
-                    }
+                let mut i = 0;
+                while i + 3 < c_len {
+                    let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
+                    let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) as usize };
+                    let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) as usize };
+                    let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) as usize };
                     unsafe {
-                        *counts.get_unchecked_mut(r) = cnt + 1;
+                        *counts_ptr.add(r0) += 1;
+                        *counts_ptr.add(r1) += 1;
+                        *counts_ptr.add(r2) += 1;
+                        *counts_ptr.add(r3) += 1;
                     }
+                    i += 4;
                 }
-                if num_non_empty <= 1 {
-                    for i in 0..num_non_empty {
-                        let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                        unsafe {
-                            *counts.get_unchecked_mut(r) = 0;
-                        }
+                while i < c_len {
+                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
+                    unsafe {
+                        *counts_ptr.add(r) += 1;
                     }
-                    continue;
+                    i += 1;
                 }
+
                 let mut expected_rem = 0u32;
-                let mut base_lb = candidates.len() as u32;
-                for i in 0..num_non_empty {
-                    let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                    let v = unsafe { *counts.get_unchecked(r) as usize };
+                let mut base_lb = c_len as u32;
+                let mut num_non_empty = 0;
+                for r in 0..256 {
+                    let v = unsafe { *counts_ptr.add(r) as usize };
+                    if v == 0 {
+                        continue;
+                    }
+                    num_non_empty += 1;
                     expected_rem += (v as u32) * (v as u32);
-                    if r != matrix.win_response.0 as usize {
+                    if r != win_response {
                         base_lb += unsafe { *cap_bounds_ptr.add(v) };
                     }
                     unsafe {
-                        *counts.get_unchecked_mut(r) = 0;
+                        *counts_ptr.add(r) = 0;
                     }
                 }
-                out.push((g, expected_rem, base_lb));
+                if num_non_empty > 1 {
+                    out.push((g, expected_rem, base_lb));
+                }
             }
         } else {
             let data_c_g_ptr = matrix.data_c_g.as_ptr();
@@ -955,6 +960,14 @@ impl<'a> OptimalPolicy<'a> {
         // cost is <= the best is always evaluated exactly (beta is always
         // best + 1 >= its cost + 1 at that point), and the packed
         // (cost, index) minimum breaks ties by heuristic rank.
+        let filtered_active: Vec<(usize, usize, u32)> = active
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(_, _, base_lb))| base_lb <= initial_best_val)
+            .map(|(i, &(g, _, base_lb))| (i, g, base_lb))
+            .collect();
+
+        const CHUNK_SIZE: usize = 4;
         let next = AtomicUsize::new(0);
         (0..rayon::current_num_threads())
             .into_par_iter()
@@ -972,42 +985,47 @@ impl<'a> OptimalPolicy<'a> {
                 );
 
                 loop {
-                    let idx = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(g, _, base_lb)) = active.get(idx) else {
+                    let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
+                    if start_idx >= filtered_active.len() {
                         break;
-                    };
-
-                    let best_packed = global_best.load(Ordering::Relaxed);
-                    let best_val = (best_packed >> 32) as u32;
-                    let best_idx = (best_packed & 0xFFFFFFFF) as usize;
-                    let guess_beta = if idx < best_idx {
-                        best_val + 1
-                    } else {
-                        best_val
-                    };
-
-                    if base_lb >= guess_beta {
-                        continue;
                     }
+                    let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
 
-                    let v = solver.min_guess_val(
-                        candidates,
-                        self.all_guesses_bits,
-                        g,
-                        guess_beta,
-                        1,
-                        self.max_k,
-                    );
-                    self.metrics
-                        .root_guesses_done
-                        .fetch_add(1, Ordering::Relaxed);
+                    for i in start_idx..end_idx {
+                        let (orig_idx, g, base_lb) = unsafe { *filtered_active.get_unchecked(i) };
 
-                    if v < guess_beta {
-                        let packed = ((v as u64) << 32) | (idx as u64);
-                        let old = global_best.fetch_min(packed, Ordering::Relaxed);
-                        let old_val = (old >> 32) as u32;
-                        if v < old_val {
-                            global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                        let best_packed = global_best.load(Ordering::Relaxed);
+                        let best_val = (best_packed >> 32) as u32;
+                        let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                        let guess_beta = if orig_idx < best_idx {
+                            best_val + 1
+                        } else {
+                            best_val
+                        };
+
+                        if base_lb >= guess_beta {
+                            continue;
+                        }
+
+                        let v = solver.min_guess_val(
+                            candidates,
+                            self.all_guesses_bits,
+                            g,
+                            guess_beta,
+                            1,
+                            self.max_k,
+                        );
+                        self.metrics
+                            .root_guesses_done
+                            .fetch_add(1, Ordering::Relaxed);
+
+                        if v < guess_beta {
+                            let packed = ((v as u64) << 32) | (orig_idx as u64);
+                            let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                            let old_val = (old >> 32) as u32;
+                            if v < old_val {
+                                global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                            }
                         }
                     }
                 }
