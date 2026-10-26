@@ -1068,20 +1068,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let projs_chunk = &mut projs[chunk_start..chunk_end];
+                projs_chunk.fill(0);
                 let chunk_len = chunk_end - chunk_start;
                 let projs_ptr = projs_chunk.as_mut_ptr();
-
-                let c0 = unsafe { *c_vals.get_unchecked(0) };
-                let z0 = unsafe { *z_vals.get_unchecked(0) };
-                let c0_ptr = unsafe { data_cg_ptr.add(c0 * num_guesses + chunk_start) };
-                for i in 0..chunk_len {
-                    let r = unsafe { (*c0_ptr.add(i)).to_usize() as u64 };
-                    unsafe {
-                        *projs_ptr.add(i) = z0.wrapping_mul(r + 1);
-                    }
-                }
-
-                for c_idx in 1..c_len {
+                for c_idx in 0..c_len {
                     let c = unsafe { *c_vals.get_unchecked(c_idx) };
                     let z = unsafe { *z_vals.get_unchecked(c_idx) };
                     let c_off = c * num_guesses + chunk_start;
