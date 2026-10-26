@@ -68,23 +68,25 @@ fn combine_and_count_u8(mask: &[u64; 8]) -> usize {
 #[inline(always)]
 fn count_unique_responses_from_row_u8(g_ptr: *const u8, candidates: &[usize], mask: &mut [u64; 8]) {
     let n = candidates.len();
-    let mut i = 0;
-    while i + 1 < n {
-        let c0 = unsafe { *candidates.get_unchecked(i) };
-        let c1 = unsafe { *candidates.get_unchecked(i + 1) };
+    let mut c_it = candidates.as_ptr();
+    let c_end = unsafe { c_it.add(n & !1) };
+    let mask_ptr = mask.as_mut_ptr();
+    while c_it < c_end {
+        let c0 = unsafe { *c_it };
+        let c1 = unsafe { *c_it.add(1) };
         let r0 = unsafe { *g_ptr.add(c0) as usize };
         let r1 = unsafe { *g_ptr.add(c1) as usize };
         unsafe {
-            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-            *mask.get_unchecked_mut(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            c_it = c_it.add(2);
         }
-        i += 2;
     }
-    if i < n {
-        let c0 = unsafe { *candidates.get_unchecked(i) };
+    if (n & 1) != 0 {
+        let c0 = unsafe { *c_end };
         let r0 = unsafe { *g_ptr.add(c0) as usize };
         unsafe {
-            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
         }
     }
 }
@@ -253,20 +255,25 @@ fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
 #[inline(always)]
 fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 8]) {
     let n = ptrs.len();
-    let mut i = 0;
-    while i + 1 < n {
-        let r0 = unsafe { *(*ptrs.get_unchecked(i)).add(g) as usize };
-        let r1 = unsafe { *(*ptrs.get_unchecked(i + 1)).add(g) as usize };
+    let mut p_it = ptrs.as_ptr();
+    let p_end = unsafe { p_it.add(n & !1) };
+    let mask_ptr = mask.as_mut_ptr();
+    while p_it < p_end {
+        let c_ptr0 = unsafe { *p_it };
+        let c_ptr1 = unsafe { *p_it.add(1) };
+        let r0 = unsafe { *c_ptr0.add(g) as usize };
+        let r1 = unsafe { *c_ptr1.add(g) as usize };
         unsafe {
-            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-            *mask.get_unchecked_mut(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            p_it = p_it.add(2);
         }
-        i += 2;
     }
-    if i < n {
-        let r0 = unsafe { *(*ptrs.get_unchecked(i)).add(g) as usize };
+    if (n & 1) != 0 {
+        let c_ptr0 = unsafe { *p_end };
+        let r0 = unsafe { *c_ptr0.add(g) as usize };
         unsafe {
-            *mask.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
         }
     }
 }
