@@ -643,8 +643,15 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-10-20 | `f64864e` | pc01 | 1000 | 1 | optimal | 3.271s | 3124 | 1049 | 1125–1145 | — | interleaved A/B vs 4b9c029: 3.260 / 3.269 / 3.264 / 3.277 / 3.274 / 3.273s (median shown); no difference beyond spread; validation OK |
 | 2026-10-20 | `4b9c029` | pc01 | 2340 | — | optimal | 27.947s (0.01h) | 8001 | 2478 | 26690–26868 | — | interleaved A/B baseline, full list via deploy_and_bench (not run_full.sh): 27.779 / 27.808 / 28.131 / 27.951 / 27.942 / 27.960s (median shown); validation OK |
 | 2026-10-20 | `f64864e` | pc01 | 2340 | — | optimal | 27.955s (0.01h) | 8001 | 2478 | 26728–26810 | — | interleaved A/B, full list via deploy_and_bench (not run_full.sh): 27.880 / 27.948 / 27.920 / 27.961 / 27.990 / 27.987s (median shown); no difference beyond spread; validation OK |
+| 2026-10-26 | `4016793` | pc01 | 1000 | 1 | optimal | 3.256s | 3124 | 1049 | 1122–1155 | — | interleaved A/B baseline Round 2, 3 runs: 3.258 / 3.256 / 3.252s (median shown); validation OK |
+| 2026-10-26 | `0c0dc9b` | pc01 | 1000 | 1 | optimal | 3.251s | 3124 | 1049 | 1112–1144 | — | interleaved A/B vs 4016793, 2 rounds x 3 runs: 3.245 / 3.252 / 3.250 / 3.251 / 3.255 / 3.251s (median shown); validation OK |
+| 2026-10-26 | `4016793` | pc01 | 2340 | — | optimal | 27.769s (0.01h) | 8001 | 2478 | 26735–26852 | — | interleaved A/B baseline Round 2, full list via deploy_and_bench: 27.565 / 27.919 / 27.769s (median shown); validation OK |
+| 2026-10-26 | `0c0dc9b` | pc01 | 2340 | — | optimal | 27.763s (0.01h) | 8001 | 2478 | 26633–26833 | — | interleaved A/B vs 4016793, 2 rounds x 3 runs: 27.752 / 27.765 / 27.761 / 27.793 / 27.757 / 27.871s (median shown); validation OK |
+| 2026-10-26 | `0c0dc9b` | pc01 | 2340 | — | optimal | 28.950s (0.01h) | 8001 | 2478 | 26478 | ~2.5GB | full N=2340 run via run_full.sh (2026-10-26-0c0dc9b); guesses 765,310; pick 27.3s; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 
 ## Notes
+
+- The `0c0dc9b` rows (removes `c_responses` buffer from `min_guess_val` for $c\_len \le 16$, loading candidate responses directly from `g_ptr.add(c)` on demand) were benchmarked interleaved against parent `4016793` across 2 rounds (6 runs per commit per size). Results: $N=1000$ median 3.251s vs 3.256s; full $N=2340$ median 27.763s vs 27.769s. The difference is within run-to-run noise spread. The standalone `run_full.sh` run (`2026-10-26-0c0dc9b`) finished in 28.950s (pick 27.3s, cost 8001, golden tree hash `34f095c2…`).
 
 - Correction (2026-10-20): the `4375206`, `4b9c029` and `f64864e` single-run rows
   above were first described as "new all-time records" against single runs of
