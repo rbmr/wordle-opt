@@ -1633,7 +1633,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                         let g_mask = unsafe { *guess_masks_ptr.add(g) };
                         let shared = g_mask & c_mask;
-                        if (shared & (shared - 1)) == 0 && (shared & multi_c_mask) == 0 {
+                        if (shared & shared.wrapping_sub(1)) == 0 && (shared & multi_c_mask) == 0 {
                             continue;
                         }
 
@@ -2365,52 +2365,36 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 )
             };
 
-            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
-            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
-            let num_non_empty = std::cell::Cell::new(0usize);
-            let has_hashes = std::cell::Cell::new(false);
             let mut eval_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
             let mut num_eval = 0;
 
-            struct GuessCleanup<'a> {
+            struct GuessCleanup {
                 counts_ptr: *mut u16,
                 hashes_ptr: *mut u64,
-                non_empty_indices_ptr: *const u16,
-                num_non_empty: &'a std::cell::Cell<usize>,
-                has_hashes: &'a std::cell::Cell<bool>,
+                r_len: usize,
+                has_hashes: bool,
             }
 
-            impl<'a> Drop for GuessCleanup<'a> {
+            impl Drop for GuessCleanup {
                 #[inline(always)]
                 fn drop(&mut self) {
                     unsafe {
-                        let n_non_empty = self.num_non_empty.get();
-                        if self.has_hashes.get() {
-                            for i in 0..n_non_empty {
-                                let r = *self.non_empty_indices_ptr.add(i) as usize;
-                                *self.counts_ptr.add(r) = 0;
-                                *self.hashes_ptr.add(r) = 0;
-                            }
-                        } else {
-                            for i in 0..n_non_empty {
-                                let r = *self.non_empty_indices_ptr.add(i) as usize;
-                                *self.counts_ptr.add(r) = 0;
-                            }
+                        std::ptr::write_bytes(self.counts_ptr, 0, self.r_len);
+                        if self.has_hashes {
+                            std::ptr::write_bytes(self.hashes_ptr, 0, self.r_len);
                         }
                     }
                 }
             }
 
-            let _cleanup = GuessCleanup {
+            let mut cleanup = GuessCleanup {
                 counts_ptr,
                 hashes_ptr,
-                non_empty_indices_ptr,
-                num_non_empty: &num_non_empty,
-                has_hashes: &has_hashes,
+                r_len: R,
+                has_hashes: false,
             };
 
-            let mut num_non_empty_local = 0usize;
             let set_ptr = set.as_ptr();
             let mut i = 0;
             while i + 3 < c_len {
@@ -2440,18 +2424,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 i += 1;
             }
 
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+
             let mut cost = set.len() as u32;
             let mut max_p_len = 0;
+            let mut num_buckets = 0;
 
             for r in 0..R {
                 let p_len = unsafe { *counts_ptr.add(r) as usize };
                 if p_len == 0 {
                     continue;
                 }
-                unsafe {
-                    *non_empty_indices_ptr.add(num_non_empty_local) = r as u16;
-                    num_non_empty_local += 1;
-                }
+                num_buckets += 1;
                 if r == WIN {
                     continue;
                 }
@@ -2459,6 +2444,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     max_p_len = p_len;
                 }
                 cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                if cost >= cutoff {
+                    self.metrics
+                        .pruned_by_bounds
+                        .fetch_add(1, Ordering::Relaxed);
+                    return cost;
+                }
                 if p_len > 2 {
                     unsafe {
                         *eval_indices_ptr.add(num_eval) = r as u16;
@@ -2466,18 +2457,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     num_eval += 1;
                 }
             }
-            num_non_empty.set(num_non_empty_local);
 
-            if num_non_empty_local == 1 {
+            if num_buckets <= 1 {
                 return beta;
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                return cost;
             }
 
             if max_p_len <= 2 {
@@ -2630,16 +2612,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
             let mut curr = 0;
-            let n_non_empty = num_non_empty_local;
-            for i in 0..n_non_empty {
-                let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+            for r in 0..R {
                 unsafe {
                     *current_offsets_ptr.add(r) = curr;
                     curr += *counts_ptr.add(r);
                 }
             }
 
-            has_hashes.set(true);
+            cleanup.has_hashes = true;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut i = 0;
             while i + 1 < c_len {
