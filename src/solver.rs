@@ -1239,11 +1239,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
         let mut max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
 
-        let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+        let cp_ptr = self.matrix.candidate_profiles.as_ptr();
         let active_guesses_ptr = active_guesses_slice.as_ptr();
         let set_ptr = set.as_ptr();
         for (cand_idx, &cand) in set.iter().enumerate() {
-            let g = unsafe { *cand_to_guess_ptr.add(cand) };
+            let g = unsafe { (*cp_ptr.add(cand)).guess_idx };
             if (unsafe { *active_guesses_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
                 continue;
             }
@@ -1576,15 +1576,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut is_in_set =
                     std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
                 let is_in_set_ptr = is_in_set.as_mut_ptr();
-                let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
-                let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
+                let cp_ptr = self.matrix.candidate_profiles.as_ptr();
                 let set_ptr = set.as_ptr();
                 let mut c_mask = 0u32;
                 let mut multi_c_mask = 0u32;
                 for i in 0..c_len {
                     let c = unsafe { *set_ptr.add(i) };
-                    let g = unsafe { *cand_to_guess_ptr.add(c) };
-                    let m = unsafe { *cand_masks_ptr.add(c) };
+                    let cp = unsafe { &*cp_ptr.add(c) };
+                    let g = cp.guess_idx;
+                    let m = cp.mask;
                     multi_c_mask |= c_mask & m;
                     c_mask |= m;
                     unsafe {
@@ -1868,7 +1868,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let set_ptr = set.as_ptr();
                 for i in 0..c_len {
                     let c = unsafe { *set_ptr.add(i) };
-                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    let g = unsafe { (*cp_ptr.add(c)).guess_idx };
                     unsafe {
                         *is_in_set_ptr.add(g / 64) = 0;
                     }

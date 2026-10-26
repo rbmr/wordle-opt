@@ -15,8 +15,9 @@ pub struct GuessProfile {
 pub struct CandidateProfile {
     pub mask: u32,
     pub dup_mask: u32,
+    pub guess_idx: usize,
     pub at_mask: [u32; 8],
-    pub _pad: [u32; 6],
+    pub _pad: [u32; 4],
 }
 
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
@@ -189,8 +190,9 @@ impl ResponseMatrix {
             candidate_profiles.push(CandidateProfile {
                 mask: candidate_masks[c_idx],
                 dup_mask: dup,
+                guess_idx: cg,
                 at_mask: at,
-                _pad: [0; 6],
+                _pad: [0; 4],
             });
         }
 
