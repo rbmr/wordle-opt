@@ -1064,12 +1064,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 c_vals[c_idx] = c;
                 let z = unsafe { *zobrist_ptr.add(c) };
                 let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                let mut val = z;
                 for r in 0..R {
-                    let val = z.wrapping_mul(r as u64 + 1);
                     unsafe {
                         *c_table_ptr.add(r) = val;
                     }
                     dummy_projs[r] ^= val;
+                    val = val.wrapping_add(z);
                 }
             }
 
@@ -1153,6 +1154,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let bits_ptr = bits.as_mut_ptr();
+            let mut kept_count = 0usize;
             for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
                 if block == 0 {
                     continue;
@@ -1185,6 +1187,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 unsafe {
                     *bits_ptr.add(block_idx) = kept_mask;
                 }
+                kept_count += kept_mask.count_ones() as usize;
             }
 
             let added_len = added_indices.len();
@@ -1209,8 +1212,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         .equiv_cache_misses
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     self.metrics.pruned_by_equivalence.fetch_add(
-                        self.dict.guesses.len()
-                            - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
+                        self.dict.guesses.len() - kept_count,
                         std::sync::atomic::Ordering::Relaxed,
                     );
                     let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
@@ -1230,8 +1232,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     .equiv_cache_misses
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 self.metrics.pruned_by_equivalence.fetch_add(
-                    self.dict.guesses.len()
-                        - bits.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
+                    self.dict.guesses.len() - kept_count,
                     std::sync::atomic::Ordering::Relaxed,
                 );
                 None
