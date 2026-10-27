@@ -2639,7 +2639,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 counts_ptr: *mut u16,
                 hashes_ptr: *mut u64,
                 r_len: usize,
-                has_hashes: bool,
             }
 
             impl Drop for GuessCleanup {
@@ -2647,20 +2646,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 fn drop(&mut self) {
                     unsafe {
                         std::ptr::write_bytes(self.counts_ptr, 0, self.r_len);
-                        if self.has_hashes {
-                            std::ptr::write_bytes(self.hashes_ptr, 0, self.r_len);
-                        }
+                        std::ptr::write_bytes(self.hashes_ptr, 0, self.r_len);
                     }
                 }
             }
 
-            let mut cleanup = GuessCleanup {
+            let _cleanup = GuessCleanup {
                 counts_ptr,
                 hashes_ptr,
                 r_len: R,
-                has_hashes: false,
             };
 
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
             let mut i = 0;
             while i + 7 < c_len {
@@ -2680,6 +2677,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
                 let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
                 let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+                let z0 = unsafe { *zobrist_ptr.add(c0) };
+                let z1 = unsafe { *zobrist_ptr.add(c1) };
+                let z2 = unsafe { *zobrist_ptr.add(c2) };
+                let z3 = unsafe { *zobrist_ptr.add(c3) };
+                let z4 = unsafe { *zobrist_ptr.add(c4) };
+                let z5 = unsafe { *zobrist_ptr.add(c5) };
+                let z6 = unsafe { *zobrist_ptr.add(c6) };
+                let z7 = unsafe { *zobrist_ptr.add(c7) };
 
                 unsafe {
                     *counts_ptr.add(r0) += 1;
@@ -2690,14 +2695,24 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *counts_ptr.add(r5) += 1;
                     *counts_ptr.add(r6) += 1;
                     *counts_ptr.add(r7) += 1;
+                    *hashes_ptr.add(r0) ^= z0;
+                    *hashes_ptr.add(r1) ^= z1;
+                    *hashes_ptr.add(r2) ^= z2;
+                    *hashes_ptr.add(r3) ^= z3;
+                    *hashes_ptr.add(r4) ^= z4;
+                    *hashes_ptr.add(r5) ^= z5;
+                    *hashes_ptr.add(r6) ^= z6;
+                    *hashes_ptr.add(r7) ^= z7;
                 }
                 i += 8;
             }
             while i < c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                let z = unsafe { *zobrist_ptr.add(c) };
                 unsafe {
                     *counts_ptr.add(r) += 1;
+                    *hashes_ptr.add(r) ^= z;
                 }
                 i += 1;
             }
@@ -2882,56 +2897,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 split
             };
-
-            cleanup.has_hashes = true;
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            let mut i = 0;
-            while i + 7 < c_len {
-                let c0 = unsafe { *set_ptr.add(i) };
-                let c1 = unsafe { *set_ptr.add(i + 1) };
-                let c2 = unsafe { *set_ptr.add(i + 2) };
-                let c3 = unsafe { *set_ptr.add(i + 3) };
-                let c4 = unsafe { *set_ptr.add(i + 4) };
-                let c5 = unsafe { *set_ptr.add(i + 5) };
-                let c6 = unsafe { *set_ptr.add(i + 6) };
-                let c7 = unsafe { *set_ptr.add(i + 7) };
-                let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
-                let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
-                let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
-                let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
-                let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
-                let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
-                let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
-                let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
-                let z0 = unsafe { *zobrist_ptr.add(c0) };
-                let z1 = unsafe { *zobrist_ptr.add(c1) };
-                let z2 = unsafe { *zobrist_ptr.add(c2) };
-                let z3 = unsafe { *zobrist_ptr.add(c3) };
-                let z4 = unsafe { *zobrist_ptr.add(c4) };
-                let z5 = unsafe { *zobrist_ptr.add(c5) };
-                let z6 = unsafe { *zobrist_ptr.add(c6) };
-                let z7 = unsafe { *zobrist_ptr.add(c7) };
-                unsafe {
-                    *hashes_ptr.add(r0) ^= z0;
-                    *hashes_ptr.add(r1) ^= z1;
-                    *hashes_ptr.add(r2) ^= z2;
-                    *hashes_ptr.add(r3) ^= z3;
-                    *hashes_ptr.add(r4) ^= z4;
-                    *hashes_ptr.add(r5) ^= z5;
-                    *hashes_ptr.add(r6) ^= z6;
-                    *hashes_ptr.add(r7) ^= z7;
-                }
-                i += 8;
-            }
-            while i < c_len {
-                let c = unsafe { *set_ptr.add(i) };
-                let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
-                let z = unsafe { *zobrist_ptr.add(c) };
-                unsafe {
-                    *hashes_ptr.add(r_idx) ^= z;
-                }
-                i += 1;
-            }
 
             let mut exact_mask = [0u64; M];
             let mut cached_mask = [0u64; M];
