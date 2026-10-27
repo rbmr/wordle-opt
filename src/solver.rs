@@ -2591,18 +2591,22 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut eval_hashes = [0u64; 5];
-            let mut small_p = [[0usize; 16]; 5];
-            let mut small_p_extracted = [false; 5];
+            let mut small_p = std::mem::MaybeUninit::<[[usize; 16]; 5]>::uninit();
+            let small_p_ptr = small_p.as_mut_ptr() as *mut usize;
 
             if num_eval == 1 {
                 let r0 = eval_entries[0].0;
                 let target_count = eval_entries[0].1 as usize;
                 let mut found_count = 0;
+                let p0_ptr = small_p_ptr;
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(found_count) = c;
+                        }
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2614,11 +2618,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r1 = eval_entries[1].0;
                 let target_count = (eval_entries[0].1 + eval_entries[1].1) as usize;
                 let mut found_count = 0;
+                let mut p0_len = 0;
+                let mut p1_len = 0;
+                let p0_ptr = small_p_ptr;
+                let p1_ptr = unsafe { small_p_ptr.add(16) };
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(p0_len) = c;
+                        }
+                        p0_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2626,6 +2638,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else if r == r1 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p1_ptr.add(p1_len) = c;
+                        }
+                        p1_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2639,11 +2655,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let target_count =
                     (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1) as usize;
                 let mut found_count = 0;
+                let mut p0_len = 0;
+                let mut p1_len = 0;
+                let mut p2_len = 0;
+                let p0_ptr = small_p_ptr;
+                let p1_ptr = unsafe { small_p_ptr.add(16) };
+                let p2_ptr = unsafe { small_p_ptr.add(32) };
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(p0_len) = c;
+                        }
+                        p0_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2651,6 +2677,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else if r == r1 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p1_ptr.add(p1_len) = c;
+                        }
+                        p1_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2658,6 +2688,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else if r == r2 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p2_ptr.add(p2_len) = c;
+                        }
+                        p2_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2673,11 +2707,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1 + eval_entries[3].1)
                         as usize;
                 let mut found_count = 0;
+                let mut p0_len = 0;
+                let mut p1_len = 0;
+                let mut p2_len = 0;
+                let mut p3_len = 0;
+                let p0_ptr = small_p_ptr;
+                let p1_ptr = unsafe { small_p_ptr.add(16) };
+                let p2_ptr = unsafe { small_p_ptr.add(32) };
+                let p3_ptr = unsafe { small_p_ptr.add(48) };
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(p0_len) = c;
+                        }
+                        p0_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2685,6 +2731,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else if r == r1 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p1_ptr.add(p1_len) = c;
+                        }
+                        p1_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2692,6 +2742,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else if r == r2 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p2_ptr.add(p2_len) = c;
+                        }
+                        p2_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2699,6 +2753,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else if r == r3 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[3] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p3_ptr.add(p3_len) = c;
+                        }
+                        p3_len += 1;
                         found_count += 1;
                         if found_count == target_count {
                             break;
@@ -2706,12 +2764,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
             } else {
+                let mut p_lens = [0usize; 5];
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     for j in 0..num_eval {
                         if eval_entries[j].0 == r {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             eval_hashes[j] ^= unsafe { *zobrist_ptr.add(c) };
+                            let pj_ptr = unsafe { small_p_ptr.add(j * 16) };
+                            unsafe {
+                                *pj_ptr.add(p_lens[j]) = c;
+                            }
+                            p_lens[j] += 1;
                             break;
                         }
                     }
@@ -2723,33 +2787,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut small_used_val = [0u32; 5];
             let mut small_is_exact = [false; 5];
             let mut all_exact = true;
-
-            macro_rules! extract_small_p {
-                ($idx:expr) => {
-                    if !small_p_extracted[$idx] {
-                        let entry = eval_entries[$idx];
-                        let r_target = entry.0;
-                        let target_len = entry.1 as usize;
-                        let mut p_idx = 0;
-                        let set_ptr = set.as_ptr();
-                        let p_slice_ptr = small_p[$idx].as_mut_ptr();
-                        for cand_idx in 0..c_len {
-                            let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                            if r == r_target {
-                                let c = unsafe { *set_ptr.add(cand_idx) };
-                                unsafe {
-                                    *p_slice_ptr.add(p_idx) = c;
-                                }
-                                p_idx += 1;
-                                if p_idx == target_len {
-                                    break;
-                                }
-                            }
-                        }
-                        small_p_extracted[$idx] = true;
-                    }
-                };
-            }
 
             for i in 0..num_eval {
                 let entry = eval_entries[i];
@@ -2763,8 +2800,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         self.local_metrics.cache_hits += 1;
                         (cached_val.max(initial_lb), is_exact)
                     } else {
-                        extract_small_p!(i);
-                        let p_slice = &small_p[i][..p_len];
+                        let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                        let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
                         let used_val = quick_val.max(initial_lb);
@@ -2811,8 +2848,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let p_len = small_p_len[i] as usize;
-                extract_small_p!(i);
-                let p_slice = &small_p[i][..p_len];
+                let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                 let p_hash = small_p_hash[i];
 
                 self.current_cost_so_far += b;
