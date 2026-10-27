@@ -94,7 +94,6 @@ pub struct SolverScratch {
     pub scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     pub scratch_hash_table: [Vec<u64>; 32],
     pub scratch_added_indices: [Vec<usize>; 32],
-    pub scratch_projs: [Vec<u64>; 32],
     pub scratch_active_bits: [Vec<u64>; 32],
     pub scratch_guess_counts: [Vec<u16>; 32],
     pub scratch_guess_hashes: [Vec<u64>; 32],
@@ -102,7 +101,6 @@ pub struct SolverScratch {
     pub scratch_guess_child_max_ks: [Vec<u16>; 32],
     pub scratch_z_tables: [Vec<u64>; 32],
     pub scratch_state_counts: Vec<u16>,
-    pub scratch_useless_projs: Vec<u64>,
 }
 
 impl SolverScratch {
@@ -114,7 +112,6 @@ impl SolverScratch {
             scratch_phase2_tuples: std::array::from_fn(|_| Vec::with_capacity(num_guesses)),
             scratch_hash_table: std::array::from_fn(|_| Vec::new()),
             scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
-            scratch_projs: std::array::from_fn(|_| Vec::new()),
             scratch_active_bits: std::array::from_fn(|_| Vec::new()),
             scratch_guess_counts: std::array::from_fn(|_| Vec::new()),
             scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
@@ -122,7 +119,6 @@ impl SolverScratch {
             scratch_guess_child_max_ks: std::array::from_fn(|_| Vec::new()),
             scratch_z_tables: std::array::from_fn(|_| Vec::new()),
             scratch_state_counts: Vec::new(),
-            scratch_useless_projs: Vec::new(),
         };
         s.fit_dictionary(num_guesses, num_responses);
         s
@@ -146,9 +142,6 @@ impl SolverScratch {
             }
             if self.scratch_sorted_sets[d].len() < num_guesses {
                 self.scratch_sorted_sets[d].resize(num_guesses, 0);
-            }
-            if self.scratch_projs[d].len() < num_guesses {
-                self.scratch_projs[d].resize(num_guesses, 0);
             }
             if self.scratch_hash_table[d].len() < table_len {
                 self.scratch_hash_table[d].resize(table_len, 0);
@@ -174,9 +167,6 @@ impl SolverScratch {
         }
         if self.scratch_state_counts.len() < num_responses {
             self.scratch_state_counts.resize(num_responses, 0);
-        }
-        if self.scratch_useless_projs.len() < num_responses {
-            self.scratch_useless_projs.resize(num_responses, 0);
         }
     }
 }
@@ -1053,9 +1043,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let added_ptr = added_indices.as_mut_ptr();
             let mut added_len = 0usize;
 
-            let projs = &mut scratch_ref.scratch_projs[depth];
-            let projs_raw_ptr = projs.as_ptr();
-
             let mask = table.len() - 1;
             let shift = 64 - table.len().trailing_zeros();
 
@@ -1081,30 +1068,46 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            let chunk_size = 512;
-            for chunk_start in (0..num_guesses).step_by(chunk_size) {
-                let chunk_end = (chunk_start + chunk_size).min(num_guesses);
-                let b_start = chunk_start / 64;
-                let b_end = chunk_end.div_ceil(64);
-                let mut has_active = false;
-                for b in b_start..b_end {
-                    if unsafe { *parent_active_guesses.get_unchecked(b) } != 0 {
-                        has_active = true;
+            for r in 0..R {
+                let mut proj = dummy_projs[r];
+                if proj == 0 {
+                    proj = 1;
+                }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                loop {
+                    let slot = unsafe { *table_ptr.add(idx) };
+                    if slot == 0 {
+                        unsafe {
+                            *table_ptr.add(idx) = proj;
+                            *added_ptr.add(added_len) = idx;
+                        }
+                        added_len += 1;
                         break;
                     }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
                 }
-                if !has_active {
+            }
+
+            let bits_ptr = bits.as_mut_ptr();
+            let mut kept_count = 0usize;
+            let mut projs_block = [0u64; 64];
+            let projs_ptr = projs_block.as_mut_ptr();
+
+            for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
+                if block == 0 {
                     continue;
                 }
+                let block_start = block_idx << 6;
+                let chunk_len = (block_start + 64).min(num_guesses) - block_start;
 
-                let projs_chunk = &mut projs[chunk_start..chunk_end];
-                projs_chunk.fill(0);
-                let chunk_len = chunk_end - chunk_start;
-                let projs_ptr = projs_chunk.as_mut_ptr();
+                projs_block.fill(0);
                 for c_idx in 0..c_len {
                     let c = unsafe { *c_vals.get_unchecked(c_idx) };
                     let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-                    let c_off = c * num_guesses + chunk_start;
+                    let c_off = c * num_guesses + block_start;
                     let c_ptr = unsafe { data_cg_ptr.add(c_off) };
                     let mut i = 0;
                     while i + 7 < chunk_len {
@@ -1136,48 +1139,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         i += 1;
                     }
                 }
-            }
 
-            for r in 0..R {
-                let mut proj = dummy_projs[r];
-                if proj == 0 {
-                    proj = 1;
-                }
-                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                loop {
-                    let slot = unsafe { *table_ptr.add(idx) };
-                    if slot == 0 {
-                        unsafe {
-                            *table_ptr.add(idx) = proj;
-                            *added_ptr.add(added_len) = idx;
-                        }
-                        added_len += 1;
-                        break;
-                    }
-                    if slot == proj {
-                        break;
-                    }
-                    idx = (idx + 1) & mask;
-                }
-            }
-
-            let bits_ptr = bits.as_mut_ptr();
-            let mut kept_count = 0usize;
-            for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
-                if block == 0 {
-                    continue;
-                }
-                let block_base = block_idx << 6;
                 let mut b = block;
                 let mut kept_mask = 0u64;
                 #[allow(clippy::manual_isolate_lowest_one)]
                 while b != 0 {
                     let lowest_bit = b & b.wrapping_neg();
                     let tz = lowest_bit.trailing_zeros();
-                    let g = block_base | (tz as usize);
                     b ^= lowest_bit;
 
-                    let proj = unsafe { *projs_raw_ptr.add(g) };
+                    let mut proj = unsafe { *projs_ptr.add(tz as usize) };
+                    if proj == 0 {
+                        proj = 1;
+                    }
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                     loop {
                         let slot = unsafe { *table_ptr.add(idx) };
