@@ -1039,9 +1039,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let scratch_ref = self.scratch.as_mut().unwrap();
             let table = &mut scratch_ref.scratch_hash_table[depth];
             let table_ptr = table.as_mut_ptr();
-            let added_indices = &mut scratch_ref.scratch_added_indices[depth];
-            added_indices.clear();
             let num_guesses = self.dict.guesses.len();
+            let added_indices = &mut scratch_ref.scratch_added_indices[depth];
+            if added_indices.capacity() < num_guesses + R {
+                added_indices.reserve(num_guesses + R - added_indices.capacity());
+            }
+            let added_ptr = added_indices.as_mut_ptr();
+            let mut added_len = 0usize;
 
             let projs = &mut scratch_ref.scratch_projs[depth];
             let projs_raw_ptr = projs.as_ptr();
@@ -1139,8 +1143,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if slot == 0 {
                         unsafe {
                             *table_ptr.add(idx) = proj;
+                            *added_ptr.add(added_len) = idx;
                         }
-                        added_indices.push(idx);
+                        added_len += 1;
                         break;
                     }
                     if slot == proj {
@@ -1156,12 +1161,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if block == 0 {
                     continue;
                 }
+                let block_base = block_idx << 6;
                 let mut b = block;
                 let mut kept_mask = 0u64;
+                #[allow(clippy::manual_isolate_lowest_one)]
                 while b != 0 {
-                    let tz = b.trailing_zeros();
-                    let g = block_idx * 64 + tz as usize;
-                    b &= b - 1;
+                    let lowest_bit = b & b.wrapping_neg();
+                    let tz = lowest_bit.trailing_zeros();
+                    let g = block_base | (tz as usize);
+                    b ^= lowest_bit;
 
                     let proj = unsafe { *projs_raw_ptr.add(g) };
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
@@ -1170,9 +1178,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         if slot == 0 {
                             unsafe {
                                 *table_ptr.add(idx) = proj;
+                                *added_ptr.add(added_len) = idx;
                             }
-                            added_indices.push(idx);
-                            kept_mask |= 1 << tz;
+                            added_len += 1;
+                            kept_mask |= lowest_bit;
                             break;
                         }
                         if slot == proj {
@@ -1187,8 +1196,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 kept_count += kept_mask.count_ones() as usize;
             }
 
-            let added_len = added_indices.len();
-            let added_ptr = added_indices.as_ptr();
             for i in 0..added_len {
                 unsafe {
                     let idx = *added_ptr.add(i);
