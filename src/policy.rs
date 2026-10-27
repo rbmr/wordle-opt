@@ -927,6 +927,7 @@ impl<'a> OptimalPolicy<'a> {
                                 }
                             }
                         }
+                        solver.flush_metrics();
                     }
                 });
 
@@ -1073,6 +1074,7 @@ impl<'a> OptimalPolicy<'a> {
                             }
                         }
                     }
+                    solver.flush_metrics();
                 }
             });
 

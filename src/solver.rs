@@ -45,6 +45,19 @@ pub struct Metrics {
     pub root_guesses_done: AtomicUsize,
 }
 
+#[derive(Default, Debug, Clone, Copy)]
+pub struct LocalMetrics {
+    pub states_evaluated: usize,
+    pub max_depth: usize,
+    pub guesses_evaluated: usize,
+    pub pruned_by_bounds: usize,
+    pub pruned_by_equivalence: usize,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub equiv_cache_hits: usize,
+    pub equiv_cache_misses: usize,
+}
+
 impl Default for Metrics {
     fn default() -> Self {
         Self::new()
@@ -188,6 +201,7 @@ pub struct SpecializedSolver<
     Elem: ResponseElem,
 > {
     pub metrics: &'a Metrics,
+    pub local_metrics: LocalMetrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
@@ -204,6 +218,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem> D
     for SpecializedSolver<'a, R, M, WIN, Elem>
 {
     fn drop(&mut self) {
+        self.flush_metrics();
         if let Some(scratch) = self.scratch.take() {
             THREAD_SCRATCH.with(|ts| *ts.borrow_mut() = Some(scratch));
         }
@@ -213,6 +228,64 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem> D
 impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
     SpecializedSolver<'a, R, M, WIN, Elem>
 {
+    #[inline]
+    pub fn flush_metrics(&mut self) {
+        if self.local_metrics.guesses_evaluated != 0 {
+            self.metrics
+                .guesses_evaluated
+                .fetch_add(self.local_metrics.guesses_evaluated, Ordering::Relaxed);
+            self.local_metrics.guesses_evaluated = 0;
+        }
+        if self.local_metrics.states_evaluated != 0 {
+            self.metrics
+                .states_evaluated
+                .fetch_add(self.local_metrics.states_evaluated, Ordering::Relaxed);
+            self.local_metrics.states_evaluated = 0;
+        }
+        if self.local_metrics.pruned_by_bounds != 0 {
+            self.metrics
+                .pruned_by_bounds
+                .fetch_add(self.local_metrics.pruned_by_bounds, Ordering::Relaxed);
+            self.local_metrics.pruned_by_bounds = 0;
+        }
+        if self.local_metrics.pruned_by_equivalence != 0 {
+            self.metrics
+                .pruned_by_equivalence
+                .fetch_add(self.local_metrics.pruned_by_equivalence, Ordering::Relaxed);
+            self.local_metrics.pruned_by_equivalence = 0;
+        }
+        if self.local_metrics.cache_hits != 0 {
+            self.metrics
+                .cache_hits
+                .fetch_add(self.local_metrics.cache_hits, Ordering::Relaxed);
+            self.local_metrics.cache_hits = 0;
+        }
+        if self.local_metrics.cache_misses != 0 {
+            self.metrics
+                .cache_misses
+                .fetch_add(self.local_metrics.cache_misses, Ordering::Relaxed);
+            self.local_metrics.cache_misses = 0;
+        }
+        if self.local_metrics.equiv_cache_hits != 0 {
+            self.metrics
+                .equiv_cache_hits
+                .fetch_add(self.local_metrics.equiv_cache_hits, Ordering::Relaxed);
+            self.local_metrics.equiv_cache_hits = 0;
+        }
+        if self.local_metrics.equiv_cache_misses != 0 {
+            self.metrics
+                .equiv_cache_misses
+                .fetch_add(self.local_metrics.equiv_cache_misses, Ordering::Relaxed);
+            self.local_metrics.equiv_cache_misses = 0;
+        }
+        if self.local_metrics.max_depth != 0 {
+            self.metrics
+                .max_depth
+                .fetch_max(self.local_metrics.max_depth, Ordering::Relaxed);
+            self.local_metrics.max_depth = 0;
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_global_beta(
         matrix: &'a ResponseMatrix,
@@ -234,6 +307,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             max_k,
             dict,
             metrics,
+            local_metrics: LocalMetrics::default(),
             capacity_bounds_2d,
             cache,
             global_beta,
@@ -1066,15 +1140,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             };
         }
 
-        self.metrics
-            .max_depth
-            .fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
+        self.local_metrics.max_depth = self.local_metrics.max_depth.max(depth);
 
         let mut cached_lower_bound = 0;
         if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-            self.metrics
-                .cache_hits
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.local_metrics.cache_hits += 1;
             if is_exact {
                 return cached_val;
             } else {
@@ -1087,9 +1157,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
         }
 
-        self.metrics
-            .states_evaluated
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.local_metrics.states_evaluated += 1;
         if known_quick_lb != 0 {
             cached_lower_bound = cached_lower_bound.max(known_quick_lb);
         } else if c_len <= 15 {
@@ -1123,9 +1191,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let rc_opt = if should_cache_equiv {
             let cache = self.equiv_cache[shard_idx].read().unwrap();
             if let Some(cached) = cache.get(&set_hash) {
-                self.metrics
-                    .equiv_cache_hits
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.local_metrics.equiv_cache_hits += 1;
                 Some(std::sync::Arc::clone(cached))
             } else {
                 None
@@ -1302,19 +1368,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let rc_new = if should_cache_equiv {
                 let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
                 if let Some(cached) = cache_mut.get(&set_hash) {
-                    self.metrics
-                        .equiv_cache_hits
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    self.local_metrics.equiv_cache_hits += 1;
                     Some(std::sync::Arc::clone(cached))
                 } else {
                     let rc = std::sync::Arc::new(bits.clone());
-                    self.metrics
-                        .equiv_cache_misses
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    self.metrics.pruned_by_equivalence.fetch_add(
-                        self.dict.guesses.len() - kept_count,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    self.local_metrics.equiv_cache_misses += 1;
+                    self.local_metrics.pruned_by_equivalence +=
+                        self.dict.guesses.len() - kept_count;
                     let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
                     if cache_mut.len() > cap {
                         let evict = (cap / 4).max(1);
@@ -1328,13 +1388,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     Some(rc)
                 }
             } else {
-                self.metrics
-                    .equiv_cache_misses
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                self.metrics.pruned_by_equivalence.fetch_add(
-                    self.dict.guesses.len() - kept_count,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                self.local_metrics.equiv_cache_misses += 1;
+                self.local_metrics.pruned_by_equivalence += self.dict.guesses.len() - kept_count;
                 None
             };
 
@@ -1674,18 +1729,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if self.current_cost_so_far + g_lb >= current_global_beta {
                 cut_by_global = true;
                 min_val_found = min_val_found.min(g_lb);
-                self.metrics.pruned_by_bounds.fetch_add(
-                    phase1_tuples.len() - idx,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
                 break;
             }
             if g_lb >= best_val {
                 min_val_found = min_val_found.min(g_lb);
-                self.metrics.pruned_by_bounds.fetch_add(
-                    phase1_tuples.len() - idx,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
                 break;
             }
             let val =
@@ -2153,18 +2202,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if self.current_cost_so_far + g_lb >= current_global_beta {
                         cut_by_global = true;
                         min_val_found = min_val_found.min(g_lb);
-                        self.metrics.pruned_by_bounds.fetch_add(
-                            phase2_tuples.len() - idx,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
+                        self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
                         break;
                     }
                     if g_lb >= best_val {
                         min_val_found = min_val_found.min(g_lb);
-                        self.metrics.pruned_by_bounds.fetch_add(
-                            phase2_tuples.len() - idx,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
+                        self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
                         break;
                     }
                     let val = self.min_guess_val(
@@ -2229,9 +2272,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
         let beta = beta.min(current_global_beta);
 
-        self.metrics
-            .guesses_evaluated
-            .fetch_add(1, Ordering::Relaxed);
+        self.local_metrics.guesses_evaluated += 1;
+        if self.local_metrics.guesses_evaluated >= 1024 {
+            self.flush_metrics();
+        }
 
         let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
         let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
@@ -2290,9 +2334,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
             let mut cost = c_len as u32;
             if cost >= cutoff {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
+                self.local_metrics.pruned_by_bounds += 1;
                 return cost;
             }
 
@@ -2314,9 +2356,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if lb > 0 {
                     cost += lb;
                     if cost >= cutoff {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.local_metrics.pruned_by_bounds += 1;
                         return cost;
                     }
                 }
@@ -2543,7 +2583,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let (used_val, is_exact) =
                     if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
-                        self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                        self.local_metrics.cache_hits += 1;
                         (cached_val.max(initial_lb), is_exact)
                     } else {
                         extract_small_p!(i);
@@ -2568,9 +2608,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let cutoff =
                         beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
                     if cost >= cutoff {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.local_metrics.pruned_by_bounds += 1;
                         return cost;
                     }
                 }
@@ -2740,9 +2778,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if lb > 0 {
                     cost += lb;
                     if cost >= cutoff {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.local_metrics.pruned_by_bounds += 1;
                         return cost;
                     }
                 }
@@ -2908,7 +2944,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
+                    self.local_metrics.cache_hits += 1;
                     let used_val = cached_val.max(cap_lb);
                     unsafe {
                         *p_lbs_ptr.add(i) = used_val;
@@ -2931,9 +2967,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let cutoff =
                             beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
                         if cost >= cutoff {
-                            self.metrics
-                                .pruned_by_bounds
-                                .fetch_add(1, Ordering::Relaxed);
+                            self.local_metrics.pruned_by_bounds += 1;
                             return cost;
                         }
                     }
@@ -3044,9 +3078,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let cutoff =
                         beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
                     if cost >= cutoff {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
+                        self.local_metrics.pruned_by_bounds += 1;
                         self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                         return cost;
                     }
@@ -3117,9 +3149,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     current_global_beta.saturating_sub(self.current_cost_so_far),
                                 );
                                 if cost >= cutoff {
-                                    self.metrics
-                                        .pruned_by_bounds
-                                        .fetch_add(1, Ordering::Relaxed);
+                                    self.local_metrics.pruned_by_bounds += 1;
                                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
                                         sorted_set;
                                     return cost;
@@ -3364,6 +3394,11 @@ impl<'a> Solver<'a> {
         parent_max_k: usize,
     ) -> u32 {
         match_solver_mut!(self, s => s.min_guess_val(set, active_guesses_slice, guess, beta, depth, parent_max_k))
+    }
+
+    #[inline(always)]
+    pub fn flush_metrics(&mut self) {
+        match_solver_mut!(self, s => s.flush_metrics());
     }
 
     pub fn greedy_solve(
