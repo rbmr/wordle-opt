@@ -2917,16 +2917,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut i = 0;
             if is_contiguous_root {
                 let g_u8_ptr = g_ptr as *const u8;
-                while i + 7 < c_len {
-                    let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
-                    let r0 = (r_u64 & 0xFF) as usize;
-                    let r1 = ((r_u64 >> 8) & 0xFF) as usize;
-                    let r2 = ((r_u64 >> 16) & 0xFF) as usize;
-                    let r3 = ((r_u64 >> 24) & 0xFF) as usize;
-                    let r4 = ((r_u64 >> 32) & 0xFF) as usize;
-                    let r5 = ((r_u64 >> 40) & 0xFF) as usize;
-                    let r6 = ((r_u64 >> 48) & 0xFF) as usize;
-                    let r7 = (r_u64 >> 56) as usize;
+                while i + 15 < c_len {
+                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                    let r0 = (r_u64_0 & 0xFF) as usize;
+                    let r1 = ((r_u64_0 >> 8) & 0xFF) as usize;
+                    let r2 = ((r_u64_0 >> 16) & 0xFF) as usize;
+                    let r3 = ((r_u64_0 >> 24) & 0xFF) as usize;
+                    let r4 = ((r_u64_0 >> 32) & 0xFF) as usize;
+                    let r5 = ((r_u64_0 >> 40) & 0xFF) as usize;
+                    let r6 = ((r_u64_0 >> 48) & 0xFF) as usize;
+                    let r7 = (r_u64_0 >> 56) as usize;
+
+                    let r8 = (r_u64_1 & 0xFF) as usize;
+                    let r9 = ((r_u64_1 >> 8) & 0xFF) as usize;
+                    let r10 = ((r_u64_1 >> 16) & 0xFF) as usize;
+                    let r11 = ((r_u64_1 >> 24) & 0xFF) as usize;
+                    let r12 = ((r_u64_1 >> 32) & 0xFF) as usize;
+                    let r13 = ((r_u64_1 >> 40) & 0xFF) as usize;
+                    let r14 = ((r_u64_1 >> 48) & 0xFF) as usize;
+                    let r15 = (r_u64_1 >> 56) as usize;
 
                     let z0 = unsafe { *zobrist_ptr.add(i) };
                     let z1 = unsafe { *zobrist_ptr.add(i + 1) };
@@ -2936,6 +2946,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let z5 = unsafe { *zobrist_ptr.add(i + 5) };
                     let z6 = unsafe { *zobrist_ptr.add(i + 6) };
                     let z7 = unsafe { *zobrist_ptr.add(i + 7) };
+                    let z8 = unsafe { *zobrist_ptr.add(i + 8) };
+                    let z9 = unsafe { *zobrist_ptr.add(i + 9) };
+                    let z10 = unsafe { *zobrist_ptr.add(i + 10) };
+                    let z11 = unsafe { *zobrist_ptr.add(i + 11) };
+                    let z12 = unsafe { *zobrist_ptr.add(i + 12) };
+                    let z13 = unsafe { *zobrist_ptr.add(i + 13) };
+                    let z14 = unsafe { *zobrist_ptr.add(i + 14) };
+                    let z15 = unsafe { *zobrist_ptr.add(i + 15) };
 
                     unsafe {
                         *counts_ptr.add(r0) += 1;
@@ -2946,6 +2964,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *counts_ptr.add(r5) += 1;
                         *counts_ptr.add(r6) += 1;
                         *counts_ptr.add(r7) += 1;
+                        *counts_ptr.add(r8) += 1;
+                        *counts_ptr.add(r9) += 1;
+                        *counts_ptr.add(r10) += 1;
+                        *counts_ptr.add(r11) += 1;
+                        *counts_ptr.add(r12) += 1;
+                        *counts_ptr.add(r13) += 1;
+                        *counts_ptr.add(r14) += 1;
+                        *counts_ptr.add(r15) += 1;
+
                         *hashes_ptr.add(r0) ^= z0;
                         *hashes_ptr.add(r1) ^= z1;
                         *hashes_ptr.add(r2) ^= z2;
@@ -2954,8 +2981,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *hashes_ptr.add(r5) ^= z5;
                         *hashes_ptr.add(r6) ^= z6;
                         *hashes_ptr.add(r7) ^= z7;
+                        *hashes_ptr.add(r8) ^= z8;
+                        *hashes_ptr.add(r9) ^= z9;
+                        *hashes_ptr.add(r10) ^= z10;
+                        *hashes_ptr.add(r11) ^= z11;
+                        *hashes_ptr.add(r12) ^= z12;
+                        *hashes_ptr.add(r13) ^= z13;
+                        *hashes_ptr.add(r14) ^= z14;
+                        *hashes_ptr.add(r15) ^= z15;
                     }
-                    i += 8;
+                    i += 16;
                 }
                 while i < c_len {
                     let r = unsafe { *g_u8_ptr.add(i) as usize };
@@ -3272,11 +3307,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut i = 0;
             if is_contiguous_root {
                 let g_u8_ptr = g_ptr as *const u8;
-                while i + 3 < c_len {
-                    let r0 = unsafe { *g_u8_ptr.add(i) as usize };
-                    let r1 = unsafe { *g_u8_ptr.add(i + 1) as usize };
-                    let r2 = unsafe { *g_u8_ptr.add(i + 2) as usize };
-                    let r3 = unsafe { *g_u8_ptr.add(i + 3) as usize };
+                while i + 7 < c_len {
+                    let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r0 = (r_u64 & 0xFF) as usize;
+                    let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+                    let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+                    let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+                    let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+                    let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+                    let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+                    let r7 = (r_u64 >> 56) as usize;
+
                     unsafe {
                         let pos_ptr0 = current_offsets_ptr.add(r0);
                         let pos0 = *pos_ptr0 as usize;
@@ -3297,8 +3338,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let pos3 = *pos_ptr3 as usize;
                         *sorted_set_ptr.add(pos3) = i + 3;
                         *pos_ptr3 += 1;
+
+                        let pos_ptr4 = current_offsets_ptr.add(r4);
+                        let pos4 = *pos_ptr4 as usize;
+                        *sorted_set_ptr.add(pos4) = i + 4;
+                        *pos_ptr4 += 1;
+
+                        let pos_ptr5 = current_offsets_ptr.add(r5);
+                        let pos5 = *pos_ptr5 as usize;
+                        *sorted_set_ptr.add(pos5) = i + 5;
+                        *pos_ptr5 += 1;
+
+                        let pos_ptr6 = current_offsets_ptr.add(r6);
+                        let pos6 = *pos_ptr6 as usize;
+                        *sorted_set_ptr.add(pos6) = i + 6;
+                        *pos_ptr6 += 1;
+
+                        let pos_ptr7 = current_offsets_ptr.add(r7);
+                        let pos7 = *pos_ptr7 as usize;
+                        *sorted_set_ptr.add(pos7) = i + 7;
+                        *pos_ptr7 += 1;
                     }
-                    i += 4;
+                    i += 8;
                 }
                 while i < c_len {
                     let r_idx = unsafe { *g_u8_ptr.add(i) as usize };
