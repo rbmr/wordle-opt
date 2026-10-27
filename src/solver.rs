@@ -1501,11 +1501,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let mut b = block;
                 let mut kept_mask = 0u64;
-                #[allow(clippy::manual_isolate_lowest_one)]
                 while b != 0 {
-                    let lowest_bit = b & b.wrapping_neg();
-                    let tz = lowest_bit.trailing_zeros();
-                    b ^= lowest_bit;
+                    let tz = b.trailing_zeros();
+                    b &= b - 1;
+                    let bit = 1u64 << tz;
 
                     let mut proj = unsafe { *projs_ptr.add(tz as usize) };
                     if proj == 0 {
@@ -1520,7 +1519,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 *added_ptr.add(added_len) = idx;
                             }
                             added_len += 1;
-                            kept_mask |= lowest_bit;
+                            kept_mask |= bit;
                             break;
                         }
                         if slot == proj {
@@ -1996,12 +1995,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
                     let block_base = block_idx << 6;
-                    #[allow(clippy::manual_isolate_lowest_one)]
                     while b != 0 {
-                        let lowest_bit = b & b.wrapping_neg();
-                        let tz = lowest_bit.trailing_zeros();
+                        let tz = b.trailing_zeros();
                         let g = block_base | (tz as usize);
-                        b ^= lowest_bit;
+                        b &= b - 1;
 
                         let g_mask = unsafe { *guess_masks_ptr.add(g) };
                         let shared = g_mask & c_mask;
