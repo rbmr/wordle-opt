@@ -1460,6 +1460,124 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
                 let block_start = block_idx << 6;
+
+                if (block & (block - 1)) == 0 {
+                    let tz = block.trailing_zeros() as usize;
+                    let g_idx = block_start + tz;
+                    let mut proj = 0u64;
+                    for c_idx in 0..c_len {
+                        let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                        let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                        let r = unsafe { (*data_cg_ptr.add(c * num_guesses + g_idx)).to_usize() };
+                        proj ^= unsafe { *c_table_ptr.add(r) };
+                    }
+                    if proj == 0 {
+                        proj = 1;
+                    }
+                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                    let mut kept_mask = 0u64;
+                    loop {
+                        let slot = unsafe { *table_ptr.add(idx) };
+                        if slot == 0 {
+                            unsafe {
+                                *table_ptr.add(idx) = proj;
+                                *added_ptr.add(added_len) = idx;
+                            }
+                            added_len += 1;
+                            kept_mask = block;
+                            break;
+                        }
+                        if slot == proj {
+                            break;
+                        }
+                        idx = (idx + 1) & mask;
+                    }
+                    unsafe {
+                        *bits_ptr.add(block_idx) = kept_mask;
+                    }
+                    kept_count += (kept_mask != 0) as usize;
+                    continue;
+                }
+
+                let ones = block.count_ones() as usize;
+                if ones <= 16 {
+                    let mut active_offsets = [0u8; 16];
+                    let mut sparse_projs = [0u64; 16];
+                    let mut b = block;
+                    let mut k = 0usize;
+                    while b != 0 {
+                        unsafe {
+                            *active_offsets.get_unchecked_mut(k) = b.trailing_zeros() as u8;
+                        }
+                        b &= b - 1;
+                        k += 1;
+                    }
+                    let sparse_ptr = sparse_projs.as_mut_ptr();
+                    let offsets_ptr = active_offsets.as_ptr();
+                    for c_idx in 0..c_len {
+                        let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                        let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                        let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
+                        let mut j = 0usize;
+                        while j + 3 < ones {
+                            let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                            let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                            let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                            let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                            let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                            let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                            let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                            let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                            unsafe {
+                                *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
+                                *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
+                                *sparse_ptr.add(j + 2) ^= *c_table_ptr.add(r2);
+                                *sparse_ptr.add(j + 3) ^= *c_table_ptr.add(r3);
+                            }
+                            j += 4;
+                        }
+                        while j < ones {
+                            let off = unsafe { *offsets_ptr.add(j) as usize };
+                            let r = unsafe { (*c_ptr.add(off)).to_usize() };
+                            unsafe {
+                                *sparse_ptr.add(j) ^= *c_table_ptr.add(r);
+                            }
+                            j += 1;
+                        }
+                    }
+                    let mut kept_mask = 0u64;
+                    for j in 0..ones {
+                        let tz = unsafe { *offsets_ptr.add(j) };
+                        let bit = 1u64 << tz;
+                        let mut proj = unsafe { *sparse_ptr.add(j) };
+                        if proj == 0 {
+                            proj = 1;
+                        }
+                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                        loop {
+                            let slot = unsafe { *table_ptr.add(idx) };
+                            if slot == 0 {
+                                unsafe {
+                                    *table_ptr.add(idx) = proj;
+                                    *added_ptr.add(added_len) = idx;
+                                }
+                                added_len += 1;
+                                kept_mask |= bit;
+                                break;
+                            }
+                            if slot == proj {
+                                break;
+                            }
+                            idx = (idx + 1) & mask;
+                        }
+                    }
+                    unsafe {
+                        *bits_ptr.add(block_idx) = kept_mask;
+                    }
+                    kept_count += kept_mask.count_ones() as usize;
+                    continue;
+                }
+
                 let chunk_len = (block_start + 64).min(num_guesses) - block_start;
 
                 projs_block.fill(0);
