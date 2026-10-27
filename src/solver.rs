@@ -1201,10 +1201,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut collisions = 0;
                         let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                        for i in 0..n {
-                            if i == idx {
-                                continue;
-                            }
+                        for i in 0..idx {
                             let c = unsafe { *bucket_ptr.add(i) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             let word_idx = r >> 6;
@@ -1219,6 +1216,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else {
                                 unsafe {
                                     *word_ptr = word_val | bit;
+                                }
+                            }
+                        }
+                        if collisions < max_collisions {
+                            for i in (idx + 1)..n {
+                                let c = unsafe { *bucket_ptr.add(i) };
+                                let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                                let word_idx = r >> 6;
+                                let bit = 1u64 << (r & 63);
+                                let word_ptr = unsafe { seen_ptr.add(word_idx) };
+                                let word_val = unsafe { *word_ptr };
+                                if (word_val & bit) != 0 {
+                                    collisions += 1;
+                                    if collisions >= max_collisions {
+                                        break;
+                                    }
+                                } else {
+                                    unsafe {
+                                        *word_ptr = word_val | bit;
+                                    }
                                 }
                             }
                         }
@@ -1764,11 +1781,54 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if (unsafe { *parent_active_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
                 continue;
             }
+            let g_off = g * self.matrix.num_candidates;
+            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
+            if M <= 4 && max_allowed_duplicates == 0 {
+                let mut seen = [0u64; M];
+                let mut dup = false;
+                for i in 0..cand_idx {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                    let bit = 1u64 << (r & 63);
+                    if (*word & bit) != 0 {
+                        dup = true;
+                        break;
+                    }
+                    *word |= bit;
+                }
+                if !dup {
+                    for i in (cand_idx + 1)..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                        let bit = 1u64 << (r & 63);
+                        if (*word & bit) != 0 {
+                            dup = true;
+                            break;
+                        }
+                        *word |= bit;
+                    }
+                }
+                if dup {
+                    min_val_found = min_val_found.min(best_val);
+                    continue;
+                }
+                let lb_cost = (2 * c_len - 1) as u32;
+                local_max_k = c_len;
+                if lb_cost < best_val {
+                    valid_phase1_k = c_len;
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                } else {
+                    min_val_found = min_val_found.min(lb_cost);
+                }
+                break;
+            }
             let mut num_non_empty = 0;
             let mut duplicates = 0;
             let mut aborted = false;
-            let g_off = g * self.matrix.num_candidates;
-            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
             for i in 0..cand_idx {
                 let c = unsafe { *set_ptr.add(i) };
                 let r = unsafe { (*g_ptr.add(c)).to_usize() };
@@ -1960,123 +2020,131 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 break;
             }
         }
-        if phase1_tuples.len() == 2 {
-            let t0 = phase1_tuples[0];
-            let t1 = phase1_tuples[1];
-            let k0 = (t0.2, t0.1, t0.0);
-            let k1 = (t1.2, t1.1, t1.0);
-            if k0 > k1 {
-                phase1_tuples[0] = t1;
-                phase1_tuples[1] = t0;
-            }
-        } else if phase1_tuples.len() == 3 {
-            let mut t0 = phase1_tuples[0];
-            let mut t1 = phase1_tuples[1];
-            let mut t2 = phase1_tuples[2];
-            let mut k0 = (t0.2, t0.1, t0.0);
-            let mut k1 = (t1.2, t1.1, t1.0);
-            let mut k2 = (t2.2, t2.1, t2.0);
-            if k0 > k1 {
-                std::mem::swap(&mut t0, &mut t1);
-                std::mem::swap(&mut k0, &mut k1);
-            }
-            if k1 > k2 {
-                std::mem::swap(&mut t1, &mut t2);
-                std::mem::swap(&mut k1, &mut k2);
-            }
-            if k0 > k1 {
-                std::mem::swap(&mut t0, &mut t1);
-            }
-            phase1_tuples[0] = t0;
-            phase1_tuples[1] = t1;
-            phase1_tuples[2] = t2;
-        } else if phase1_tuples.len() == 4 {
-            let mut t0 = phase1_tuples[0];
-            let mut t1 = phase1_tuples[1];
-            let mut t2 = phase1_tuples[2];
-            let mut t3 = phase1_tuples[3];
-            let mut k0 = (t0.2, t0.1, t0.0);
-            let mut k1 = (t1.2, t1.1, t1.0);
-            let mut k2 = (t2.2, t2.1, t2.0);
-            let mut k3 = (t3.2, t3.1, t3.0);
-            if k0 > k1 {
-                std::mem::swap(&mut t0, &mut t1);
-                std::mem::swap(&mut k0, &mut k1);
-            }
-            if k2 > k3 {
-                std::mem::swap(&mut t2, &mut t3);
-                std::mem::swap(&mut k2, &mut k3);
-            }
-            if k0 > k2 {
-                std::mem::swap(&mut t0, &mut t2);
-                std::mem::swap(&mut k0, &mut k2);
-            }
-            if k1 > k3 {
-                std::mem::swap(&mut t1, &mut t3);
-                std::mem::swap(&mut k1, &mut k3);
-            }
-            if k1 > k2 {
-                std::mem::swap(&mut t1, &mut t2);
-            }
-            phase1_tuples[0] = t0;
-            phase1_tuples[1] = t1;
-            phase1_tuples[2] = t2;
-            phase1_tuples[3] = t3;
-        } else if phase1_tuples.len() > 4 && phase1_tuples.len() <= 32 {
-            let p1_ptr = phase1_tuples.as_mut_ptr();
-            let p1_len = phase1_tuples.len();
-            for j in 1..p1_len {
-                let key = unsafe { *p1_ptr.add(j) };
-                let mut k = j;
-                while k > 0 {
-                    let prev = unsafe { *p1_ptr.add(k - 1) };
-                    let prev_greater = prev.2 > key.2
-                        || (prev.2 == key.2
-                            && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
-                    if prev_greater {
-                        unsafe {
-                            *p1_ptr.add(k) = prev;
+        if best_val > local_lb && !phase1_tuples.is_empty() {
+            if phase1_tuples.len() == 2 {
+                let t0 = phase1_tuples[0];
+                let t1 = phase1_tuples[1];
+                let k0 = (t0.2, t0.1, t0.0);
+                let k1 = (t1.2, t1.1, t1.0);
+                if k0 > k1 {
+                    phase1_tuples[0] = t1;
+                    phase1_tuples[1] = t0;
+                }
+            } else if phase1_tuples.len() == 3 {
+                let mut t0 = phase1_tuples[0];
+                let mut t1 = phase1_tuples[1];
+                let mut t2 = phase1_tuples[2];
+                let mut k0 = (t0.2, t0.1, t0.0);
+                let mut k1 = (t1.2, t1.1, t1.0);
+                let mut k2 = (t2.2, t2.1, t2.0);
+                if k0 > k1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k1 > k2 {
+                    std::mem::swap(&mut t1, &mut t2);
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k0 > k1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                }
+                phase1_tuples[0] = t0;
+                phase1_tuples[1] = t1;
+                phase1_tuples[2] = t2;
+            } else if phase1_tuples.len() == 4 {
+                let mut t0 = phase1_tuples[0];
+                let mut t1 = phase1_tuples[1];
+                let mut t2 = phase1_tuples[2];
+                let mut t3 = phase1_tuples[3];
+                let mut k0 = (t0.2, t0.1, t0.0);
+                let mut k1 = (t1.2, t1.1, t1.0);
+                let mut k2 = (t2.2, t2.1, t2.0);
+                let mut k3 = (t3.2, t3.1, t3.0);
+                if k0 > k1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 > k3 {
+                    std::mem::swap(&mut t2, &mut t3);
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 > k2 {
+                    std::mem::swap(&mut t0, &mut t2);
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 > k3 {
+                    std::mem::swap(&mut t1, &mut t3);
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 > k2 {
+                    std::mem::swap(&mut t1, &mut t2);
+                }
+                phase1_tuples[0] = t0;
+                phase1_tuples[1] = t1;
+                phase1_tuples[2] = t2;
+                phase1_tuples[3] = t3;
+            } else if phase1_tuples.len() > 4 && phase1_tuples.len() <= 32 {
+                let p1_ptr = phase1_tuples.as_mut_ptr();
+                let p1_len = phase1_tuples.len();
+                for j in 1..p1_len {
+                    let key = unsafe { *p1_ptr.add(j) };
+                    let mut k = j;
+                    while k > 0 {
+                        let prev = unsafe { *p1_ptr.add(k - 1) };
+                        let prev_greater = prev.2 > key.2
+                            || (prev.2 == key.2
+                                && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
+                        if prev_greater {
+                            unsafe {
+                                *p1_ptr.add(k) = prev;
+                            }
+                            k -= 1;
+                        } else {
+                            break;
                         }
-                        k -= 1;
-                    } else {
-                        break;
+                    }
+                    unsafe {
+                        *p1_ptr.add(k) = key;
                     }
                 }
-                unsafe {
-                    *p1_ptr.add(k) = key;
-                }
+            } else if phase1_tuples.len() > 32 {
+                phase1_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
             }
-        } else if phase1_tuples.len() > 32 {
-            phase1_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
-        }
 
-        for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if self.current_cost_so_far + local_lb >= current_global_beta {
-                cut_by_global = true;
-                break;
-            }
-            if self.current_cost_so_far + g_lb >= current_global_beta {
-                cut_by_global = true;
-                min_val_found = min_val_found.min(g_lb);
-                self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
-                break;
-            }
-            if g_lb >= best_val {
-                min_val_found = min_val_found.min(g_lb);
-                self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
-                break;
-            }
-            let val =
-                self.min_guess_val_inner(set, &mut equiv_state, _g, best_val, depth, parent_max_k);
-            min_val_found = min_val_found.min(val);
-            if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                cut_by_global = true;
-            }
-            if val < best_val {
-                best_val = val;
-                if best_val <= local_lb {
+            for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                if self.current_cost_so_far + local_lb >= current_global_beta {
+                    cut_by_global = true;
                     break;
+                }
+                if self.current_cost_so_far + g_lb >= current_global_beta {
+                    cut_by_global = true;
+                    min_val_found = min_val_found.min(g_lb);
+                    self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                    break;
+                }
+                if g_lb >= best_val {
+                    min_val_found = min_val_found.min(g_lb);
+                    self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                    break;
+                }
+                let val = self.min_guess_val_inner(
+                    set,
+                    &mut equiv_state,
+                    _g,
+                    best_val,
+                    depth,
+                    parent_max_k,
+                );
+                min_val_found = min_val_found.min(val);
+                if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                    cut_by_global = true;
+                }
+                if val < best_val {
+                    best_val = val;
+                    if best_val <= local_lb {
+                        break;
+                    }
                 }
             }
         }
@@ -2160,6 +2228,33 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let shared = g_mask & c_mask;
                         if (shared & shared.wrapping_sub(1)) == 0 && (shared & multi_c_mask) == 0 {
                             continue;
+                        }
+
+                        if M <= 4 && max_allowed_duplicates == 0 {
+                            let mut seen = [0u64; M];
+                            let mut dup = false;
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
+                                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                                let bit = 1u64 << (r & 63);
+                                if (*word & bit) != 0 {
+                                    dup = true;
+                                    break;
+                                }
+                                *word |= bit;
+                            }
+                            if dup {
+                                min_val_found = min_val_found.min(best_val);
+                                continue;
+                            }
+                            let lb_cost = (2 * c_len) as u32;
+                            local_max_k = c_len;
+                            valid_phase2_k = c_len;
+                            self.local_metrics.guesses_evaluated += 1;
+                            min_val_found = min_val_found.min(lb_cost);
+                            best_val = lb_cost;
+                            break 'guess_loop;
                         }
 
                         let mut num_non_empty = 0;
