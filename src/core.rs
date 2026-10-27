@@ -161,11 +161,13 @@ impl Response {
 pub trait ResponseElem:
     Copy + Default + Send + Sync + 'static + PartialEq + Eq + PartialOrd + Ord
 {
+    const IS_U8: bool = false;
     fn to_usize(self) -> usize;
     fn from_usize(val: usize) -> Self;
 }
 
 impl ResponseElem for u8 {
+    const IS_U8: bool = true;
     #[inline(always)]
     fn to_usize(self) -> usize {
         self as usize
