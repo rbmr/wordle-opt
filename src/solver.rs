@@ -3671,7 +3671,7 @@ impl<'a> Solver<'a> {
                         let mut lb = set.len() as u32;
                         let win_r = matrix.win_response.0 as usize;
                         let mut expected_rem = 0u32;
-                        for (r_idx, &cnt) in counts.iter().enumerate() {
+                        for (r_idx, &cnt) in counts[..matrix.num_responses].iter().enumerate() {
                             if cnt > 0 {
                                 expected_rem += (cnt as u32) * (cnt as u32);
                                 if r_idx != win_r {
