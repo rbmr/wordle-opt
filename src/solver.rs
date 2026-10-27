@@ -373,7 +373,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 const ROT4: [[usize; 3]; 4] = [[1, 2, 3], [2, 3, 0], [3, 0, 1], [0, 1, 2]];
                 let c = [c0, c1, c2, c3];
-                let mut best_inside = u32::MAX;
+                let mut best_inside_exact = false;
 
                 for i in 0..4 {
                     let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
@@ -388,27 +388,34 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rb = unsafe { *gi_ptr.add(cb) };
                     let rc = unsafe { *gi_ptr.add(cc) };
 
-                    if best_inside == 8 {
-                        if ra == rb || ra == rc || rb == rc {
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
                             continue;
                         }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
                         return (7, true);
                     }
-
-                    if ra != rb && ra != rc && rb != rc {
-                        return (7, true);
-                    }
-
-                    if ra != rb || rb != rc {
-                        best_inside = 8;
-                    }
+                    best_inside_exact = true;
                 }
 
-                if best_inside == 8 {
-                    (8, true)
-                } else {
-                    (8, false)
-                }
+                (8, best_inside_exact)
             }
             5 => {
                 let bucket_ptr = bucket.as_ptr();
@@ -429,7 +436,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     [0, 1, 2, 3],
                 ];
                 let c = [c0, c1, c2, c3, c4];
-                let mut best_inside = u32::MAX;
+                let mut best_inside_exact = false;
 
                 for i in 0..5 {
                     let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
@@ -446,41 +453,52 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
 
-                    if best_inside == 10 {
-                        if ra == rb || ra == rc || ra == rd || rb == rc || rb == rd || rc == rd {
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
                             continue;
                         }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
                         return (9, true);
                     }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_cd = rc == rd;
-
-                    let coll_mask = (eq_ab as u8)
-                        | ((eq_ac as u8) << 1)
-                        | ((eq_ad as u8) << 2)
-                        | ((eq_bc as u8) << 3)
-                        | ((eq_bd as u8) << 4)
-                        | ((eq_cd as u8) << 5);
-
-                    if coll_mask == 0 {
-                        return (9, true);
-                    }
-
-                    if (coll_mask & (coll_mask - 1)) == 0 {
-                        best_inside = 10;
-                    }
+                    best_inside_exact = true;
                 }
 
-                if best_inside == 10 {
-                    (10, true)
-                } else {
-                    (10, false)
-                }
+                (10, best_inside_exact)
             }
             6 => {
                 let bucket_ptr = bucket.as_ptr();
@@ -503,7 +521,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     [0, 1, 2, 3, 4],
                 ];
                 let c = [c0, c1, c2, c3, c4, c5];
-                let mut best_inside = u32::MAX;
+                let mut best_inside_exact = false;
 
                 for i in 0..6 {
                     let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
@@ -522,59 +540,76 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rd = unsafe { *gi_ptr.add(cd) };
                     let re = unsafe { *gi_ptr.add(ce) };
 
-                    if best_inside == 12 {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rc == rd
-                            || rc == re
-                            || rd == re
-                        {
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
                             continue;
                         }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
                         return (11, true);
                     }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_de = rd == re;
-
-                    let coll_mask = (eq_ab as u16)
-                        | ((eq_ac as u16) << 1)
-                        | ((eq_ad as u16) << 2)
-                        | ((eq_ae as u16) << 3)
-                        | ((eq_bc as u16) << 4)
-                        | ((eq_bd as u16) << 5)
-                        | ((eq_be as u16) << 6)
-                        | ((eq_cd as u16) << 7)
-                        | ((eq_ce as u16) << 8)
-                        | ((eq_de as u16) << 9);
-
-                    if coll_mask == 0 {
-                        return (11, true);
-                    }
-
-                    if (coll_mask & (coll_mask - 1)) == 0 {
-                        best_inside = 12;
-                    }
+                    best_inside_exact = true;
                 }
 
-                if best_inside == 12 {
-                    (12, true)
-                } else {
-                    (12, false)
-                }
+                (12, best_inside_exact)
             }
             7 => {
                 let bucket_ptr = bucket.as_ptr();
@@ -599,7 +634,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     [0, 1, 2, 3, 4, 5],
                 ];
                 let c = [c0, c1, c2, c3, c4, c5, c6];
-                let mut best_inside = u32::MAX;
+                let mut best_inside_exact = false;
 
                 for i in 0..7 {
                     let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
@@ -620,74 +655,106 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let re = unsafe { *gi_ptr.add(ce) };
                     let rf = unsafe { *gi_ptr.add(cf) };
 
-                    if best_inside == 14 {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || ra == rf
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rb == rf
-                            || rc == rd
-                            || rc == re
-                            || rc == rf
-                            || rd == re
-                            || rd == rf
-                            || re == rf
-                        {
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
                             continue;
                         }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
                         return (13, true);
                     }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_af = ra == rf;
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_bf = rb == rf;
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_cf = rc == rf;
-                    let eq_de = rd == re;
-                    let eq_df = rd == rf;
-                    let eq_ef = re == rf;
-
-                    let coll_mask = (eq_ab as u16)
-                        | ((eq_ac as u16) << 1)
-                        | ((eq_ad as u16) << 2)
-                        | ((eq_ae as u16) << 3)
-                        | ((eq_af as u16) << 4)
-                        | ((eq_bc as u16) << 5)
-                        | ((eq_bd as u16) << 6)
-                        | ((eq_be as u16) << 7)
-                        | ((eq_bf as u16) << 8)
-                        | ((eq_cd as u16) << 9)
-                        | ((eq_ce as u16) << 10)
-                        | ((eq_cf as u16) << 11)
-                        | ((eq_de as u16) << 12)
-                        | ((eq_df as u16) << 13)
-                        | ((eq_ef as u16) << 14);
-
-                    if coll_mask == 0 {
-                        return (13, true);
-                    }
-
-                    if (coll_mask & (coll_mask - 1)) == 0 {
-                        best_inside = 14;
-                    }
+                    best_inside_exact = true;
                 }
 
-                if best_inside == 14 {
-                    (14, true)
-                } else {
-                    (14, false)
-                }
+                (14, best_inside_exact)
             }
             8 => {
                 let bucket_ptr = bucket.as_ptr();
@@ -714,7 +781,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     [0, 1, 2, 3, 4, 5, 6],
                 ];
                 let c = [c0, c1, c2, c3, c4, c5, c6, c7];
-                let mut best_inside = u32::MAX;
+                let mut best_inside_exact = false;
 
                 for i in 0..8 {
                     let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
@@ -737,97 +804,142 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
 
-                    if best_inside == 16 {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || ra == rf
-                            || ra == rg
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rb == rf
-                            || rb == rg
-                            || rc == rd
-                            || rc == re
-                            || rc == rf
-                            || rc == rg
-                            || rd == re
-                            || rd == rf
-                            || rd == rg
-                            || re == rf
-                            || re == rg
-                            || rf == rg
-                        {
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
                             continue;
                         }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rf == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
                         return (15, true);
                     }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_af = ra == rf;
-                    let eq_ag = ra == rg;
-
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_bf = rb == rf;
-                    let eq_bg = rb == rg;
-
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_cf = rc == rf;
-                    let eq_cg = rc == rg;
-
-                    let eq_de = rd == re;
-                    let eq_df = rd == rf;
-                    let eq_dg = rd == rg;
-
-                    let eq_ef = re == rf;
-                    let eq_eg = re == rg;
-
-                    let eq_fg = rf == rg;
-
-                    let coll_mask = (eq_ab as u32)
-                        | ((eq_ac as u32) << 1)
-                        | ((eq_ad as u32) << 2)
-                        | ((eq_ae as u32) << 3)
-                        | ((eq_af as u32) << 4)
-                        | ((eq_ag as u32) << 5)
-                        | ((eq_bc as u32) << 6)
-                        | ((eq_bd as u32) << 7)
-                        | ((eq_be as u32) << 8)
-                        | ((eq_bf as u32) << 9)
-                        | ((eq_bg as u32) << 10)
-                        | ((eq_cd as u32) << 11)
-                        | ((eq_ce as u32) << 12)
-                        | ((eq_cf as u32) << 13)
-                        | ((eq_cg as u32) << 14)
-                        | ((eq_de as u32) << 15)
-                        | ((eq_df as u32) << 16)
-                        | ((eq_dg as u32) << 17)
-                        | ((eq_ef as u32) << 18)
-                        | ((eq_eg as u32) << 19)
-                        | ((eq_fg as u32) << 20);
-
-                    if coll_mask == 0 {
-                        return (15, true);
-                    }
-
-                    if (coll_mask & (coll_mask - 1)) == 0 {
-                        best_inside = 16;
-                    }
+                    best_inside_exact = true;
                 }
 
-                if best_inside == 16 {
-                    (16, true)
-                } else {
-                    (16, false)
-                }
+                (16, best_inside_exact)
             }
             9 => {
                 let bucket_ptr = bucket.as_ptr();
@@ -856,7 +968,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     [0, 1, 2, 3, 4, 5, 6, 7],
                 ];
                 let c = [c0, c1, c2, c3, c4, c5, c6, c7, c8];
-                let mut best_inside = u32::MAX;
+                let mut best_inside_exact = false;
 
                 for i in 0..9 {
                     let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
@@ -881,119 +993,184 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rg = unsafe { *gi_ptr.add(cg) };
                     let rh = unsafe { *gi_ptr.add(ch) };
 
-                    if best_inside == 18 {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || ra == rf
-                            || ra == rg
-                            || ra == rh
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rb == rf
-                            || rb == rg
-                            || rb == rh
-                            || rc == rd
-                            || rc == re
-                            || rc == rf
-                            || rc == rg
-                            || rc == rh
-                            || rd == re
-                            || rd == rf
-                            || rd == rg
-                            || rd == rh
-                            || re == rf
-                            || re == rg
-                            || re == rh
-                            || rf == rg
-                            || rf == rh
-                            || rg == rh
-                        {
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
                             continue;
                         }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rf == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rf == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rg == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
                         return (17, true);
                     }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_af = ra == rf;
-                    let eq_ag = ra == rg;
-                    let eq_ah = ra == rh;
-
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_bf = rb == rf;
-                    let eq_bg = rb == rg;
-                    let eq_bh = rb == rh;
-
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_cf = rc == rf;
-                    let eq_cg = rc == rg;
-                    let eq_ch = rc == rh;
-
-                    let eq_de = rd == re;
-                    let eq_df = rd == rf;
-                    let eq_dg = rd == rg;
-                    let eq_dh = rd == rh;
-
-                    let eq_ef = re == rf;
-                    let eq_eg = re == rg;
-                    let eq_eh = re == rh;
-
-                    let eq_fg = rf == rg;
-                    let eq_fh = rf == rh;
-
-                    let eq_gh = rg == rh;
-
-                    let coll_mask = (eq_ab as u32)
-                        | ((eq_ac as u32) << 1)
-                        | ((eq_ad as u32) << 2)
-                        | ((eq_ae as u32) << 3)
-                        | ((eq_af as u32) << 4)
-                        | ((eq_ag as u32) << 5)
-                        | ((eq_ah as u32) << 6)
-                        | ((eq_bc as u32) << 7)
-                        | ((eq_bd as u32) << 8)
-                        | ((eq_be as u32) << 9)
-                        | ((eq_bf as u32) << 10)
-                        | ((eq_bg as u32) << 11)
-                        | ((eq_bh as u32) << 12)
-                        | ((eq_cd as u32) << 13)
-                        | ((eq_ce as u32) << 14)
-                        | ((eq_cf as u32) << 15)
-                        | ((eq_cg as u32) << 16)
-                        | ((eq_ch as u32) << 17)
-                        | ((eq_de as u32) << 18)
-                        | ((eq_df as u32) << 19)
-                        | ((eq_dg as u32) << 20)
-                        | ((eq_dh as u32) << 21)
-                        | ((eq_ef as u32) << 22)
-                        | ((eq_eg as u32) << 23)
-                        | ((eq_eh as u32) << 24)
-                        | ((eq_fg as u32) << 25)
-                        | ((eq_fh as u32) << 26)
-                        | ((eq_gh as u32) << 27);
-
-                    if coll_mask == 0 {
-                        return (17, true);
-                    }
-
-                    if (coll_mask & (coll_mask - 1)) == 0 {
-                        best_inside = 18;
-                    }
+                    best_inside_exact = true;
                 }
 
-                if best_inside == 18 {
-                    (18, true)
-                } else {
-                    (18, false)
-                }
+                (18, best_inside_exact)
             }
             _ => {
                 let mut best_inside = u32::MAX;
