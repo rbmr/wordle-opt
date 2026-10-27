@@ -110,8 +110,8 @@ impl SolverScratch {
         let mut s = Self {
             scratch_is_in_set: std::array::from_fn(|_| Vec::new()),
             scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
-            scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
-            scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
+            scratch_phase1_tuples: std::array::from_fn(|_| Vec::with_capacity(40)),
+            scratch_phase2_tuples: std::array::from_fn(|_| Vec::with_capacity(num_guesses)),
             scratch_hash_table: std::array::from_fn(|_| Vec::new()),
             scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
             scratch_projs: std::array::from_fn(|_| Vec::new()),
@@ -135,6 +135,12 @@ impl SolverScratch {
             .next_power_of_two()
             .max(32768);
         for d in 0..32 {
+            if self.scratch_phase1_tuples[d].capacity() < 40 {
+                self.scratch_phase1_tuples[d].reserve(40);
+            }
+            if self.scratch_phase2_tuples[d].capacity() < num_guesses {
+                self.scratch_phase2_tuples[d].reserve(num_guesses);
+            }
             if self.scratch_is_in_set[d].len() < words {
                 self.scratch_is_in_set[d].resize(words, 0);
             }
@@ -1286,6 +1292,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
         let active_guesses_ptr = active_guesses_slice.as_ptr();
         let set_ptr = set.as_ptr();
+        phase1_tuples.reserve(c_len);
         for (cand_idx, &cand) in set.iter().enumerate() {
             let g = unsafe { *cand_to_guess_ptr.add(cand) };
             if (unsafe { *active_guesses_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
@@ -1616,6 +1623,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 (3 * c_len as u32).saturating_sub(best_val.saturating_sub(1)) as usize;
             let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
             if c_len >= min_k_needed {
+                let num_guesses = self.dict.guesses.len();
+                phase2_tuples.reserve(num_guesses);
+
                 let mut max_allowed_duplicates = c_len - min_k_needed;
                 let mut is_in_set =
                     std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
@@ -1632,11 +1642,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     multi_c_mask |= c_mask & m;
                     c_mask |= m;
                     unsafe {
-                        *is_in_set_ptr.add(g / 64) |= 1 << (g % 64);
+                        *is_in_set_ptr.add(g >> 6) |= 1u64 << (g & 63);
                     }
                 }
                 let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
-                let num_guesses = self.dict.guesses.len();
                 let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
                 let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
                 let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
@@ -1670,10 +1679,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         continue;
                     }
                     let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
+                    let block_base = block_idx << 6;
+                    #[allow(clippy::manual_isolate_lowest_one)]
                     while b != 0 {
-                        let tz = b.trailing_zeros();
-                        let g = block_idx * 64 + tz as usize;
-                        b &= b - 1;
+                        let lowest_bit = b & b.wrapping_neg();
+                        let tz = lowest_bit.trailing_zeros();
+                        let g = block_base | (tz as usize);
+                        b ^= lowest_bit;
 
                         let g_mask = unsafe { *guess_masks_ptr.add(g) };
                         let shared = g_mask & c_mask;
@@ -1914,7 +1926,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let c = unsafe { *set_ptr.add(i) };
                     let g = unsafe { *cand_to_guess_ptr.add(c) };
                     unsafe {
-                        *is_in_set_ptr.add(g / 64) = 0;
+                        *is_in_set_ptr.add(g >> 6) = 0;
                     }
                 }
                 self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
