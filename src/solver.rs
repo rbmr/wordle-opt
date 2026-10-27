@@ -2447,6 +2447,47 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     }
                 }
+            } else if num_eval == 4 {
+                let r0 = eval_entries[0].0;
+                let r1 = eval_entries[1].0;
+                let r2 = eval_entries[2].0;
+                let r3 = eval_entries[3].0;
+                let target_count =
+                    (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1 + eval_entries[3].1)
+                        as usize;
+                let mut found_count = 0;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r3 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[3] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    }
+                }
             } else {
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
@@ -2466,6 +2507,33 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut small_is_exact = [false; 5];
             let mut all_exact = true;
 
+            macro_rules! extract_small_p {
+                ($idx:expr) => {
+                    if !small_p_extracted[$idx] {
+                        let entry = eval_entries[$idx];
+                        let r_target = entry.0;
+                        let target_len = entry.1 as usize;
+                        let mut p_idx = 0;
+                        let set_ptr = set.as_ptr();
+                        let p_slice_ptr = small_p[$idx].as_mut_ptr();
+                        for cand_idx in 0..c_len {
+                            let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                            if r == r_target {
+                                let c = unsafe { *set_ptr.add(cand_idx) };
+                                unsafe {
+                                    *p_slice_ptr.add(p_idx) = c;
+                                }
+                                p_idx += 1;
+                                if p_idx == target_len {
+                                    break;
+                                }
+                            }
+                        }
+                        small_p_extracted[$idx] = true;
+                    }
+                };
+            }
+
             for i in 0..num_eval {
                 let entry = eval_entries[i];
                 let p_len = entry.1 as usize;
@@ -2478,23 +2546,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
                         (cached_val.max(initial_lb), is_exact)
                     } else {
-                        if !small_p_extracted[i] {
-                            let r_target = entry.0;
-                            let mut p_idx = 0;
-                            let set_ptr = set.as_ptr();
-                            for cand_idx in 0..c_len {
-                                let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                                if r == r_target {
-                                    let c = unsafe { *set_ptr.add(cand_idx) };
-                                    small_p[i][p_idx] = c;
-                                    p_idx += 1;
-                                    if p_idx == p_len {
-                                        break;
-                                    }
-                                }
-                            }
-                            small_p_extracted[i] = true;
-                        }
+                        extract_small_p!(i);
                         let p_slice = &small_p[i][..p_len];
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
@@ -2544,24 +2596,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let p_len = small_p_len[i] as usize;
-                if !small_p_extracted[i] {
-                    let entry = eval_entries[i];
-                    let r_target = entry.0;
-                    let mut p_idx = 0;
-                    let set_ptr = set.as_ptr();
-                    for cand_idx in 0..c_len {
-                        let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                        if r == r_target {
-                            let c = unsafe { *set_ptr.add(cand_idx) };
-                            small_p[i][p_idx] = c;
-                            p_idx += 1;
-                            if p_idx == p_len {
-                                break;
-                            }
-                        }
-                    }
-                    small_p_extracted[i] = true;
-                }
+                extract_small_p!(i);
                 let p_slice = &small_p[i][..p_len];
                 let p_hash = small_p_hash[i];
 
