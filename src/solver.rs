@@ -314,11 +314,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rb = unsafe { *gi_ptr.add(cb) };
                     let rc = unsafe { *gi_ptr.add(cc) };
 
+                    if best_inside == 8 {
+                        if ra == rb || ra == rc || rb == rc {
+                            continue;
+                        }
+                        return (7, true);
+                    }
+
                     if ra != rb && ra != rc && rb != rc {
                         return (7, true);
                     }
 
-                    if best_inside != 8 && (ra != rb || rb != rc) {
+                    if ra != rb || rb != rc {
                         best_inside = 8;
                     }
                 }
@@ -365,6 +372,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
 
+                    if best_inside == 10 {
+                        if ra == rb || ra == rc || ra == rd || rb == rc || rb == rd || rc == rd {
+                            continue;
+                        }
+                        return (9, true);
+                    }
+
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
                     let eq_ad = ra == rd;
@@ -383,7 +397,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         return (9, true);
                     }
 
-                    if best_inside != 10 && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside = 10;
                     }
                 }
@@ -434,6 +448,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rd = unsafe { *gi_ptr.add(cd) };
                     let re = unsafe { *gi_ptr.add(ce) };
 
+                    if best_inside == 12 {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rc == rd
+                            || rc == re
+                            || rd == re
+                        {
+                            continue;
+                        }
+                        return (11, true);
+                    }
+
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
                     let eq_ad = ra == rd;
@@ -460,7 +491,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         return (11, true);
                     }
 
-                    if best_inside != 12 && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside = 12;
                     }
                 }
@@ -515,6 +546,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let re = unsafe { *gi_ptr.add(ce) };
                     let rf = unsafe { *gi_ptr.add(cf) };
 
+                    if best_inside == 14 {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || ra == rf
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rb == rf
+                            || rc == rd
+                            || rc == re
+                            || rc == rf
+                            || rd == re
+                            || rd == rf
+                            || re == rf
+                        {
+                            continue;
+                        }
+                        return (13, true);
+                    }
+
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
                     let eq_ad = ra == rd;
@@ -551,7 +604,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         return (13, true);
                     }
 
-                    if best_inside != 14 && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside = 14;
                     }
                 }
@@ -610,6 +663,34 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
 
+                    if best_inside == 16 {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || ra == rf
+                            || ra == rg
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rb == rf
+                            || rb == rg
+                            || rc == rd
+                            || rc == re
+                            || rc == rf
+                            || rc == rg
+                            || rd == re
+                            || rd == rf
+                            || rd == rg
+                            || re == rf
+                            || re == rg
+                            || rf == rg
+                        {
+                            continue;
+                        }
+                        return (15, true);
+                    }
+
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
                     let eq_ad = ra == rd;
@@ -663,7 +744,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         return (15, true);
                     }
 
-                    if best_inside != 16 && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside = 16;
                     }
                 }
@@ -725,6 +806,41 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
                     let rh = unsafe { *gi_ptr.add(ch) };
+
+                    if best_inside == 18 {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || ra == rf
+                            || ra == rg
+                            || ra == rh
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rb == rf
+                            || rb == rg
+                            || rb == rh
+                            || rc == rd
+                            || rc == re
+                            || rc == rf
+                            || rc == rg
+                            || rc == rh
+                            || rd == re
+                            || rd == rf
+                            || rd == rg
+                            || rd == rh
+                            || re == rf
+                            || re == rg
+                            || re == rh
+                            || rf == rg
+                            || rf == rh
+                            || rg == rh
+                        {
+                            continue;
+                        }
+                        return (17, true);
+                    }
 
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
@@ -794,7 +910,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         return (17, true);
                     }
 
-                    if best_inside != 18 && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside = 18;
                     }
                 }
