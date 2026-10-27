@@ -2883,75 +2883,51 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 split
             };
 
-            let mut sorted_set =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
-            if sorted_set.len() < set.len() {
-                sorted_set.resize(set.len(), 0);
-            }
-            let sorted_set_ptr = sorted_set.as_mut_ptr();
-
-            let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
-            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
-            let mut curr = 0;
-            for r in 0..R {
-                unsafe {
-                    *current_offsets_ptr.add(r) = curr;
-                    curr += *counts_ptr.add(r);
-                }
-            }
-
             cleanup.has_hashes = true;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut i = 0;
-            while i + 3 < c_len {
+            while i + 7 < c_len {
                 let c0 = unsafe { *set_ptr.add(i) };
                 let c1 = unsafe { *set_ptr.add(i + 1) };
                 let c2 = unsafe { *set_ptr.add(i + 2) };
                 let c3 = unsafe { *set_ptr.add(i + 3) };
+                let c4 = unsafe { *set_ptr.add(i + 4) };
+                let c5 = unsafe { *set_ptr.add(i + 5) };
+                let c6 = unsafe { *set_ptr.add(i + 6) };
+                let c7 = unsafe { *set_ptr.add(i + 7) };
                 let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
                 let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
                 let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
                 let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
                 let z0 = unsafe { *zobrist_ptr.add(c0) };
                 let z1 = unsafe { *zobrist_ptr.add(c1) };
                 let z2 = unsafe { *zobrist_ptr.add(c2) };
                 let z3 = unsafe { *zobrist_ptr.add(c3) };
+                let z4 = unsafe { *zobrist_ptr.add(c4) };
+                let z5 = unsafe { *zobrist_ptr.add(c5) };
+                let z6 = unsafe { *zobrist_ptr.add(c6) };
+                let z7 = unsafe { *zobrist_ptr.add(c7) };
                 unsafe {
-                    let pos_ptr0 = current_offsets_ptr.add(r0);
-                    let pos0 = *pos_ptr0 as usize;
-                    *sorted_set_ptr.add(pos0) = c0;
-                    *pos_ptr0 += 1;
                     *hashes_ptr.add(r0) ^= z0;
-
-                    let pos_ptr1 = current_offsets_ptr.add(r1);
-                    let pos1 = *pos_ptr1 as usize;
-                    *sorted_set_ptr.add(pos1) = c1;
-                    *pos_ptr1 += 1;
                     *hashes_ptr.add(r1) ^= z1;
-
-                    let pos_ptr2 = current_offsets_ptr.add(r2);
-                    let pos2 = *pos_ptr2 as usize;
-                    *sorted_set_ptr.add(pos2) = c2;
-                    *pos_ptr2 += 1;
                     *hashes_ptr.add(r2) ^= z2;
-
-                    let pos_ptr3 = current_offsets_ptr.add(r3);
-                    let pos3 = *pos_ptr3 as usize;
-                    *sorted_set_ptr.add(pos3) = c3;
-                    *pos_ptr3 += 1;
                     *hashes_ptr.add(r3) ^= z3;
+                    *hashes_ptr.add(r4) ^= z4;
+                    *hashes_ptr.add(r5) ^= z5;
+                    *hashes_ptr.add(r6) ^= z6;
+                    *hashes_ptr.add(r7) ^= z7;
                 }
-                i += 4;
+                i += 8;
             }
             while i < c_len {
                 let c = unsafe { *set_ptr.add(i) };
                 let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
                 let z = unsafe { *zobrist_ptr.add(c) };
-                let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
-                let pos = unsafe { *pos_ptr as usize };
                 unsafe {
-                    *sorted_set_ptr.add(pos) = c;
-                    *pos_ptr += 1;
                     *hashes_ptr.add(r_idx) ^= z;
                 }
                 i += 1;
@@ -2993,7 +2969,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             self.metrics
                                 .pruned_by_bounds
                                 .fetch_add(1, Ordering::Relaxed);
-                            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                             return cost;
                         }
                     }
@@ -3005,8 +2980,69 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             if num_exact == num_eval {
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                 return cost;
+            }
+
+            let mut sorted_set =
+                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
+            if sorted_set.len() < set.len() {
+                sorted_set.resize(set.len(), 0);
+            }
+            let sorted_set_ptr = sorted_set.as_mut_ptr();
+
+            let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
+            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
+            let mut curr = 0;
+            for r in 0..R {
+                unsafe {
+                    *current_offsets_ptr.add(r) = curr;
+                    curr += *counts_ptr.add(r);
+                }
+            }
+
+            let mut i = 0;
+            while i + 3 < c_len {
+                let c0 = unsafe { *set_ptr.add(i) };
+                let c1 = unsafe { *set_ptr.add(i + 1) };
+                let c2 = unsafe { *set_ptr.add(i + 2) };
+                let c3 = unsafe { *set_ptr.add(i + 3) };
+                let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                unsafe {
+                    let pos_ptr0 = current_offsets_ptr.add(r0);
+                    let pos0 = *pos_ptr0 as usize;
+                    *sorted_set_ptr.add(pos0) = c0;
+                    *pos_ptr0 += 1;
+
+                    let pos_ptr1 = current_offsets_ptr.add(r1);
+                    let pos1 = *pos_ptr1 as usize;
+                    *sorted_set_ptr.add(pos1) = c1;
+                    *pos_ptr1 += 1;
+
+                    let pos_ptr2 = current_offsets_ptr.add(r2);
+                    let pos2 = *pos_ptr2 as usize;
+                    *sorted_set_ptr.add(pos2) = c2;
+                    *pos_ptr2 += 1;
+
+                    let pos_ptr3 = current_offsets_ptr.add(r3);
+                    let pos3 = *pos_ptr3 as usize;
+                    *sorted_set_ptr.add(pos3) = c3;
+                    *pos_ptr3 += 1;
+                }
+                i += 4;
+            }
+            while i < c_len {
+                let c = unsafe { *set_ptr.add(i) };
+                let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
+                let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
+                let pos = unsafe { *pos_ptr as usize };
+                unsafe {
+                    *sorted_set_ptr.add(pos) = c;
+                    *pos_ptr += 1;
+                }
+                i += 1;
             }
 
             for i in split_idx..num_eval {
