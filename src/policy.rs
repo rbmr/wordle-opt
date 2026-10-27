@@ -443,6 +443,11 @@ pub(crate) fn active_guesses_with_bound(
             let r_buf_ptr = r_buf.as_mut_ptr();
             let c_len = candidates.len();
             let win_response = matrix.win_response.0 as usize;
+            let max_allowed_duplicates = if max_base_lb < (3 * c_len).saturating_sub(1) as u32 {
+                (max_base_lb as usize).saturating_sub((2 * c_len).saturating_sub(1))
+            } else {
+                c_len
+            };
 
             for g in 0..num_guesses {
                 if !skip_projections {
@@ -471,43 +476,83 @@ pub(crate) fn active_guesses_with_bound(
                     }
                 }
 
-                let mut i = 0;
-                while i + 7 < c_len {
-                    let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
-                    let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) };
-                    let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) };
-                    let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) };
-                    let r4 = unsafe { *(*stack_c_ptrs_ptr.add(i + 4)).add(g) };
-                    let r5 = unsafe { *(*stack_c_ptrs_ptr.add(i + 5)).add(g) };
-                    let r6 = unsafe { *(*stack_c_ptrs_ptr.add(i + 6)).add(g) };
-                    let r7 = unsafe { *(*stack_c_ptrs_ptr.add(i + 7)).add(g) };
-                    unsafe {
-                        *r_buf_ptr.add(i) = r0;
-                        *r_buf_ptr.add(i + 1) = r1;
-                        *r_buf_ptr.add(i + 2) = r2;
-                        *r_buf_ptr.add(i + 3) = r3;
-                        *r_buf_ptr.add(i + 4) = r4;
-                        *r_buf_ptr.add(i + 5) = r5;
-                        *r_buf_ptr.add(i + 6) = r6;
-                        *r_buf_ptr.add(i + 7) = r7;
-                        *counts_ptr.add(r0 as usize) += 1;
-                        *counts_ptr.add(r1 as usize) += 1;
-                        *counts_ptr.add(r2 as usize) += 1;
-                        *counts_ptr.add(r3 as usize) += 1;
-                        *counts_ptr.add(r4 as usize) += 1;
-                        *counts_ptr.add(r5 as usize) += 1;
-                        *counts_ptr.add(r6 as usize) += 1;
-                        *counts_ptr.add(r7 as usize) += 1;
+                if max_allowed_duplicates < c_len {
+                    let mut seen = [0u64; 4];
+                    let mut dup = 0usize;
+                    for i in 0..c_len {
+                        let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r;
+                        }
+                        let word = unsafe { seen.get_unchecked_mut((r as usize) >> 6) };
+                        let bit = 1u64 << (r & 63);
+                        if (*word & bit) != 0 {
+                            dup += 1;
+                            if dup > max_allowed_duplicates {
+                                break;
+                            }
+                        } else {
+                            *word |= bit;
+                        }
                     }
-                    i += 8;
-                }
-                while i < c_len {
-                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
-                    unsafe {
-                        *r_buf_ptr.add(i) = r;
-                        *counts_ptr.add(r as usize) += 1;
+                    if dup > max_allowed_duplicates || c_len - dup <= 1 {
+                        continue;
                     }
-                    i += 1;
+                    if dup <= 1 {
+                        let has_win =
+                            (seen[win_response >> 6] & (1u64 << (win_response & 63))) != 0;
+                        let expected_rem = (c_len + 2 * dup) as u32;
+                        let base_lb = (2 * c_len + dup - has_win as usize) as u32;
+                        if base_lb <= max_base_lb {
+                            out.push((g, expected_rem, base_lb));
+                        }
+                        continue;
+                    }
+                    for i in 0..c_len {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            *counts_ptr.add(r) += 1;
+                        }
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
+                        let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) };
+                        let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) };
+                        let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) };
+                        let r4 = unsafe { *(*stack_c_ptrs_ptr.add(i + 4)).add(g) };
+                        let r5 = unsafe { *(*stack_c_ptrs_ptr.add(i + 5)).add(g) };
+                        let r6 = unsafe { *(*stack_c_ptrs_ptr.add(i + 6)).add(g) };
+                        let r7 = unsafe { *(*stack_c_ptrs_ptr.add(i + 7)).add(g) };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r0;
+                            *r_buf_ptr.add(i + 1) = r1;
+                            *r_buf_ptr.add(i + 2) = r2;
+                            *r_buf_ptr.add(i + 3) = r3;
+                            *r_buf_ptr.add(i + 4) = r4;
+                            *r_buf_ptr.add(i + 5) = r5;
+                            *r_buf_ptr.add(i + 6) = r6;
+                            *r_buf_ptr.add(i + 7) = r7;
+                            *counts_ptr.add(r0 as usize) += 1;
+                            *counts_ptr.add(r1 as usize) += 1;
+                            *counts_ptr.add(r2 as usize) += 1;
+                            *counts_ptr.add(r3 as usize) += 1;
+                            *counts_ptr.add(r4 as usize) += 1;
+                            *counts_ptr.add(r5 as usize) += 1;
+                            *counts_ptr.add(r6 as usize) += 1;
+                            *counts_ptr.add(r7 as usize) += 1;
+                        }
+                        i += 8;
+                    }
+                    while i < c_len {
+                        let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r;
+                            *counts_ptr.add(r as usize) += 1;
+                        }
+                        i += 1;
+                    }
                 }
 
                 let mut expected_rem = 0u32;
@@ -1068,7 +1113,8 @@ impl<'a> OptimalPolicy<'a> {
 
                 let next_bucket = AtomicUsize::new(0);
                 let total_bucket_cost = AtomicU32::new(0);
-                (0..rayon::current_num_threads())
+                let num_workers = rayon::current_num_threads().min(bucket_tasks.len());
+                (0..num_workers)
                     .into_par_iter()
                     .with_max_len(1)
                     .for_each(|_| {
@@ -1159,76 +1205,80 @@ impl<'a> OptimalPolicy<'a> {
                 .map(|(i, &(g, _, base_lb))| (i + 1, g, base_lb))
                 .collect();
 
-            const CHUNK_SIZE: usize = 4;
-            let next = AtomicUsize::new(0);
-            (0..rayon::current_num_threads())
-                .into_par_iter()
-                .with_max_len(1)
-                .for_each(|_| {
-                    let mut solver = Solver::new_with_global_beta(
-                        self.matrix,
-                        self.max_k,
-                        self.dict,
-                        self.metrics,
-                        self.capacity_bounds_2d,
-                        self.cache,
-                        &global_beta,
-                        self.equiv_cache,
-                    );
+            if !filtered_active.is_empty() {
+                const CHUNK_SIZE: usize = 4;
+                let next = AtomicUsize::new(0);
+                let num_workers =
+                    rayon::current_num_threads().min(filtered_active.len().div_ceil(CHUNK_SIZE));
+                (0..num_workers)
+                    .into_par_iter()
+                    .with_max_len(1)
+                    .for_each(|_| {
+                        let mut solver = Solver::new_with_global_beta(
+                            self.matrix,
+                            self.max_k,
+                            self.dict,
+                            self.metrics,
+                            self.capacity_bounds_2d,
+                            self.cache,
+                            &global_beta,
+                            self.equiv_cache,
+                        );
 
-                    'worker: loop {
-                        let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
-                        if start_idx >= filtered_active.len() {
-                            break;
-                        }
-                        let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
-
-                        for i in start_idx..end_idx {
-                            let (orig_idx, g, base_lb) =
-                                unsafe { *filtered_active.get_unchecked(i) };
-
-                            let best_packed = global_best.load(Ordering::Relaxed);
-                            let best_val = (best_packed >> 32) as u32;
-                            let best_idx = (best_packed & 0xFFFFFFFF) as usize;
-                            if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
-                                && orig_idx >= best_idx
-                            {
-                                break 'worker;
+                        'worker: loop {
+                            let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
+                            if start_idx >= filtered_active.len() {
+                                break;
                             }
-                            let guess_beta = if orig_idx < best_idx {
-                                best_val + 1
-                            } else {
-                                best_val
-                            };
+                            let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
 
-                            if base_lb >= guess_beta {
-                                continue;
-                            }
+                            for i in start_idx..end_idx {
+                                let (orig_idx, g, base_lb) =
+                                    unsafe { *filtered_active.get_unchecked(i) };
 
-                            let v = solver.min_guess_val(
-                                candidates,
-                                self.all_guesses_bits,
-                                g,
-                                guess_beta,
-                                1,
-                                self.max_k,
-                            );
-                            self.metrics
-                                .root_guesses_done
-                                .fetch_add(1, Ordering::Relaxed);
+                                let best_packed = global_best.load(Ordering::Relaxed);
+                                let best_val = (best_packed >> 32) as u32;
+                                let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                                if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
+                                    && orig_idx >= best_idx
+                                {
+                                    break 'worker;
+                                }
+                                let guess_beta = if orig_idx < best_idx {
+                                    best_val + 1
+                                } else {
+                                    best_val
+                                };
 
-                            if v < guess_beta {
-                                let packed = ((v as u64) << 32) | (orig_idx as u64);
-                                let old = global_best.fetch_min(packed, Ordering::Relaxed);
-                                let old_val = (old >> 32) as u32;
-                                if v < old_val {
-                                    global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                                if base_lb >= guess_beta {
+                                    continue;
+                                }
+
+                                let v = solver.min_guess_val(
+                                    candidates,
+                                    self.all_guesses_bits,
+                                    g,
+                                    guess_beta,
+                                    1,
+                                    self.max_k,
+                                );
+                                self.metrics
+                                    .root_guesses_done
+                                    .fetch_add(1, Ordering::Relaxed);
+
+                                if v < guess_beta {
+                                    let packed = ((v as u64) << 32) | (orig_idx as u64);
+                                    let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                                    let old_val = (old >> 32) as u32;
+                                    if v < old_val {
+                                        global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                                    }
                                 }
                             }
+                            solver.flush_metrics();
                         }
-                        solver.flush_metrics();
-                    }
-                });
+                    });
+            }
 
             let final_best = global_best.load(Ordering::Relaxed);
             let best_idx = (final_best & 0xFFFFFFFF) as u32;
@@ -1248,7 +1298,7 @@ impl<'a> OptimalPolicy<'a> {
             .unwrap_or_else(|| Solver::greedy_solve(self.matrix, self.dict, candidates));
 
         // For very small candidate sets, avoid thread overhead
-        if candidates.len() <= 10 {
+        if candidates.len() <= 16 {
             let mut solver = Solver::new(
                 self.matrix,
                 self.max_k,
@@ -1383,75 +1433,80 @@ impl<'a> OptimalPolicy<'a> {
             .map(|(i, &(g, _, base_lb))| (i, g, base_lb))
             .collect();
 
-        const CHUNK_SIZE: usize = 4;
-        let next = AtomicUsize::new(0);
-        (0..rayon::current_num_threads())
-            .into_par_iter()
-            .with_max_len(1)
-            .for_each(|_| {
-                let mut solver = Solver::new_with_global_beta(
-                    self.matrix,
-                    self.max_k,
-                    self.dict,
-                    self.metrics,
-                    self.capacity_bounds_2d,
-                    self.cache,
-                    &global_beta,
-                    self.equiv_cache,
-                );
+        if !filtered_active.is_empty() {
+            const CHUNK_SIZE: usize = 4;
+            let next = AtomicUsize::new(0);
+            let num_workers =
+                rayon::current_num_threads().min(filtered_active.len().div_ceil(CHUNK_SIZE));
+            (0..num_workers)
+                .into_par_iter()
+                .with_max_len(1)
+                .for_each(|_| {
+                    let mut solver = Solver::new_with_global_beta(
+                        self.matrix,
+                        self.max_k,
+                        self.dict,
+                        self.metrics,
+                        self.capacity_bounds_2d,
+                        self.cache,
+                        &global_beta,
+                        self.equiv_cache,
+                    );
 
-                'worker: loop {
-                    let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
-                    if start_idx >= filtered_active.len() {
-                        break;
-                    }
-                    let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
-
-                    for i in start_idx..end_idx {
-                        let (orig_idx, g, base_lb) = unsafe { *filtered_active.get_unchecked(i) };
-
-                        let best_packed = global_best.load(Ordering::Relaxed);
-                        let best_val = (best_packed >> 32) as u32;
-                        let best_idx = (best_packed & 0xFFFFFFFF) as usize;
-                        if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
-                            && orig_idx >= best_idx
-                        {
-                            break 'worker;
+                    'worker: loop {
+                        let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
+                        if start_idx >= filtered_active.len() {
+                            break;
                         }
-                        let guess_beta = if orig_idx < best_idx {
-                            best_val + 1
-                        } else {
-                            best_val
-                        };
+                        let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
 
-                        if base_lb >= guess_beta {
-                            continue;
-                        }
+                        for i in start_idx..end_idx {
+                            let (orig_idx, g, base_lb) =
+                                unsafe { *filtered_active.get_unchecked(i) };
 
-                        let v = solver.min_guess_val(
-                            candidates,
-                            self.all_guesses_bits,
-                            g,
-                            guess_beta,
-                            1,
-                            self.max_k,
-                        );
-                        self.metrics
-                            .root_guesses_done
-                            .fetch_add(1, Ordering::Relaxed);
+                            let best_packed = global_best.load(Ordering::Relaxed);
+                            let best_val = (best_packed >> 32) as u32;
+                            let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                            if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
+                                && orig_idx >= best_idx
+                            {
+                                break 'worker;
+                            }
+                            let guess_beta = if orig_idx < best_idx {
+                                best_val + 1
+                            } else {
+                                best_val
+                            };
 
-                        if v < guess_beta {
-                            let packed = ((v as u64) << 32) | (orig_idx as u64);
-                            let old = global_best.fetch_min(packed, Ordering::Relaxed);
-                            let old_val = (old >> 32) as u32;
-                            if v < old_val {
-                                global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                            if base_lb >= guess_beta {
+                                continue;
+                            }
+
+                            let v = solver.min_guess_val(
+                                candidates,
+                                self.all_guesses_bits,
+                                g,
+                                guess_beta,
+                                1,
+                                self.max_k,
+                            );
+                            self.metrics
+                                .root_guesses_done
+                                .fetch_add(1, Ordering::Relaxed);
+
+                            if v < guess_beta {
+                                let packed = ((v as u64) << 32) | (orig_idx as u64);
+                                let old = global_best.fetch_min(packed, Ordering::Relaxed);
+                                let old_val = (old >> 32) as u32;
+                                if v < old_val {
+                                    global_beta.fetch_min(v + 1, Ordering::Relaxed);
+                                }
                             }
                         }
+                        solver.flush_metrics();
                     }
-                    solver.flush_metrics();
-                }
-            });
+                });
+        }
 
         let final_best = global_best.load(Ordering::Relaxed);
         let best_val = (final_best >> 32) as u32;
