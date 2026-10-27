@@ -124,7 +124,7 @@ impl SolverScratch {
             scratch_phase1_tuples: std::array::from_fn(|_| Vec::with_capacity(40)),
             scratch_phase2_tuples: std::array::from_fn(|_| Vec::with_capacity(num_guesses)),
             scratch_hash_table: std::array::from_fn(|_| Vec::new()),
-            scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
+            scratch_added_indices: std::array::from_fn(|_| Vec::new()),
             scratch_active_bits: std::array::from_fn(|_| Vec::new()),
             scratch_guess_counts: std::array::from_fn(|_| Vec::new()),
             scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
@@ -159,6 +159,9 @@ impl SolverScratch {
             if self.scratch_hash_table[d].len() < table_len {
                 self.scratch_hash_table[d].resize(table_len, 0);
             }
+            if self.scratch_added_indices[d].len() < num_guesses + num_responses {
+                self.scratch_added_indices[d].resize(num_guesses + num_responses, 0);
+            }
             if self.scratch_active_bits[d].len() < words {
                 self.scratch_active_bits[d].resize(words, 0);
             }
@@ -186,6 +189,15 @@ impl SolverScratch {
 
 thread_local! {
     static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
+}
+
+enum EquivState {
+    Uncomputed {
+        set_hash: u64,
+        parent_ptr: *const [u64],
+    },
+    Ready(*const [u64]),
+    Cached(std::sync::Arc<Vec<u64>>),
 }
 
 /// Specialized solver for a concrete word length with compile-time response parameters:
@@ -1297,6 +1309,231 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         )
     }
 
+    fn get_or_compute_active_guesses(
+        &mut self,
+        set: &[usize],
+        depth: usize,
+        equiv_state: &mut EquivState,
+    ) -> *const [u64] {
+        let (set_hash, parent_ptr) = match *equiv_state {
+            EquivState::Ready(ptr) => return ptr,
+            EquivState::Cached(ref arc) => return arc.as_slice() as *const [u64],
+            EquivState::Uncomputed {
+                set_hash,
+                parent_ptr,
+            } => (set_hash, parent_ptr),
+        };
+
+        let parent_active_guesses = unsafe { &*parent_ptr };
+        let c_len = set.len();
+        let shard = &self.equiv_cache[(set_hash as usize) & 1023];
+        if let Some(arc) = shard.read().unwrap().get(&set_hash).cloned() {
+            self.local_metrics.equiv_cache_hits += 1;
+            let ptr = arc.as_slice() as *const [u64];
+            *equiv_state = EquivState::Cached(arc);
+            return ptr;
+        }
+
+        self.local_metrics.equiv_cache_misses += 1;
+        let num_guesses = self.dict.guesses.len();
+        let mut bits =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
+        if bits.len() != parent_active_guesses.len() {
+            bits.resize(parent_active_guesses.len(), 0);
+        }
+        let bits_ptr = bits.as_mut_ptr();
+        let mut hash_table =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_hash_table[depth]);
+        let table_mask = hash_table.len() - 1;
+        let mut added_indices =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_added_indices[depth]);
+        let mut added_len = 0usize;
+
+        let z_table_ptr = self.scratch.as_mut().unwrap().scratch_z_tables[depth].as_mut_ptr();
+        let zobrist_ptr = self.matrix.zobrist.as_ptr();
+        let mut const_hashes: [u64; R] = [0; R];
+
+        let table_ptr = hash_table.as_mut_ptr();
+        let added_ptr = added_indices.as_mut_ptr();
+
+        let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
+        let mut c_ptrs = std::mem::MaybeUninit::<[*const Elem; 40]>::uninit();
+        let c_ptrs_ptr = c_ptrs.as_mut_ptr() as *mut *const Elem;
+
+        let set_ptr = set.as_ptr();
+        let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
+        let mut c_mask = 0u32;
+        let mut multi_c_mask = 0u32;
+        for (i, &c) in set.iter().enumerate() {
+            let m = unsafe { *cand_masks_ptr.add(c) };
+            multi_c_mask |= c_mask & m;
+            c_mask |= m;
+            unsafe {
+                *c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+            }
+            let z_c = unsafe { *zobrist_ptr.add(c) };
+            let row_ptr = unsafe { z_table_ptr.add(i * R) };
+            for r in 0..R {
+                let h = z_c.wrapping_mul((r as u64).wrapping_add(1));
+                unsafe {
+                    *row_ptr.add(r) = h;
+                }
+                const_hashes[r] ^= h;
+            }
+        }
+
+        for &ch in &const_hashes {
+            let mut h_val = ch;
+            if h_val == 0 {
+                h_val = 1;
+            }
+            let mut idx = (h_val as usize) & table_mask;
+            loop {
+                let entry = unsafe { *table_ptr.add(idx) };
+                if entry == 0 {
+                    unsafe {
+                        *table_ptr.add(idx) = h_val;
+                        *added_ptr.add(added_len) = idx;
+                    }
+                    added_len += 1;
+                    break;
+                } else if entry == h_val {
+                    break;
+                }
+                idx = (idx + 1) & table_mask;
+            }
+        }
+
+        let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+        let mut in_set_words = [0u64; 40];
+        let mut in_set_masks = [0u64; 40];
+        for i in 0..c_len {
+            let c = unsafe { *set_ptr.add(i) };
+            let cg = unsafe { *cand_to_guess_ptr.add(c) };
+            in_set_words[i] = (cg >> 6) as u64;
+            in_set_masks[i] = 1u64 << (cg & 63);
+        }
+
+        let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
+        for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
+            if block == 0 {
+                unsafe {
+                    *bits_ptr.add(block_idx) = 0;
+                }
+                continue;
+            }
+            let mut new_block = 0u64;
+            let mut b = block;
+            let block_base = block_idx << 6;
+            for i in 0..c_len {
+                if in_set_words[i] == block_idx as u64 {
+                    let mask = in_set_masks[i];
+                    if (b & mask) != 0 {
+                        new_block |= mask;
+                        b &= !mask;
+                    }
+                }
+            }
+            while b != 0 {
+                let tz = b.trailing_zeros();
+                let g = block_base | (tz as usize);
+                b &= b - 1;
+
+                let g_mask = unsafe { *guess_masks_ptr.add(g) };
+                let shared = g_mask & c_mask;
+                if (shared & shared.wrapping_sub(1)) == 0 && (shared & multi_c_mask) == 0 {
+                    self.local_metrics.pruned_by_equivalence += 1;
+                    continue;
+                }
+
+                let mut h = 0u64;
+                let mut i = 0;
+                while i + 3 < c_len {
+                    let c0 = unsafe { *c_ptrs_ptr.add(i) };
+                    let c1 = unsafe { *c_ptrs_ptr.add(i + 1) };
+                    let c2 = unsafe { *c_ptrs_ptr.add(i + 2) };
+                    let c3 = unsafe { *c_ptrs_ptr.add(i + 3) };
+                    let r0 = unsafe { (*c0.add(g)).to_usize() };
+                    let r1 = unsafe { (*c1.add(g)).to_usize() };
+                    let r2 = unsafe { (*c2.add(g)).to_usize() };
+                    let r3 = unsafe { (*c3.add(g)).to_usize() };
+                    let base = i * R;
+                    let h0 = unsafe { *z_table_ptr.add(base + r0) };
+                    let h1 = unsafe { *z_table_ptr.add(base + R + r1) };
+                    let h2 = unsafe { *z_table_ptr.add(base + 2 * R + r2) };
+                    let h3 = unsafe { *z_table_ptr.add(base + 3 * R + r3) };
+                    h ^= (h0 ^ h1) ^ (h2 ^ h3);
+                    i += 4;
+                }
+                while i < c_len {
+                    let c_ptr = unsafe { *c_ptrs_ptr.add(i) };
+                    let r_val = unsafe { (*c_ptr.add(g)).to_usize() };
+                    h ^= unsafe { *z_table_ptr.add(i * R + r_val) };
+                    i += 1;
+                }
+                if h == 0 {
+                    h = 1;
+                }
+
+                let mut idx = (h as usize) & table_mask;
+                let mut found = false;
+                loop {
+                    let entry = unsafe { *table_ptr.add(idx) };
+                    if entry == 0 {
+                        unsafe {
+                            *table_ptr.add(idx) = h;
+                            *added_ptr.add(added_len) = idx;
+                        }
+                        added_len += 1;
+                        break;
+                    } else if entry == h {
+                        found = true;
+                        break;
+                    }
+                    idx = (idx + 1) & table_mask;
+                }
+
+                if !found {
+                    new_block |= 1u64 << tz;
+                } else {
+                    self.local_metrics.pruned_by_equivalence += 1;
+                }
+            }
+            unsafe {
+                *bits_ptr.add(block_idx) = new_block;
+            }
+        }
+
+        for i in 0..added_len {
+            unsafe {
+                let idx = *added_ptr.add(i);
+                *table_ptr.add(idx) = 0;
+            }
+        }
+        self.scratch.as_mut().unwrap().scratch_hash_table[depth] = hash_table;
+        self.scratch.as_mut().unwrap().scratch_added_indices[depth] = added_indices;
+
+        if c_len >= 12 {
+            let arc = std::sync::Arc::new(bits.clone());
+            self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+            let mut write_guard = shard.write().unwrap();
+            let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
+            if write_guard.len() >= cap {
+                write_guard.clear();
+            }
+            write_guard.insert(set_hash, arc.clone());
+            let ptr = arc.as_slice() as *const [u64];
+            *equiv_state = EquivState::Cached(arc);
+            ptr
+        } else {
+            self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+            let ptr = self.scratch.as_ref().unwrap().scratch_active_bits[depth].as_slice()
+                as *const [u64];
+            *equiv_state = EquivState::Ready(ptr);
+            ptr
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn min_state_val_with_hash(
         &mut self,
@@ -1360,346 +1597,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
         let mut best_val = beta;
         let mut cut_by_global = false;
-        let set_hash = hash;
-
-        let should_cache_equiv = set.len() >= 10 && set.len() < 40;
-        let shard_idx = (set_hash as usize) % 1024;
-        let mut active_bits_scratch: Option<Vec<u64>> = None;
-        let rc_opt = if should_cache_equiv {
-            let cache = self.equiv_cache[shard_idx].read().unwrap();
-            if let Some(cached) = cache.get(&set_hash) {
-                self.local_metrics.equiv_cache_hits += 1;
-                Some(std::sync::Arc::clone(cached))
-            } else {
-                None
-            }
+        let mut equiv_state = if c_len >= 40 {
+            EquivState::Ready(parent_active_guesses as *const [u64])
         } else {
-            None
+            EquivState::Uncomputed {
+                set_hash: hash,
+                parent_ptr: parent_active_guesses as *const [u64],
+            }
         };
-
-        let slice_ptr: *const [u64];
-        let _keep_alive = if set.len() >= 40 {
-            slice_ptr = parent_active_guesses as *const _;
-            None
-        } else if let Some(rc) = &rc_opt {
-            slice_ptr = rc.as_slice() as *const _;
-            None
-        } else {
-            let mut bits =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
-            let num_u64s = self.dict.guesses.len().div_ceil(64);
-            bits.clear();
-            bits.resize(num_u64s, 0);
-
-            let scratch_ref = self.scratch.as_mut().unwrap();
-            let table = &mut scratch_ref.scratch_hash_table[depth];
-            let table_ptr = table.as_mut_ptr();
-            let num_guesses = self.dict.guesses.len();
-            let added_indices = &mut scratch_ref.scratch_added_indices[depth];
-            if added_indices.capacity() < num_guesses + R {
-                added_indices.reserve(num_guesses + R - added_indices.capacity());
-            }
-            let added_ptr = added_indices.as_mut_ptr();
-            let mut added_len = 0usize;
-
-            let mask = table.len() - 1;
-            let shift = 64 - table.len().trailing_zeros();
-
-            let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            let set_ptr = set.as_ptr();
-
-            let z_tables_ptr = scratch_ref.scratch_z_tables[depth].as_mut_ptr();
-            let mut c_vals = [0usize; 40];
-            let mut dummy_projs = [0u64; R];
-            for c_idx in 0..c_len {
-                let c = unsafe { *set_ptr.add(c_idx) };
-                c_vals[c_idx] = c;
-                let z = unsafe { *zobrist_ptr.add(c) };
-                let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-                let mut val = z;
-                for r in 0..R {
-                    unsafe {
-                        *c_table_ptr.add(r) = val;
-                    }
-                    dummy_projs[r] ^= val;
-                    val = val.wrapping_add(z);
-                }
-            }
-
-            for r in 0..R {
-                let mut proj = dummy_projs[r];
-                if proj == 0 {
-                    proj = 1;
-                }
-                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                loop {
-                    let slot = unsafe { *table_ptr.add(idx) };
-                    if slot == 0 {
-                        unsafe {
-                            *table_ptr.add(idx) = proj;
-                            *added_ptr.add(added_len) = idx;
-                        }
-                        added_len += 1;
-                        break;
-                    }
-                    if slot == proj {
-                        break;
-                    }
-                    idx = (idx + 1) & mask;
-                }
-            }
-
-            let bits_ptr = bits.as_mut_ptr();
-            let mut kept_count = 0usize;
-            let mut projs_block = [0u64; 64];
-            let projs_ptr = projs_block.as_mut_ptr();
-
-            for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
-                if block == 0 {
-                    continue;
-                }
-                let block_start = block_idx << 6;
-
-                if (block & (block - 1)) == 0 {
-                    let tz = block.trailing_zeros() as usize;
-                    let g_idx = block_start + tz;
-                    let mut proj = 0u64;
-                    for c_idx in 0..c_len {
-                        let c = unsafe { *c_vals.get_unchecked(c_idx) };
-                        let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-                        let r = unsafe { (*data_cg_ptr.add(c * num_guesses + g_idx)).to_usize() };
-                        proj ^= unsafe { *c_table_ptr.add(r) };
-                    }
-                    if proj == 0 {
-                        proj = 1;
-                    }
-                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                    let mut kept_mask = 0u64;
-                    loop {
-                        let slot = unsafe { *table_ptr.add(idx) };
-                        if slot == 0 {
-                            unsafe {
-                                *table_ptr.add(idx) = proj;
-                                *added_ptr.add(added_len) = idx;
-                            }
-                            added_len += 1;
-                            kept_mask = block;
-                            break;
-                        }
-                        if slot == proj {
-                            break;
-                        }
-                        idx = (idx + 1) & mask;
-                    }
-                    unsafe {
-                        *bits_ptr.add(block_idx) = kept_mask;
-                    }
-                    kept_count += (kept_mask != 0) as usize;
-                    continue;
-                }
-
-                let ones = block.count_ones() as usize;
-                if ones <= 16 {
-                    let mut active_offsets = [0u8; 16];
-                    let mut sparse_projs = [0u64; 16];
-                    let mut b = block;
-                    let mut k = 0usize;
-                    while b != 0 {
-                        unsafe {
-                            *active_offsets.get_unchecked_mut(k) = b.trailing_zeros() as u8;
-                        }
-                        b &= b - 1;
-                        k += 1;
-                    }
-                    let sparse_ptr = sparse_projs.as_mut_ptr();
-                    let offsets_ptr = active_offsets.as_ptr();
-                    for c_idx in 0..c_len {
-                        let c = unsafe { *c_vals.get_unchecked(c_idx) };
-                        let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-                        let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
-                        let mut j = 0usize;
-                        while j + 3 < ones {
-                            let off0 = unsafe { *offsets_ptr.add(j) as usize };
-                            let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
-                            let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
-                            let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
-                            let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
-                            let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
-                            let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
-                            let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
-                            unsafe {
-                                *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
-                                *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
-                                *sparse_ptr.add(j + 2) ^= *c_table_ptr.add(r2);
-                                *sparse_ptr.add(j + 3) ^= *c_table_ptr.add(r3);
-                            }
-                            j += 4;
-                        }
-                        while j < ones {
-                            let off = unsafe { *offsets_ptr.add(j) as usize };
-                            let r = unsafe { (*c_ptr.add(off)).to_usize() };
-                            unsafe {
-                                *sparse_ptr.add(j) ^= *c_table_ptr.add(r);
-                            }
-                            j += 1;
-                        }
-                    }
-                    let mut kept_mask = 0u64;
-                    for j in 0..ones {
-                        let tz = unsafe { *offsets_ptr.add(j) };
-                        let bit = 1u64 << tz;
-                        let mut proj = unsafe { *sparse_ptr.add(j) };
-                        if proj == 0 {
-                            proj = 1;
-                        }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                        loop {
-                            let slot = unsafe { *table_ptr.add(idx) };
-                            if slot == 0 {
-                                unsafe {
-                                    *table_ptr.add(idx) = proj;
-                                    *added_ptr.add(added_len) = idx;
-                                }
-                                added_len += 1;
-                                kept_mask |= bit;
-                                break;
-                            }
-                            if slot == proj {
-                                break;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                    }
-                    unsafe {
-                        *bits_ptr.add(block_idx) = kept_mask;
-                    }
-                    kept_count += kept_mask.count_ones() as usize;
-                    continue;
-                }
-
-                let chunk_len = (block_start + 64).min(num_guesses) - block_start;
-
-                projs_block.fill(0);
-                for c_idx in 0..c_len {
-                    let c = unsafe { *c_vals.get_unchecked(c_idx) };
-                    let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-                    let c_off = c * num_guesses + block_start;
-                    let c_ptr = unsafe { data_cg_ptr.add(c_off) };
-                    let mut i = 0;
-                    while i + 7 < chunk_len {
-                        let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
-                        let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
-                        let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
-                        let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
-                        let r4 = unsafe { (*c_ptr.add(i + 4)).to_usize() };
-                        let r5 = unsafe { (*c_ptr.add(i + 5)).to_usize() };
-                        let r6 = unsafe { (*c_ptr.add(i + 6)).to_usize() };
-                        let r7 = unsafe { (*c_ptr.add(i + 7)).to_usize() };
-                        unsafe {
-                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
-                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
-                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
-                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
-                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
-                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
-                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
-                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
-                        }
-                        i += 8;
-                    }
-                    while i < chunk_len {
-                        let r = unsafe { (*c_ptr.add(i)).to_usize() };
-                        unsafe {
-                            *projs_ptr.add(i) ^= *c_table_ptr.add(r);
-                        }
-                        i += 1;
-                    }
-                }
-
-                let mut b = block;
-                let mut kept_mask = 0u64;
-                while b != 0 {
-                    let tz = b.trailing_zeros();
-                    b &= b - 1;
-                    let bit = 1u64 << tz;
-
-                    let mut proj = unsafe { *projs_ptr.add(tz as usize) };
-                    if proj == 0 {
-                        proj = 1;
-                    }
-                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                    loop {
-                        let slot = unsafe { *table_ptr.add(idx) };
-                        if slot == 0 {
-                            unsafe {
-                                *table_ptr.add(idx) = proj;
-                                *added_ptr.add(added_len) = idx;
-                            }
-                            added_len += 1;
-                            kept_mask |= bit;
-                            break;
-                        }
-                        if slot == proj {
-                            break;
-                        }
-                        idx = (idx + 1) & mask;
-                    }
-                }
-                unsafe {
-                    *bits_ptr.add(block_idx) = kept_mask;
-                }
-                kept_count += kept_mask.count_ones() as usize;
-            }
-
-            for i in 0..added_len {
-                unsafe {
-                    let idx = *added_ptr.add(i);
-                    *table_ptr.add(idx) = 0;
-                }
-            }
-
-            let rc_new = if should_cache_equiv {
-                let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
-                if let Some(cached) = cache_mut.get(&set_hash) {
-                    self.local_metrics.equiv_cache_hits += 1;
-                    Some(std::sync::Arc::clone(cached))
-                } else {
-                    let rc = std::sync::Arc::new(bits.clone());
-                    self.local_metrics.equiv_cache_misses += 1;
-                    self.local_metrics.pruned_by_equivalence +=
-                        self.dict.guesses.len() - kept_count;
-                    let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
-                    if cache_mut.len() > cap {
-                        let evict = (cap / 4).max(1);
-                        let keys_to_remove: Vec<_> =
-                            cache_mut.keys().take(evict).copied().collect();
-                        for k in keys_to_remove {
-                            cache_mut.remove(&k);
-                        }
-                    }
-                    cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
-                    Some(rc)
-                }
-            } else {
-                self.local_metrics.equiv_cache_misses += 1;
-                self.local_metrics.pruned_by_equivalence += self.dict.guesses.len() - kept_count;
-                None
-            };
-
-            if let Some(rc_val) = &rc_new {
-                slice_ptr = rc_val.as_slice() as *const _;
-            } else {
-                slice_ptr = bits.as_slice() as *const _;
-            }
-            active_bits_scratch = Some(bits);
-            rc_new
-        };
-
-        let active_guesses_slice = unsafe { &*slice_ptr };
-        if let Some(bits) = active_bits_scratch {
-            self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
-        }
 
         let mut local_lb = parent_lb.max(cached_lower_bound);
         let counts_ptr = self
@@ -1729,12 +1634,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let mut max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
 
         let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
-        let active_guesses_ptr = active_guesses_slice.as_ptr();
+        let parent_active_ptr = parent_active_guesses.as_ptr();
         let set_ptr = set.as_ptr();
         phase1_tuples.reserve(c_len);
         for (cand_idx, &cand) in set.iter().enumerate() {
             let g = unsafe { *cand_to_guess_ptr.add(cand) };
-            if (unsafe { *active_guesses_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
+            if (unsafe { *parent_active_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
                 continue;
             }
             let mut num_non_empty = 0;
@@ -2041,7 +1946,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 break;
             }
             let val =
-                self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
+                self.min_guess_val_inner(set, &mut equiv_state, _g, best_val, depth, parent_max_k);
             min_val_found = min_val_found.min(val);
             if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
                 cut_by_global = true;
@@ -2065,6 +1970,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 (3 * c_len as u32).saturating_sub(best_val.saturating_sub(1)) as usize;
             let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
             if c_len >= min_k_needed {
+                let active_guesses_slice =
+                    unsafe { &*self.get_or_compute_active_guesses(set, depth, &mut equiv_state) };
                 let num_guesses = self.dict.guesses.len();
                 phase2_tuples.reserve(num_guesses);
 
@@ -2461,9 +2368,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
                         break;
                     }
-                    let val = self.min_guess_val(
+                    let val = self.min_guess_val_inner(
                         set,
-                        active_guesses_slice,
+                        &mut equiv_state,
                         _g,
                         best_val,
                         depth,
@@ -2511,10 +2418,24 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         }
     }
 
+    #[inline(always)]
     pub fn min_guess_val(
         &mut self,
         set: &[usize],
         active_guesses_slice: &[u64],
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let mut equiv_state = EquivState::Ready(active_guesses_slice as *const [u64]);
+        self.min_guess_val_inner(set, &mut equiv_state, guess, beta, depth, parent_max_k)
+    }
+
+    fn min_guess_val_inner(
+        &mut self,
+        set: &[usize],
+        equiv_state: &mut EquivState,
         guess: usize,
         beta: u32,
         depth: usize,
@@ -2925,6 +2846,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
                 let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                 let p_hash = small_p_hash[i];
+                let active_guesses_slice =
+                    unsafe { &*self.get_or_compute_active_guesses(set, depth, equiv_state) };
 
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
@@ -3654,6 +3577,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 let known_quick = if i >= split_idx { actual_lb } else { 0 };
+                let active_guesses_slice =
+                    unsafe { &*self.get_or_compute_active_guesses(set, depth, equiv_state) };
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
                     p,
