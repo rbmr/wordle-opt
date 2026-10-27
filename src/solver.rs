@@ -2270,42 +2270,74 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             if num_eval == 1 {
                 let r0 = eval_entries[0].0;
-                let mut p_idx0 = 0;
-                let p_len0 = eval_entries[0].1 as usize;
+                let target_count = eval_entries[0].1 as usize;
+                let mut found_count = 0;
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
-                        small_p[0][p_idx0] = c;
-                        p_idx0 += 1;
-                        if p_idx0 == p_len0 {
+                        found_count += 1;
+                        if found_count == target_count {
                             break;
                         }
                     }
                 }
-                small_p_extracted[0] = true;
             } else if num_eval == 2 {
                 let r0 = eval_entries[0].0;
                 let r1 = eval_entries[1].0;
-                let mut p_idx0 = 0;
-                let mut p_idx1 = 0;
+                let target_count = (eval_entries[0].1 + eval_entries[1].1) as usize;
+                let mut found_count = 0;
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
-                        small_p[0][p_idx0] = c;
-                        p_idx0 += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
                     } else if r == r1 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
-                        small_p[1][p_idx1] = c;
-                        p_idx1 += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
                     }
                 }
-                small_p_extracted[0] = true;
-                small_p_extracted[1] = true;
+            } else if num_eval == 3 {
+                let r0 = eval_entries[0].0;
+                let r1 = eval_entries[1].0;
+                let r2 = eval_entries[2].0;
+                let target_count =
+                    (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1) as usize;
+                let mut found_count = 0;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    }
+                }
             } else {
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
