@@ -1606,7 +1606,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let mut local_max_k = 0;
         let mut valid_phase1_k = 0;
         let mut min_val_found = u32::MAX;
-        let k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+        let mut k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
         let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
         let mut max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
 
@@ -1794,11 +1794,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 (exp, lb)
             };
-            if lb_cost < beta {
+            if lb_cost < best_val {
                 if total_non_empty > valid_phase1_k {
                     valid_phase1_k = total_non_empty;
                 }
-                phase1_tuples.push((g, expected_rem, lb_cost, total_non_empty));
+                if expected_rem == (c_len + 2 * duplicates) as u32 {
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                    k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                } else {
+                    phase1_tuples.push((g, expected_rem, lb_cost, total_non_empty));
+                }
             } else {
                 min_val_found = min_val_found.min(lb_cost);
             }
@@ -1934,7 +1943,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             && self.current_cost_so_far + phase2_effective_lb < current_global_beta
         {
             let mut valid_phase2_k = 0;
-            let k_to_beat_best =
+            let mut k_to_beat_best =
                 (3 * c_len as u32).saturating_sub(best_val.saturating_sub(1)) as usize;
             let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
             if c_len >= min_k_needed {
@@ -2043,7 +2052,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             continue;
                         }
-                        if num_non_empty == 2 {
+                        let (expected_rem, lb_cost) = if num_non_empty == 2 {
                             let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
                             let count0 = unsafe { *counts_ptr.add(r0) };
                             let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
@@ -2056,29 +2065,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             let c0 = count0 as u32;
                             let c1 = (c_len as u32) - c0;
-                            let expected_rem = c0 * c0 + c1 * c1;
-                            let lb_cost = (c_len as u32)
-                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) };
-                            if 2 > local_max_k {
-                                local_max_k = 2;
-                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                            }
-                            if lb_cost < best_val {
-                                if 2 > valid_phase2_k {
-                                    valid_phase2_k = 2;
-                                }
-                                phase2_tuples.push((g, expected_rem, lb_cost, 2));
-                            } else {
-                                min_val_found = min_val_found.min(lb_cost);
-                            }
-                            if min_k_needed > c_len {
-                                break 'guess_loop;
-                            }
-                            continue;
-                        }
-                        if num_non_empty == 3 {
+                            (
+                                c0 * c0 + c1 * c1,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) },
+                            )
+                        } else if num_non_empty == 3 {
                             let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
                             let count0 = unsafe { *counts_ptr.add(r0) };
                             let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
@@ -2092,30 +2085,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let c0 = count0 as u32;
                             let c1 = count1 as u32;
                             let c2 = (c_len as u32) - c0 - c1;
-                            let expected_rem = c0 * c0 + c1 * c1 + c2 * c2;
-                            let lb_cost = (c_len as u32)
-                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) };
-                            if 3 > local_max_k {
-                                local_max_k = 3;
-                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                            }
-                            if lb_cost < best_val {
-                                if 3 > valid_phase2_k {
-                                    valid_phase2_k = 3;
-                                }
-                                phase2_tuples.push((g, expected_rem, lb_cost, 3));
-                            } else {
-                                min_val_found = min_val_found.min(lb_cost);
-                            }
-                            if min_k_needed > c_len {
-                                break 'guess_loop;
-                            }
-                            continue;
-                        }
-                        if num_non_empty == 4 {
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) },
+                            )
+                        } else if num_non_empty == 4 {
                             let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
                             let count0 = unsafe { *counts_ptr.add(r0) };
                             let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
@@ -2133,31 +2110,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let c1 = count1 as u32;
                             let c2 = count2 as u32;
                             let c3 = (c_len as u32) - c0 - c1 - c2;
-                            let expected_rem = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
-                            let lb_cost = (c_len as u32)
-                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) };
-                            if 4 > local_max_k {
-                                local_max_k = 4;
-                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                            }
-                            if lb_cost < best_val {
-                                if 4 > valid_phase2_k {
-                                    valid_phase2_k = 4;
-                                }
-                                phase2_tuples.push((g, expected_rem, lb_cost, 4));
-                            } else {
-                                min_val_found = min_val_found.min(lb_cost);
-                            }
-                            if min_k_needed > c_len {
-                                break 'guess_loop;
-                            }
-                            continue;
-                        }
-                        if num_non_empty == 5 {
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) },
+                            )
+                        } else if num_non_empty == 5 {
                             let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
                             let count0 = unsafe { *counts_ptr.add(r0) };
                             let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
@@ -2179,43 +2140,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let c2 = count2 as u32;
                             let c3 = count3 as u32;
                             let c4 = (c_len as u32) - c0 - c1 - c2 - c3;
-                            let expected_rem = c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4;
-                            let lb_cost = (c_len as u32)
-                                + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
-                                + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) };
-                            if 5 > local_max_k {
-                                local_max_k = 5;
-                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                            }
-                            if lb_cost < best_val {
-                                if 5 > valid_phase2_k {
-                                    valid_phase2_k = 5;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) },
+                            )
+                        } else {
+                            let mut exp = 0u32;
+                            let mut lb = c_len as u32;
+                            for i in 0..num_non_empty {
+                                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                                let count = unsafe { *counts_ptr.add(r_idx) };
+                                unsafe {
+                                    *counts_ptr.add(r_idx) = 0;
                                 }
-                                phase2_tuples.push((g, expected_rem, lb_cost, 5));
-                            } else {
-                                min_val_found = min_val_found.min(lb_cost);
+                                exp += (count as u32) * (count as u32);
+                                debug_assert_ne!(r_idx, WIN);
+                                lb += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
                             }
-                            if min_k_needed > c_len {
-                                break 'guess_loop;
-                            }
-                            continue;
-                        }
-                        let mut expected_rem = 0u32;
-                        let mut lb_cost = c_len as u32;
-                        for i in 0..num_non_empty {
-                            let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                            let count = unsafe { *counts_ptr.add(r_idx) };
-                            unsafe {
-                                *counts_ptr.add(r_idx) = 0;
-                            }
-                            expected_rem += (count as u32) * (count as u32);
-                            debug_assert_ne!(r_idx, WIN);
-                            lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                        }
+                            (exp, lb)
+                        };
                         if num_non_empty > local_max_k {
                             local_max_k = num_non_empty;
                             min_k_needed = (local_max_k + 1).min(k_to_beat_best);
@@ -2225,7 +2173,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             if num_non_empty > valid_phase2_k {
                                 valid_phase2_k = num_non_empty;
                             }
-                            phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                            if expected_rem == (c_len + 2 * duplicates) as u32 {
+                                self.local_metrics.guesses_evaluated += 1;
+                                min_val_found = min_val_found.min(lb_cost);
+                                best_val = lb_cost;
+                                k_to_beat_best = (3 * c_len as u32)
+                                    .saturating_sub(best_val.saturating_sub(1))
+                                    as usize;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            } else {
+                                phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                            }
                         } else {
                             min_val_found = min_val_found.min(lb_cost);
                         }
