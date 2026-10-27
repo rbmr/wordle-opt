@@ -768,23 +768,12 @@ impl<'a> OptimalPolicy<'a> {
 
             bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.0.len()));
 
-            let bucket_costs: u32 = bucket_tasks
+            let next_bucket = AtomicUsize::new(0);
+            let total_bucket_cost = AtomicU32::new(0);
+            (0..rayon::current_num_threads())
                 .into_par_iter()
-                .map(|(bucket, hash)| {
-                    if let Some((cached_val, true)) = self.cache.get(hash) {
-                        return cached_val;
-                    }
-                    let mut known_quick = 0;
-                    if bucket.len() <= 15 {
-                        let (q_val, is_exact) =
-                            Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
-                        if is_exact {
-                            self.cache.insert_set(hash, bucket, q_val, true);
-                            cert_record!(14, bucket, q_val, true);
-                            return q_val;
-                        }
-                        known_quick = q_val;
-                    }
+                .with_max_len(1)
+                .for_each(|_| {
                     let mut solver = Solver::new(
                         self.matrix,
                         self.max_k,
@@ -794,23 +783,48 @@ impl<'a> OptimalPolicy<'a> {
                         self.cache,
                         self.equiv_cache,
                     );
-                    let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, bucket);
-                    let bucket_k = bucket.len().min(self.max_k).max(2);
-                    let val = solver.min_state_val_with_hash(
-                        bucket,
-                        hash,
-                        self.all_guesses_bits,
-                        bucket_greedy,
-                        2,
-                        bucket_k,
-                        known_quick,
-                    );
-                    let exact_val = val.min(bucket_greedy);
-                    self.cache.insert_set(hash, bucket, exact_val, true);
-                    cert_record!(15, bucket, exact_val, true);
-                    exact_val
-                })
-                .sum();
+                    let mut thread_cost = 0u32;
+                    loop {
+                        let idx = next_bucket.fetch_add(1, Ordering::Relaxed);
+                        if idx >= bucket_tasks.len() {
+                            break;
+                        }
+                        let (bucket, hash) = unsafe { *bucket_tasks.get_unchecked(idx) };
+                        if let Some((cached_val, true)) = self.cache.get(hash) {
+                            thread_cost += cached_val;
+                            continue;
+                        }
+                        let mut known_quick = 0;
+                        if bucket.len() <= 15 {
+                            let (q_val, is_exact) =
+                                Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
+                            if is_exact {
+                                self.cache.insert_set(hash, bucket, q_val, true);
+                                cert_record!(14, bucket, q_val, true);
+                                thread_cost += q_val;
+                                continue;
+                            }
+                            known_quick = q_val;
+                        }
+                        let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, bucket);
+                        let bucket_k = bucket.len().min(self.max_k).max(2);
+                        let val = solver.min_state_val_with_hash(
+                            bucket,
+                            hash,
+                            self.all_guesses_bits,
+                            bucket_greedy,
+                            2,
+                            bucket_k,
+                            known_quick,
+                        );
+                        let exact_val = val.min(bucket_greedy);
+                        self.cache.insert_set(hash, bucket, exact_val, true);
+                        cert_record!(15, bucket, exact_val, true);
+                        thread_cost += exact_val;
+                    }
+                    total_bucket_cost.fetch_add(thread_cost, Ordering::Relaxed);
+                });
+            let bucket_costs = total_bucket_cost.load(Ordering::Relaxed);
 
             let first_guess_cost = base_cost + bucket_costs;
             self.metrics
