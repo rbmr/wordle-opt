@@ -1219,6 +1219,141 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let block_start = block_idx << 6;
                 let chunk_len = (block_start + 64).min(num_guesses) - block_start;
 
+                let ones = block.count_ones();
+                if ones <= 8 {
+                    let mut tz_buf = [0usize; 8];
+                    let mut b = block;
+                    let mut num_tz = 0;
+                    #[allow(clippy::manual_isolate_lowest_one)]
+                    while b != 0 {
+                        let lowest_bit = b & b.wrapping_neg();
+                        tz_buf[num_tz] = lowest_bit.trailing_zeros() as usize;
+                        num_tz += 1;
+                        b ^= lowest_bit;
+                    }
+
+                    let mut proj_buf = [0u64; 8];
+                    if num_tz == 1 {
+                        let tz0 = tz_buf[0];
+                        let mut p0 = 0u64;
+                        for c_idx in 0..c_len {
+                            let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                            let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
+                            let r0 = unsafe { (*c_ptr.add(tz0)).to_usize() };
+                            p0 ^= unsafe { *c_table_ptr.add(r0) };
+                        }
+                        proj_buf[0] = p0;
+                    } else if num_tz == 2 {
+                        let tz0 = tz_buf[0];
+                        let tz1 = tz_buf[1];
+                        let mut p0 = 0u64;
+                        let mut p1 = 0u64;
+                        for c_idx in 0..c_len {
+                            let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                            let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
+                            let r0 = unsafe { (*c_ptr.add(tz0)).to_usize() };
+                            let r1 = unsafe { (*c_ptr.add(tz1)).to_usize() };
+                            p0 ^= unsafe { *c_table_ptr.add(r0) };
+                            p1 ^= unsafe { *c_table_ptr.add(r1) };
+                        }
+                        proj_buf[0] = p0;
+                        proj_buf[1] = p1;
+                    } else if num_tz == 3 {
+                        let tz0 = tz_buf[0];
+                        let tz1 = tz_buf[1];
+                        let tz2 = tz_buf[2];
+                        let mut p0 = 0u64;
+                        let mut p1 = 0u64;
+                        let mut p2 = 0u64;
+                        for c_idx in 0..c_len {
+                            let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                            let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
+                            let r0 = unsafe { (*c_ptr.add(tz0)).to_usize() };
+                            let r1 = unsafe { (*c_ptr.add(tz1)).to_usize() };
+                            let r2 = unsafe { (*c_ptr.add(tz2)).to_usize() };
+                            p0 ^= unsafe { *c_table_ptr.add(r0) };
+                            p1 ^= unsafe { *c_table_ptr.add(r1) };
+                            p2 ^= unsafe { *c_table_ptr.add(r2) };
+                        }
+                        proj_buf[0] = p0;
+                        proj_buf[1] = p1;
+                        proj_buf[2] = p2;
+                    } else if num_tz == 4 {
+                        let tz0 = tz_buf[0];
+                        let tz1 = tz_buf[1];
+                        let tz2 = tz_buf[2];
+                        let tz3 = tz_buf[3];
+                        let mut p0 = 0u64;
+                        let mut p1 = 0u64;
+                        let mut p2 = 0u64;
+                        let mut p3 = 0u64;
+                        for c_idx in 0..c_len {
+                            let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                            let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
+                            let r0 = unsafe { (*c_ptr.add(tz0)).to_usize() };
+                            let r1 = unsafe { (*c_ptr.add(tz1)).to_usize() };
+                            let r2 = unsafe { (*c_ptr.add(tz2)).to_usize() };
+                            let r3 = unsafe { (*c_ptr.add(tz3)).to_usize() };
+                            p0 ^= unsafe { *c_table_ptr.add(r0) };
+                            p1 ^= unsafe { *c_table_ptr.add(r1) };
+                            p2 ^= unsafe { *c_table_ptr.add(r2) };
+                            p3 ^= unsafe { *c_table_ptr.add(r3) };
+                        }
+                        proj_buf[0] = p0;
+                        proj_buf[1] = p1;
+                        proj_buf[2] = p2;
+                        proj_buf[3] = p3;
+                    } else {
+                        for c_idx in 0..c_len {
+                            let c = unsafe { *c_vals.get_unchecked(c_idx) };
+                            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+                            let c_ptr = unsafe { data_cg_ptr.add(c * num_guesses + block_start) };
+                            for k in 0..num_tz {
+                                let tz = tz_buf[k];
+                                let r = unsafe { (*c_ptr.add(tz)).to_usize() };
+                                proj_buf[k] ^= unsafe { *c_table_ptr.add(r) };
+                            }
+                        }
+                    }
+
+                    let mut kept_mask = 0u64;
+                    for k in 0..num_tz {
+                        let tz = tz_buf[k];
+                        let lowest_bit = 1u64 << tz;
+                        let mut proj = proj_buf[k];
+                        if proj == 0 {
+                            proj = 1;
+                        }
+                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                        loop {
+                            let slot = unsafe { *table_ptr.add(idx) };
+                            if slot == 0 {
+                                unsafe {
+                                    *table_ptr.add(idx) = proj;
+                                    *added_ptr.add(added_len) = idx;
+                                }
+                                added_len += 1;
+                                kept_mask |= lowest_bit;
+                                break;
+                            }
+                            if slot == proj {
+                                break;
+                            }
+                            idx = (idx + 1) & mask;
+                        }
+                    }
+
+                    unsafe {
+                        *bits_ptr.add(block_idx) = kept_mask;
+                    }
+                    kept_count += kept_mask.count_ones() as usize;
+                    continue;
+                }
+
                 projs_block.fill(0);
                 for c_idx in 0..c_len {
                     let c = unsafe { *c_vals.get_unchecked(c_idx) };
