@@ -743,6 +743,15 @@ impl<'a> OptimalPolicy<'a> {
         use rayon::prelude::*;
         use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
+        let mut set_hash = 0u64;
+        for &c in candidates {
+            set_hash ^= unsafe { *self.matrix.zobrist.get_unchecked(c) };
+        }
+        let cached_exact = match self.cache.get(set_hash) {
+            Some((val, true)) => Some(val),
+            _ => None,
+        };
+
         let active = active_guesses(
             self.matrix,
             self.dict,
@@ -848,78 +857,101 @@ impl<'a> OptimalPolicy<'a> {
                 bucket_tasks.push((p, hash));
             }
 
-            bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.0.len()));
+            let bucket_costs = if bucket_tasks.is_empty() {
+                0
+            } else {
+                bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.0.len()));
 
-            let next_bucket = AtomicUsize::new(0);
-            let total_bucket_cost = AtomicU32::new(0);
-            (0..rayon::current_num_threads())
-                .into_par_iter()
-                .with_max_len(1)
-                .for_each(|_| {
-                    let mut solver = Solver::new(
-                        self.matrix,
-                        self.max_k,
-                        self.dict,
-                        self.metrics,
-                        self.capacity_bounds_2d,
-                        self.cache,
-                        self.equiv_cache,
-                    );
-                    let mut thread_cost = 0u32;
-                    loop {
-                        let idx = next_bucket.fetch_add(1, Ordering::Relaxed);
-                        if idx >= bucket_tasks.len() {
-                            break;
-                        }
-                        let (bucket, hash) = unsafe { *bucket_tasks.get_unchecked(idx) };
-                        if let Some((cached_val, true)) = self.cache.get(hash) {
-                            thread_cost += cached_val;
-                            continue;
-                        }
-                        let mut known_quick = 0;
-                        if bucket.len() <= 15 {
-                            let (q_val, is_exact) =
-                                Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
-                            if is_exact {
-                                self.cache.insert_set(hash, bucket, q_val, true);
-                                cert_record!(14, bucket, q_val, true);
-                                thread_cost += q_val;
+                let next_bucket = AtomicUsize::new(0);
+                let total_bucket_cost = AtomicU32::new(0);
+                (0..rayon::current_num_threads())
+                    .into_par_iter()
+                    .with_max_len(1)
+                    .for_each(|_| {
+                        let mut solver = Solver::new(
+                            self.matrix,
+                            self.max_k,
+                            self.dict,
+                            self.metrics,
+                            self.capacity_bounds_2d,
+                            self.cache,
+                            self.equiv_cache,
+                        );
+                        let mut thread_cost = 0u32;
+                        loop {
+                            let idx = next_bucket.fetch_add(1, Ordering::Relaxed);
+                            if idx >= bucket_tasks.len() {
+                                break;
+                            }
+                            let (bucket, hash) = unsafe { *bucket_tasks.get_unchecked(idx) };
+                            if let Some((cached_val, true)) = self.cache.get(hash) {
+                                thread_cost += cached_val;
                                 continue;
                             }
-                            known_quick = q_val;
+                            let mut known_quick = 0;
+                            if bucket.len() <= 15 {
+                                let (q_val, is_exact) =
+                                    Solver::quick_bucket_eval(self.matrix, self.dict, bucket);
+                                if is_exact {
+                                    self.cache.insert_set(hash, bucket, q_val, true);
+                                    cert_record!(14, bucket, q_val, true);
+                                    thread_cost += q_val;
+                                    continue;
+                                }
+                                known_quick = q_val;
+                            }
+                            let bucket_greedy =
+                                Solver::greedy_solve(self.matrix, self.dict, bucket);
+                            let bucket_k = bucket.len().min(self.max_k).max(2);
+                            let val = solver.min_state_val_with_hash(
+                                bucket,
+                                hash,
+                                self.all_guesses_bits,
+                                bucket_greedy,
+                                2,
+                                bucket_k,
+                                known_quick,
+                            );
+                            let exact_val = val.min(bucket_greedy);
+                            self.cache.insert_set(hash, bucket, exact_val, true);
+                            cert_record!(15, bucket, exact_val, true);
+                            thread_cost += exact_val;
                         }
-                        let bucket_greedy = Solver::greedy_solve(self.matrix, self.dict, bucket);
-                        let bucket_k = bucket.len().min(self.max_k).max(2);
-                        let val = solver.min_state_val_with_hash(
-                            bucket,
-                            hash,
-                            self.all_guesses_bits,
-                            bucket_greedy,
-                            2,
-                            bucket_k,
-                            known_quick,
-                        );
-                        let exact_val = val.min(bucket_greedy);
-                        self.cache.insert_set(hash, bucket, exact_val, true);
-                        cert_record!(15, bucket, exact_val, true);
-                        thread_cost += exact_val;
-                    }
-                    total_bucket_cost.fetch_add(thread_cost, Ordering::Relaxed);
-                });
-            let bucket_costs = total_bucket_cost.load(Ordering::Relaxed);
+                        total_bucket_cost.fetch_add(thread_cost, Ordering::Relaxed);
+                    });
+                total_bucket_cost.load(Ordering::Relaxed)
+            };
 
             let first_guess_cost = base_cost + bucket_costs;
             self.metrics
                 .root_guesses_done
                 .fetch_add(1, Ordering::Relaxed);
 
-            let global_beta = AtomicU32::new(first_guess_cost);
-            let global_best = AtomicU64::new((first_guess_cost as u64) << 32);
+            if cached_exact.is_some_and(|opt_cost| first_guess_cost <= opt_cost) {
+                return (first_g, first_guess_cost);
+            }
 
+            let init_val = cached_exact.unwrap_or(first_guess_cost);
+            let global_beta = AtomicU32::new(if cached_exact.is_some() {
+                init_val + 1
+            } else {
+                first_guess_cost
+            });
+            let global_best = AtomicU64::new(if cached_exact.is_some() {
+                ((init_val as u64) << 32) | (u32::MAX as u64)
+            } else {
+                (first_guess_cost as u64) << 32
+            });
+
+            let filter_bound = if cached_exact.is_some() {
+                init_val + 1
+            } else {
+                first_guess_cost
+            };
             let filtered_active: Vec<(usize, usize, u32)> = active[1..]
                 .iter()
                 .enumerate()
-                .filter(|&(_, &(_, _, base_lb))| base_lb < first_guess_cost)
+                .filter(|&(_, &(_, _, base_lb))| base_lb < filter_bound)
                 .map(|(i, &(g, _, base_lb))| (i + 1, g, base_lb))
                 .collect();
 
@@ -940,7 +972,7 @@ impl<'a> OptimalPolicy<'a> {
                         self.equiv_cache,
                     );
 
-                    loop {
+                    'worker: loop {
                         let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
                         if start_idx >= filtered_active.len() {
                             break;
@@ -954,6 +986,11 @@ impl<'a> OptimalPolicy<'a> {
                             let best_packed = global_best.load(Ordering::Relaxed);
                             let best_val = (best_packed >> 32) as u32;
                             let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                            if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
+                                && orig_idx >= best_idx
+                            {
+                                break 'worker;
+                            }
                             let guess_beta = if orig_idx < best_idx {
                                 best_val + 1
                             } else {
@@ -990,19 +1027,21 @@ impl<'a> OptimalPolicy<'a> {
                 });
 
             let final_best = global_best.load(Ordering::Relaxed);
-            let best_val = (final_best >> 32) as u32;
             let best_idx = (final_best & 0xFFFFFFFF) as u32;
 
-            let best_guess = if best_idx == u32::MAX {
-                usize::MAX
+            let (best_guess, best_val) = if best_idx == u32::MAX {
+                (first_g, first_guess_cost)
             } else {
-                active[best_idx as usize].0
+                let val = (final_best >> 32) as u32;
+                (active[best_idx as usize].0, val)
             };
 
+            self.cache.insert_set(set_hash, candidates, best_val, true);
             return (best_guess, best_val);
         }
 
-        let initial_best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
+        let initial_best_val = cached_exact
+            .unwrap_or_else(|| Solver::greedy_solve(self.matrix, self.dict, candidates));
 
         // For very small candidate sets, avoid thread overhead
         if candidates.len() <= 10 {
@@ -1043,8 +1082,76 @@ impl<'a> OptimalPolicy<'a> {
                 } else if v == best_val && best_guess == usize::MAX {
                     best_guess = g;
                 }
+                if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
+                    && best_guess != usize::MAX
+                {
+                    break;
+                }
             }
+            if best_guess == usize::MAX && cached_exact.is_some() {
+                best_val = Solver::greedy_solve(self.matrix, self.dict, candidates);
+                for &(g, _, base_lb) in &active {
+                    let guess_beta = if best_guess == usize::MAX {
+                        best_val + 1
+                    } else {
+                        best_val
+                    };
+                    if base_lb >= guess_beta {
+                        continue;
+                    }
+                    let v = solver.min_guess_val(
+                        candidates,
+                        self.all_guesses_bits,
+                        g,
+                        guess_beta,
+                        1,
+                        self.max_k,
+                    );
+                    self.metrics
+                        .root_guesses_done
+                        .fetch_add(1, Ordering::Relaxed);
+                    if v < best_val {
+                        best_val = v;
+                        best_guess = g;
+                    } else if v == best_val && best_guess == usize::MAX {
+                        best_guess = g;
+                    }
+                }
+            }
+            self.cache.insert_set(set_hash, candidates, best_val, true);
             return (best_guess, best_val);
+        }
+
+        let mut start_active = 0usize;
+        if let Some(opt_cost) = cached_exact
+            && let Some(&(first_g, _, first_lb)) = active.first()
+        {
+            start_active = 1;
+            if first_lb <= opt_cost {
+                let mut solver = Solver::new(
+                    self.matrix,
+                    self.max_k,
+                    self.dict,
+                    self.metrics,
+                    self.capacity_bounds_2d,
+                    self.cache,
+                    self.equiv_cache,
+                );
+                let v = solver.min_guess_val(
+                    candidates,
+                    self.all_guesses_bits,
+                    first_g,
+                    opt_cost + 1,
+                    1,
+                    self.max_k,
+                );
+                self.metrics
+                    .root_guesses_done
+                    .fetch_add(1, Ordering::Relaxed);
+                if v <= opt_cost {
+                    return (first_g, v);
+                }
+            }
         }
 
         let global_beta = AtomicU32::new(initial_best_val + 1);
@@ -1067,6 +1174,7 @@ impl<'a> OptimalPolicy<'a> {
         let filtered_active: Vec<(usize, usize, u32)> = active
             .iter()
             .enumerate()
+            .skip(start_active)
             .filter(|&(_, &(_, _, base_lb))| base_lb <= initial_best_val)
             .map(|(i, &(g, _, base_lb))| (i, g, base_lb))
             .collect();
@@ -1088,7 +1196,7 @@ impl<'a> OptimalPolicy<'a> {
                     self.equiv_cache,
                 );
 
-                loop {
+                'worker: loop {
                     let start_idx = next.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
                     if start_idx >= filtered_active.len() {
                         break;
@@ -1101,6 +1209,11 @@ impl<'a> OptimalPolicy<'a> {
                         let best_packed = global_best.load(Ordering::Relaxed);
                         let best_val = (best_packed >> 32) as u32;
                         let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                        if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
+                            && orig_idx >= best_idx
+                        {
+                            break 'worker;
+                        }
                         let guess_beta = if orig_idx < best_idx {
                             best_val + 1
                         } else {
@@ -1145,6 +1258,10 @@ impl<'a> OptimalPolicy<'a> {
         } else {
             active[best_idx as usize].0
         };
+
+        if best_guess != usize::MAX {
+            self.cache.insert_set(set_hash, candidates, best_val, true);
+        }
 
         (best_guess, best_val)
     }
