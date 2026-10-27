@@ -253,28 +253,35 @@ pub(crate) fn active_guesses(
 
             let mut counts = [0u16; 256];
             let counts_ptr = counts.as_mut_ptr();
+            let mut r_buf = [0u8; 48];
+            let r_buf_ptr = r_buf.as_mut_ptr();
             let c_len = candidates.len();
             let win_response = matrix.win_response.0 as usize;
 
             for g in surviving_guesses {
                 let mut i = 0;
                 while i + 3 < c_len {
-                    let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
-                    let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) as usize };
-                    let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) as usize };
-                    let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) as usize };
+                    let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
+                    let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) };
+                    let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) };
+                    let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) };
                     unsafe {
-                        *counts_ptr.add(r0) += 1;
-                        *counts_ptr.add(r1) += 1;
-                        *counts_ptr.add(r2) += 1;
-                        *counts_ptr.add(r3) += 1;
+                        *r_buf_ptr.add(i) = r0;
+                        *r_buf_ptr.add(i + 1) = r1;
+                        *r_buf_ptr.add(i + 2) = r2;
+                        *r_buf_ptr.add(i + 3) = r3;
+                        *counts_ptr.add(r0 as usize) += 1;
+                        *counts_ptr.add(r1 as usize) += 1;
+                        *counts_ptr.add(r2 as usize) += 1;
+                        *counts_ptr.add(r3 as usize) += 1;
                     }
                     i += 4;
                 }
                 while i < c_len {
-                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
+                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
                     unsafe {
-                        *counts_ptr.add(r) += 1;
+                        *r_buf_ptr.add(i) = r;
+                        *counts_ptr.add(r as usize) += 1;
                     }
                     i += 1;
                 }
@@ -282,18 +289,18 @@ pub(crate) fn active_guesses(
                 let mut expected_rem = 0u32;
                 let mut base_lb = c_len as u32;
                 let mut num_non_empty = 0;
-                for r in 0..256 {
+                for i in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(i) as usize };
                     let v = unsafe { *counts_ptr.add(r) as usize };
-                    if v == 0 {
-                        continue;
-                    }
-                    num_non_empty += 1;
-                    expected_rem += (v as u32) * (v as u32);
-                    if r != win_response {
-                        base_lb += unsafe { *cap_bounds_ptr.add(v) };
-                    }
-                    unsafe {
-                        *counts_ptr.add(r) = 0;
+                    if v > 0 {
+                        num_non_empty += 1;
+                        expected_rem += (v as u32) * (v as u32);
+                        if r != win_response {
+                            base_lb += unsafe { *cap_bounds_ptr.add(v) };
+                        }
+                        unsafe {
+                            *counts_ptr.add(r) = 0;
+                        }
                     }
                 }
                 if num_non_empty > 1 {

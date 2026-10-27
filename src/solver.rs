@@ -1046,11 +1046,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let projs = &mut scratch_ref.scratch_projs[depth];
             let projs_raw_ptr = projs.as_ptr();
 
-            let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size = (((active_count + R as u32) * 2).next_power_of_two() as usize)
-                .clamp(1024, table.len());
-            let mask = table_size - 1;
-            let shift = 64 - table_size.trailing_zeros();
+            let mask = table.len() - 1;
+            let shift = 64 - table.len().trailing_zeros();
 
             let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
