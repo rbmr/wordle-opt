@@ -2202,12 +2202,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     max_p_len = p_len;
                 }
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                cost += lb;
-                if cost >= cutoff {
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, Ordering::Relaxed);
-                    return cost;
+                if lb > 0 {
+                    cost += lb;
+                    if cost >= cutoff {
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, Ordering::Relaxed);
+                        return cost;
+                    }
                 }
                 if p_len > 2 {
                     eval_entries[num_eval] = entry;
@@ -2263,21 +2265,62 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut eval_hashes = [0u64; 5];
-            for cand_idx in 0..c_len {
-                let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                for j in 0..num_eval {
-                    if eval_entries[j].0 == r {
+            let mut small_p = [[0usize; 16]; 5];
+            let mut small_p_extracted = [false; 5];
+
+            if num_eval == 1 {
+                let r0 = eval_entries[0].0;
+                let mut p_idx0 = 0;
+                let p_len0 = eval_entries[0].1 as usize;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[j] ^= unsafe { *zobrist_ptr.add(c) };
-                        break;
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        small_p[0][p_idx0] = c;
+                        p_idx0 += 1;
+                        if p_idx0 == p_len0 {
+                            break;
+                        }
+                    }
+                }
+                small_p_extracted[0] = true;
+            } else if num_eval == 2 {
+                let r0 = eval_entries[0].0;
+                let r1 = eval_entries[1].0;
+                let mut p_idx0 = 0;
+                let mut p_idx1 = 0;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        small_p[0][p_idx0] = c;
+                        p_idx0 += 1;
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        small_p[1][p_idx1] = c;
+                        p_idx1 += 1;
+                    }
+                }
+                small_p_extracted[0] = true;
+                small_p_extracted[1] = true;
+            } else {
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    for j in 0..num_eval {
+                        if eval_entries[j].0 == r {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            eval_hashes[j] ^= unsafe { *zobrist_ptr.add(c) };
+                            break;
+                        }
                     }
                 }
             }
 
-            let mut small_p = [[0usize; 16]; 5];
             let mut small_p_len = [0u8; 5];
             let mut small_p_hash = [0u64; 5];
-            let mut small_p_extracted = [false; 5];
             let mut small_used_val = [0u32; 5];
             let mut small_is_exact = [false; 5];
             let mut all_exact = true;
@@ -2294,21 +2337,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
                         (cached_val.max(initial_lb), is_exact)
                     } else {
-                        let r_target = entry.0;
-                        let mut p_idx = 0;
-                        let set_ptr = set.as_ptr();
-                        for cand_idx in 0..c_len {
-                            let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                            if r == r_target {
-                                let c = unsafe { *set_ptr.add(cand_idx) };
-                                small_p[i][p_idx] = c;
-                                p_idx += 1;
-                                if p_idx == p_len {
-                                    break;
+                        if !small_p_extracted[i] {
+                            let r_target = entry.0;
+                            let mut p_idx = 0;
+                            let set_ptr = set.as_ptr();
+                            for cand_idx in 0..c_len {
+                                let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                                if r == r_target {
+                                    let c = unsafe { *set_ptr.add(cand_idx) };
+                                    small_p[i][p_idx] = c;
+                                    p_idx += 1;
+                                    if p_idx == p_len {
+                                        break;
+                                    }
                                 }
                             }
+                            small_p_extracted[i] = true;
                         }
-                        small_p_extracted[i] = true;
                         let p_slice = &small_p[i][..p_len];
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
@@ -2500,12 +2545,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if p_len > max_p_len {
                     max_p_len = p_len;
                 }
-                cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                if cost >= cutoff {
-                    self.metrics
-                        .pruned_by_bounds
-                        .fetch_add(1, Ordering::Relaxed);
-                    return cost;
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                if lb > 0 {
+                    cost += lb;
+                    if cost >= cutoff {
+                        self.metrics
+                            .pruned_by_bounds
+                            .fetch_add(1, Ordering::Relaxed);
+                        return cost;
+                    }
                 }
                 if p_len > 2 {
                     unsafe {
