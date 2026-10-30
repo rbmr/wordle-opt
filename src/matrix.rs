@@ -2,6 +2,23 @@
 use crate::core::Response;
 use crate::dict::Dictionary;
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Default)]
+pub struct GuessProfile {
+    pub mask: u32,
+    pub chars: [u8; 8],
+    pub _pad: [u8; 4],
+}
+
+#[repr(C, align(64))]
+#[derive(Clone, Copy, Default)]
+pub struct CandidateProfile {
+    pub mask: u32,
+    pub dup_mask: u32,
+    pub at_mask: [u32; 8],
+    pub _pad: [u32; 6],
+}
+
 /// A precomputed lookup table mapping every (Guess, Candidate) pair to their resulting Wordle `Response`.
 ///
 /// The matrix is flattened into a 1D vector and stored in row-major order: `guess * num_candidates + candidate`.
@@ -10,8 +27,13 @@ use crate::dict::Dictionary;
 pub struct ResponseMatrix {
     pub num_guesses: usize,
     pub num_candidates: usize,
+    pub word_len: usize,
+    pub num_responses: usize,
+    pub win_response: Response,
     pub guess_masks: Vec<u32>,
+    pub guess_profiles: Vec<GuessProfile>,
     pub candidate_masks: Vec<u32>,
+    pub candidate_profiles: Vec<CandidateProfile>,
     pub zobrist: Vec<u64>,
     pub data: Vec<Response>,
     /// Transposed matrix: `data_c_g[candidate * num_guesses + guess]`.
@@ -20,15 +42,22 @@ pub struct ResponseMatrix {
     /// for a fixed candidate. This is critical for the `is_equivalent` check which compares two
     /// candidates across all possible guesses.
     pub data_c_g: Vec<Response>,
+    pub data_u8: Vec<u8>,
+    pub data_c_g_u8: Vec<u8>,
     pub candidate_to_guess: Vec<usize>,
-    pub guess_chars: Vec<[u8; 5]>,
+    pub guess_chars: Vec<[u8; 8]>,
+    pub guess_profile_chars: Vec<[u8; 8]>,
+    pub candidate_at_masks: Vec<[u32; 8]>,
+    pub candidate_dup_masks: Vec<u32>,
 }
 
 impl ResponseMatrix {
     pub fn new(dict: &Dictionary) -> Self {
         let num_guesses = dict.guesses.len();
         let num_candidates = dict.candidates.len();
-        let mut data = Vec::with_capacity(num_guesses * num_candidates);
+        let word_len = dict.word_len;
+        let num_responses = 3usize.pow(word_len.min(10) as u32);
+        let win_response = Response::win_for_len(word_len);
         let mut guess_masks = Vec::with_capacity(num_guesses);
         let mut candidate_masks = Vec::with_capacity(num_candidates);
         let mut zobrist = Vec::with_capacity(num_candidates);
@@ -44,7 +73,10 @@ impl ResponseMatrix {
         // the varying-position branching bound) and never prunes wrongly.
         let index = crate::dict::letter_index(dict.guesses.iter().chain(&dict.candidates));
         let mask_of = |w: &crate::core::Word| match &index {
-            Some(ix) => w.0.iter().fold(0u32, |m, &b| m | 1 << ix[b as usize]),
+            Some(ix) => w
+                .as_bytes()
+                .iter()
+                .fold(0u32, |m, &b| m | 1 << ix[b as usize]),
             None => u32::MAX,
         };
 
@@ -58,49 +90,195 @@ impl ResponseMatrix {
 
         use rayon::prelude::*;
 
-        // Pre-allocate the data array
-        data.resize(dict.guesses.len() * dict.candidates.len(), Response(0));
+        let total_cells = num_guesses * num_candidates;
+        let mut data = Vec::new();
+        let mut data_c_g = Vec::new();
+        let mut data_u8 = Vec::new();
+        let mut data_c_g_u8 = Vec::new();
 
-        let num_candidates = dict.candidates.len();
         let guesses = &dict.guesses;
         let candidates = &dict.candidates;
 
-        // Compute rows in parallel
-        data.par_chunks_mut(num_candidates)
-            .enumerate()
-            .for_each(|(g, row)| {
-                let guess = &guesses[g];
-                for (c, candidate) in candidates.iter().enumerate() {
-                    row[c] = Response::compute(candidate, guess);
-                }
-            });
+        if word_len <= 5 {
+            data_u8.resize(total_cells, 0u8);
+            data_u8
+                .par_chunks_mut(num_candidates)
+                .enumerate()
+                .for_each(|(g, row)| {
+                    let guess = &guesses[g];
+                    for (c, candidate) in candidates.iter().enumerate() {
+                        row[c] = Response::compute(candidate, guess).0 as u8;
+                    }
+                });
 
-        let mut data_c_g = vec![Response(0); num_candidates * num_guesses];
-        for c in 0..num_candidates {
-            for g in 0..num_guesses {
-                data_c_g[c * num_guesses + g] = data[g * num_candidates + c];
+            data_c_g_u8.resize(total_cells, 0u8);
+            for c in 0..num_candidates {
+                for g in 0..num_guesses {
+                    data_c_g_u8[c * num_guesses + g] = data_u8[g * num_candidates + c];
+                }
+            }
+
+            data.resize(total_cells, Response(0));
+            for i in 0..total_cells {
+                data[i] = Response(data_u8[i] as u16);
+            }
+            data_c_g.resize(total_cells, Response(0));
+            for i in 0..total_cells {
+                data_c_g[i] = Response(data_c_g_u8[i] as u16);
+            }
+        } else {
+            data.resize(total_cells, Response(0));
+            data.par_chunks_mut(num_candidates)
+                .enumerate()
+                .for_each(|(g, row)| {
+                    let guess = &guesses[g];
+                    for (c, candidate) in candidates.iter().enumerate() {
+                        row[c] = Response::compute(candidate, guess);
+                    }
+                });
+
+            data_c_g.resize(total_cells, Response(0));
+            for c in 0..num_candidates {
+                for g in 0..num_guesses {
+                    data_c_g[c * num_guesses + g] = data[g * num_candidates + c];
+                }
             }
         }
 
         let candidate_to_guess = dict.candidate_to_guess.clone();
         let guess_chars = dict.guess_chars.clone();
+        let k_len = word_len.min(8);
+        let mut guess_profile_chars = Vec::with_capacity(num_guesses);
+        for chars in &guess_chars {
+            let mut pchars = [0u8; 8];
+            let mut seen = 0u32;
+            for i in 0..k_len {
+                let l = chars[i];
+                let bit = 1u32 << (l & 31);
+                if (seen & bit) != 0 {
+                    pchars[i] = l + 64;
+                } else {
+                    seen |= bit;
+                    let mut count = 0;
+                    for j in 0..k_len {
+                        if chars[j] == l {
+                            count += 1;
+                        }
+                    }
+                    pchars[i] = if count > 1 { l + 32 } else { l };
+                }
+            }
+            guess_profile_chars.push(pchars);
+        }
+        let mut candidate_at_masks = Vec::with_capacity(num_candidates);
+        let mut candidate_dup_masks = Vec::with_capacity(num_candidates);
+        let mut candidate_profiles = Vec::with_capacity(num_candidates);
+        for (c_idx, &cg) in candidate_to_guess.iter().enumerate() {
+            let chars = &guess_chars[cg];
+            let mut at = [0u32; 8];
+            let mut seen = 0u32;
+            let mut dup = 0u32;
+            for i in 0..k_len {
+                let bit = 1u32 << (chars[i] & 31);
+                at[i] = bit;
+                dup |= seen & bit;
+                seen |= bit;
+            }
+            candidate_at_masks.push(at);
+            candidate_dup_masks.push(dup);
+            candidate_profiles.push(CandidateProfile {
+                mask: candidate_masks[c_idx],
+                dup_mask: dup,
+                at_mask: at,
+                _pad: [0; 6],
+            });
+        }
+
+        let mut guess_profiles = Vec::with_capacity(num_guesses);
+        for g in 0..num_guesses {
+            guess_profiles.push(GuessProfile {
+                mask: guess_masks[g],
+                chars: guess_profile_chars[g],
+                _pad: [0; 4],
+            });
+        }
 
         Self {
             num_guesses,
             num_candidates,
+            word_len,
+            num_responses,
+            win_response,
             guess_masks,
+            guess_profiles,
             candidate_masks,
+            candidate_profiles,
             zobrist,
             data,
             data_c_g,
+            data_u8,
+            data_c_g_u8,
             candidate_to_guess,
             guess_chars,
+            guess_profile_chars,
+            candidate_at_masks,
+            candidate_dup_masks,
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, guess_idx: usize, candidate_idx: usize) -> Response {
-        self.data[guess_idx * self.num_candidates + candidate_idx]
+        if self.word_len <= 5 {
+            Response(unsafe {
+                *self
+                    .data_u8
+                    .get_unchecked(guess_idx * self.num_candidates + candidate_idx)
+            } as u16)
+        } else {
+            self.data[guess_idx * self.num_candidates + candidate_idx]
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_cg(&self, candidate_idx: usize, guess_idx: usize) -> Response {
+        if self.word_len <= 5 {
+            Response(unsafe {
+                *self
+                    .data_c_g_u8
+                    .get_unchecked(candidate_idx * self.num_guesses + guess_idx)
+            } as u16)
+        } else {
+            self.data_c_g[candidate_idx * self.num_guesses + guess_idx]
+        }
+    }
+
+    #[inline(always)]
+    pub fn data_ptr<Elem: crate::core::ResponseElem>(&self) -> *const Elem {
+        if self.word_len <= 5 {
+            self.data_u8.as_ptr() as *const Elem
+        } else {
+            self.data.as_ptr() as *const Elem
+        }
+    }
+
+    #[inline(always)]
+    pub fn data_cg_ptr<Elem: crate::core::ResponseElem>(&self) -> *const Elem {
+        if self.word_len <= 5 {
+            self.data_c_g_u8.as_ptr() as *const Elem
+        } else {
+            self.data_c_g.as_ptr() as *const Elem
+        }
+    }
+
+    #[inline(always)]
+    pub fn slice_cg<Elem: crate::core::ResponseElem>(&self, start: usize, end: usize) -> &[Elem] {
+        if self.word_len <= 5 {
+            let slice = &self.data_c_g_u8[start..end];
+            unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const Elem, slice.len()) }
+        } else {
+            let slice = &self.data_c_g[start..end];
+            unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const Elem, slice.len()) }
+        }
     }
 }
 
@@ -119,37 +297,21 @@ mod tests {
         candidates.push(Word::new("apple"));
         candidates.push(Word::new("maple"));
 
-        let dict = Dictionary {
-            guess_chars: guesses
-                .iter()
-                .map(|w| {
-                    [
-                        w.0[0] - b'a',
-                        w.0[1] - b'a',
-                        w.0[2] - b'a',
-                        w.0[3] - b'a',
-                        w.0[4] - b'a',
-                    ]
-                })
-                .collect(),
-            guesses,
-            candidates,
-            candidate_to_guess: vec![0, 1],
-        };
+        let dict = Dictionary::from_words(guesses, candidates);
 
         let matrix = ResponseMatrix::new(&dict);
-        assert_eq!(matrix.num_guesses, 2);
+        assert_eq!(matrix.num_guesses, 3); // apple, berry, maple
         assert_eq!(matrix.num_candidates, 2);
 
-        // guess 0: apple, candidate 0: apple -> WIN
-        assert_eq!(matrix.get(0, 0), Response::WIN);
+        // candidate 0 is apple. Find guess for apple
+        let apple_g = dict.guesses.binary_search(&Word::new("apple")).unwrap();
+        let apple_c = dict.candidates.binary_search(&Word::new("apple")).unwrap();
+        assert_eq!(matrix.get(apple_g, apple_c), Response::WIN);
 
-        // guess 0: apple, candidate 1: maple (secret=maple, guess=apple):
-        // a: not green, secret's only 'a' (index 1) unused -> yellow
-        // p: green (index 2) -> consumes secret's only 'p', second 'p' has none left -> black
-        // l: green, e: green
+        // guess: apple, candidate: maple (secret=maple, guess=apple):
         // => [2, 0, 1, 1, 1] -> 2 + 0*3 + 1*9 + 1*27 + 1*81 = 119
-        assert_eq!(matrix.get(0, 1), Response::new(2, 0, 1, 1, 1));
+        let maple_c = dict.candidates.binary_search(&Word::new("maple")).unwrap();
+        assert_eq!(matrix.get(apple_g, maple_c), Response::new(2, 0, 1, 1, 1));
     }
 }
 
@@ -162,29 +324,13 @@ mod extra_tests {
     fn test_transpose() {
         let guesses = vec![Word::new("abcde"), Word::new("fghij")];
         let candidates = vec![Word::new("abcde"), Word::new("xyzab"), Word::new("fghij")];
-        let dict = Dictionary {
-            guess_chars: guesses
-                .iter()
-                .map(|w| {
-                    [
-                        w.0[0] - b'a',
-                        w.0[1] - b'a',
-                        w.0[2] - b'a',
-                        w.0[3] - b'a',
-                        w.0[4] - b'a',
-                    ]
-                })
-                .collect(),
-            guesses,
-            candidates,
-            candidate_to_guess: vec![0, 2, 1],
-        };
+        let dict = Dictionary::from_words(guesses, candidates);
         let matrix = ResponseMatrix::new(&dict);
 
         for g in 0..matrix.num_guesses {
             for c in 0..matrix.num_candidates {
-                let r1 = matrix.data[g * matrix.num_candidates + c];
-                let r2 = matrix.data_c_g[c * matrix.num_guesses + g];
+                let r1 = matrix.get(g, c);
+                let r2 = matrix.get_cg(c, g);
                 assert_eq!(r1, r2, "Mismatch at g={}, c={}", g, c);
             }
         }

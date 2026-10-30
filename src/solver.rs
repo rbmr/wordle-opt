@@ -1,5 +1,5 @@
 #![allow(clippy::needless_range_loop)]
-use crate::core::Response;
+use crate::core::{Response, ResponseElem};
 use crate::dict::Dictionary;
 use crate::heuristic;
 use crate::matrix::ResponseMatrix;
@@ -45,6 +45,19 @@ pub struct Metrics {
     pub root_guesses_done: AtomicUsize,
 }
 
+#[derive(Default, Debug, Clone, Copy)]
+pub struct LocalMetrics {
+    pub states_evaluated: usize,
+    pub max_depth: usize,
+    pub guesses_evaluated: usize,
+    pub pruned_by_bounds: usize,
+    pub pruned_by_equivalence: usize,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub equiv_cache_hits: usize,
+    pub equiv_cache_misses: usize,
+}
+
 impl Default for Metrics {
     fn default() -> Self {
         Self::new()
@@ -84,6 +97,9 @@ pub fn set_equiv_cache_cap(entries_per_shard: usize) {
     EQUIV_CACHE_CAP.store(entries_per_shard.max(1024), Ordering::Relaxed);
 }
 
+/// Maximum number of ternary responses supported (3^7 = 2187).
+pub const MAX_RESPONSES: usize = 2187;
+
 pub struct SolverScratch {
     pub scratch_is_in_set: [Vec<u64>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
@@ -91,203 +107,3910 @@ pub struct SolverScratch {
     pub scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
     pub scratch_hash_table: [Vec<u64>; 32],
     pub scratch_added_indices: [Vec<usize>; 32],
-    pub scratch_projs: [Vec<u64>; 32],
     pub scratch_active_bits: [Vec<u64>; 32],
-    pub scratch_guess_counts: [[u16; 243]; 32],
-    pub scratch_guess_hashes: [[u64; 243]; 32],
-    pub scratch_guess_p_lbs: [[u32; 243]; 32],
-    pub scratch_guess_child_max_ks: [[u16; 243]; 32],
+    pub scratch_guess_counts: [Vec<u16>; 32],
+    pub scratch_guess_hashes: [Vec<u64>; 32],
+    pub scratch_guess_p_lbs: [Vec<u32>; 32],
+    pub scratch_guess_child_max_ks: [Vec<u16>; 32],
+    pub scratch_z_tables: [Vec<u64>; 32],
+    pub scratch_state_counts: Vec<u16>,
 }
 
 impl SolverScratch {
-    /// Grows the guess-indexed buffers to fit a dictionary of `num_guesses`.
-    ///
-    /// The scratch is pooled per thread and outlives any one solve, so a thread
-    /// can meet a dictionary with more guesses than the one the scratch was
-    /// first sized for (several solves in one process, or a guess list larger
-    /// than the bundled 14,855). These buffers are written through unchecked
-    /// indexing, so they must be sized here, before any use. Buffers are only
-    /// ever grown, and each is all-zero between uses, so growing with zeros
-    /// keeps that invariant.
-    fn fit_dictionary(&mut self, num_guesses: usize) {
+    pub fn new(num_guesses: usize, num_responses: usize) -> Self {
+        let mut s = Self {
+            scratch_is_in_set: std::array::from_fn(|_| Vec::new()),
+            scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
+            scratch_phase1_tuples: std::array::from_fn(|_| Vec::with_capacity(40)),
+            scratch_phase2_tuples: std::array::from_fn(|_| Vec::with_capacity(num_guesses)),
+            scratch_hash_table: std::array::from_fn(|_| Vec::new()),
+            scratch_added_indices: std::array::from_fn(|_| Vec::new()),
+            scratch_active_bits: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_counts: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_p_lbs: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_child_max_ks: std::array::from_fn(|_| Vec::new()),
+            scratch_z_tables: std::array::from_fn(|_| Vec::new()),
+            scratch_state_counts: Vec::new(),
+        };
+        s.fit_dictionary(num_guesses, num_responses);
+        s
+    }
+
+    /// Grows the buffers to fit a dictionary of `num_guesses` and response domain `num_responses`.
+    fn fit_dictionary(&mut self, num_guesses: usize, num_responses: usize) {
         let words = num_guesses.div_ceil(64);
-        // The projection table holds at most 243 useless-guess sentinels plus
-        // one entry per guess, and is kept at most half full.
-        let table_len = ((num_guesses + 243) * 2).next_power_of_two().max(32768);
+        let table_len = ((num_guesses + num_responses) * 2)
+            .next_power_of_two()
+            .max(32768);
         for d in 0..32 {
+            if self.scratch_phase1_tuples[d].capacity() < 40 {
+                self.scratch_phase1_tuples[d].reserve(40);
+            }
+            if self.scratch_phase2_tuples[d].capacity() < num_guesses {
+                self.scratch_phase2_tuples[d].reserve(num_guesses);
+            }
             if self.scratch_is_in_set[d].len() < words {
                 self.scratch_is_in_set[d].resize(words, 0);
             }
-            if self.scratch_projs[d].len() < num_guesses {
-                self.scratch_projs[d].resize(num_guesses, 0);
+            if self.scratch_sorted_sets[d].len() < num_guesses {
+                self.scratch_sorted_sets[d].resize(num_guesses, 0);
             }
             if self.scratch_hash_table[d].len() < table_len {
                 self.scratch_hash_table[d].resize(table_len, 0);
             }
+            if self.scratch_added_indices[d].len() < num_guesses + num_responses {
+                self.scratch_added_indices[d].resize(num_guesses + num_responses, 0);
+            }
+            if self.scratch_active_bits[d].len() < words {
+                self.scratch_active_bits[d].resize(words, 0);
+            }
+            if self.scratch_guess_counts[d].len() < num_responses {
+                self.scratch_guess_counts[d].resize(num_responses, 0);
+            }
+            if self.scratch_guess_hashes[d].len() < num_responses {
+                self.scratch_guess_hashes[d].resize(num_responses, 0);
+            }
+            if self.scratch_guess_p_lbs[d].len() < num_responses {
+                self.scratch_guess_p_lbs[d].resize(num_responses, 0);
+            }
+            if self.scratch_guess_child_max_ks[d].len() < num_responses {
+                self.scratch_guess_child_max_ks[d].resize(num_responses, 0);
+            }
+            if self.scratch_z_tables[d].len() < 40 * num_responses {
+                self.scratch_z_tables[d].resize(40 * num_responses, 0);
+            }
+        }
+        if self.scratch_state_counts.len() < num_responses {
+            self.scratch_state_counts.resize(num_responses, 0);
         }
     }
 }
 
 thread_local! {
-    static THREAD_SCRATCH:std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
+    static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// The optimal Wordle solver using Branch and Bound.
-///
-/// Implements aggressive search space pruning through:
-/// - Exact capacity lower bounds (see `heuristic::capacity_bound`)
-/// - Expected-remaining-candidate guess ordering heuristic
-/// - Equivalence-class guess projection (skips guesses that are
-///   indistinguishable given the current candidate set)
-/// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
-pub struct Solver<'a> {
+enum EquivState {
+    Uncomputed {
+        set_hash: u64,
+        parent_ptr: *const [u64],
+    },
+    Ready(*const [u64]),
+    Cached(std::sync::Arc<Vec<u64>>),
+}
+
+/// Specialized solver for a concrete word length with compile-time response parameters:
+/// - `R`: Total response count (3^word_len)
+/// - `M`: Bitmask u64 words count (div_ceil(R, 64))
+/// - `WIN`: Response code for the all-green win response
+/// - `Elem`: Storage element type (`u8` for len <= 5, `Response` for len > 5)
+pub struct SpecializedSolver<
+    'a,
+    const R: usize,
+    const M: usize,
+    const WIN: usize,
+    Elem: ResponseElem,
+> {
     pub metrics: &'a Metrics,
+    pub local_metrics: LocalMetrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     capacity_bounds_2d: &'a [Vec<u32>],
-
     pub cache: &'a crate::cache::GlobalCache,
-    /// Shared global upper bound across all parallel root-level tasks.
-    /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
     equiv_cache: &'a EquivCache,
     pub current_cost_so_far: u32,
     pub scratch: Option<Box<SolverScratch>>,
+    _phantom: std::marker::PhantomData<Elem>,
 }
 
-impl<'a> Drop for Solver<'a> {
+impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem> Drop
+    for SpecializedSolver<'a, R, M, WIN, Elem>
+{
     fn drop(&mut self) {
+        self.flush_metrics();
         if let Some(scratch) = self.scratch.take() {
             THREAD_SCRATCH.with(|ts| *ts.borrow_mut() = Some(scratch));
         }
     }
 }
 
-impl<'a> Solver<'a> {
-    /// A fast, non-optimal greedy solver used exclusively to seed the initial `beta` upper bound.
-    /// It recursively selects the guess with the lowest Expected Remaining Candidates heuristic,
-    /// generating a highly efficient (though mathematically suboptimal) decision tree.
-    pub fn greedy_solve(
-        matrix: &ResponseMatrix,
-        dict: &'a crate::dict::Dictionary,
-        set: &[usize],
-    ) -> u32 {
-        if set.len() <= 2 {
-            return (set.len() * (set.len() + 1) / 2) as u32;
+impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
+    SpecializedSolver<'a, R, M, WIN, Elem>
+{
+    #[inline]
+    pub fn flush_metrics(&mut self) {
+        if self.local_metrics.guesses_evaluated != 0 {
+            self.metrics
+                .guesses_evaluated
+                .fetch_add(self.local_metrics.guesses_evaluated, Ordering::Relaxed);
+            self.local_metrics.guesses_evaluated = 0;
         }
-
-        let mut c_mask = 0u32;
-        for &c in set {
-            c_mask |= matrix.candidate_masks[c];
+        if self.local_metrics.states_evaluated != 0 {
+            self.metrics
+                .states_evaluated
+                .fetch_add(self.local_metrics.states_evaluated, Ordering::Relaxed);
+            self.local_metrics.states_evaluated = 0;
         }
-
-        let mut best_guess = usize::MAX;
-        let mut min_expected_rem = u32::MAX;
-
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
-
-        let skip_projections = c_mask.count_ones() >= 26;
-        let mut seen_projections = if skip_projections {
-            rustc_hash::FxHashSet::default()
-        } else {
-            rustc_hash::FxHashSet::with_capacity_and_hasher(
-                dict.guesses.len().min(4096),
-                Default::default(),
-            )
-        };
-
-        let matrix_data_ptr = matrix.data.as_ptr();
-        for g in 0..dict.guesses.len() {
-            if !skip_projections {
-                let chars = &dict.guess_chars[g];
-                let mut proj = 0u32;
-                let l0 = chars[0] as u32;
-                proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-                let l1 = chars[1] as u32;
-                proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-                let l2 = chars[2] as u32;
-                proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-                let l3 = chars[3] as u32;
-                proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-                let l4 = chars[4] as u32;
-                proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-                if !seen_projections.insert(proj) {
-                    continue;
-                }
-            }
-
-            let g_offset = g * matrix.num_candidates;
-            let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
-            let mut num_non_empty = 0;
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                if counts[r] == 0 {
-                    non_empty_indices[num_non_empty] = r as u8;
-                    num_non_empty += 1;
-                }
-                counts[r] += 1;
-            }
-
-            if num_non_empty <= 1 {
-                for i in 0..num_non_empty {
-                    counts[non_empty_indices[i] as usize] = 0;
-                }
-                continue;
-            }
-
-            let mut expected_rem = 0u32;
-            for i in 0..num_non_empty {
-                let r = non_empty_indices[i] as usize;
-                let count = counts[r] as u32;
-                expected_rem += count * count;
-                counts[r] = 0;
-            }
-            if expected_rem < min_expected_rem {
-                min_expected_rem = expected_rem;
-                best_guess = g;
-            }
+        if self.local_metrics.pruned_by_bounds != 0 {
+            self.metrics
+                .pruned_by_bounds
+                .fetch_add(self.local_metrics.pruned_by_bounds, Ordering::Relaxed);
+            self.local_metrics.pruned_by_bounds = 0;
         }
-
-        if best_guess == usize::MAX {
-            return u32::MAX; // Should not happen
+        if self.local_metrics.pruned_by_equivalence != 0 {
+            self.metrics
+                .pruned_by_equivalence
+                .fetch_add(self.local_metrics.pruned_by_equivalence, Ordering::Relaxed);
+            self.local_metrics.pruned_by_equivalence = 0;
         }
-
-        let best_g_offset = best_guess * matrix.num_candidates;
-        let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
-        let mut counts = [0u16; 243];
-        for &c in set {
-            let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
-            counts[r] += 1;
+        if self.local_metrics.cache_hits != 0 {
+            self.metrics
+                .cache_hits
+                .fetch_add(self.local_metrics.cache_hits, Ordering::Relaxed);
+            self.local_metrics.cache_hits = 0;
         }
-
-        let mut offsets = [0usize; 244];
-        for r_idx in 0..243 {
-            offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+        if self.local_metrics.cache_misses != 0 {
+            self.metrics
+                .cache_misses
+                .fetch_add(self.local_metrics.cache_misses, Ordering::Relaxed);
+            self.local_metrics.cache_misses = 0;
         }
-        let mut sorted_set = vec![0usize; set.len()];
-        let mut current_offsets = offsets;
-        for &c in set {
-            let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
-            let pos = current_offsets[r];
-            sorted_set[pos] = c;
-            current_offsets[r] += 1;
+        if self.local_metrics.equiv_cache_hits != 0 {
+            self.metrics
+                .equiv_cache_hits
+                .fetch_add(self.local_metrics.equiv_cache_hits, Ordering::Relaxed);
+            self.local_metrics.equiv_cache_hits = 0;
         }
-
-        let mut cost = set.len() as u32;
-        for r_idx in 0..243 {
-            let p_len = counts[r_idx] as usize;
-            if p_len == 0 || r_idx == crate::core::Response::WIN.0 as usize {
-                continue;
-            }
-            let start = offsets[r_idx];
-            let end = start + p_len;
-            cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
+        if self.local_metrics.equiv_cache_misses != 0 {
+            self.metrics
+                .equiv_cache_misses
+                .fetch_add(self.local_metrics.equiv_cache_misses, Ordering::Relaxed);
+            self.local_metrics.equiv_cache_misses = 0;
         }
-        cost
+        if self.local_metrics.max_depth != 0 {
+            self.metrics
+                .max_depth
+                .fetch_max(self.local_metrics.max_depth, Ordering::Relaxed);
+            self.local_metrics.max_depth = 0;
+        }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_global_beta(
+        matrix: &'a ResponseMatrix,
+        max_k: usize,
+        dict: &'a crate::dict::Dictionary,
+        metrics: &'a Metrics,
+        capacity_bounds_2d: &'a [Vec<u32>],
+        cache: &'a crate::cache::GlobalCache,
+        global_beta: &'a AtomicU32,
+        equiv_cache: &'a EquivCache,
+    ) -> Self {
+        let mut scratch = THREAD_SCRATCH
+            .with(|ts| ts.borrow_mut().take())
+            .unwrap_or_else(|| Box::new(SolverScratch::new(dict.guesses.len(), R)));
+        scratch.fit_dictionary(dict.guesses.len(), R);
+
+        Self {
+            matrix,
+            max_k,
+            dict,
+            metrics,
+            local_metrics: LocalMetrics::default(),
+            capacity_bounds_2d,
+            cache,
+            global_beta,
+            equiv_cache,
+            current_cost_so_far: 0,
+            scratch: Some(scratch),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    #[inline(always)]
+    pub fn quick_bucket_eval_specialized(
+        matrix: &ResponseMatrix,
+        dict: &Dictionary,
+        bucket: &[usize],
+    ) -> (u32, bool) {
+        let n = bucket.len();
+        if n > 15 {
+            return (2 * n as u32, false);
+        }
+        match n {
+            0 => (0, true),
+            1 => (1, true),
+            2 => (3, true),
+            3 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let g0 = unsafe { *cand_to_guess_ptr.add(c0) };
+                let g0_ptr = unsafe { data_ptr.add(g0 * num_cand) };
+                if unsafe { *g0_ptr.add(c1) != *g0_ptr.add(c2) } {
+                    return (5, true);
+                }
+
+                let g1 = unsafe { *cand_to_guess_ptr.add(c1) };
+                let g1_ptr = unsafe { data_ptr.add(g1 * num_cand) };
+                if unsafe { *g1_ptr.add(c0) != *g1_ptr.add(c2) } {
+                    return (5, true);
+                }
+
+                let g2 = unsafe { *cand_to_guess_ptr.add(c2) };
+                let g2_ptr = unsafe { data_ptr.add(g2 * num_cand) };
+                if unsafe { *g2_ptr.add(c0) != *g2_ptr.add(c1) } {
+                    return (5, true);
+                }
+
+                (6, true)
+            }
+            4 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT4: [[usize; 3]; 4] = [[1, 2, 3], [2, 3, 0], [3, 0, 1], [0, 1, 2]];
+                let c = [c0, c1, c2, c3];
+                let mut best_inside_exact = false;
+
+                for i in 0..4 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic] = ROT4[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
+                        return (7, true);
+                    }
+                    best_inside_exact = true;
+                }
+
+                (8, best_inside_exact)
+            }
+            5 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT5: [[usize; 4]; 5] = [
+                    [1, 2, 3, 4],
+                    [2, 3, 4, 0],
+                    [3, 4, 0, 1],
+                    [4, 0, 1, 2],
+                    [0, 1, 2, 3],
+                ];
+                let c = [c0, c1, c2, c3, c4];
+                let mut best_inside_exact = false;
+
+                for i in 0..5 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id] = ROT5[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
+                        return (9, true);
+                    }
+                    best_inside_exact = true;
+                }
+
+                (10, best_inside_exact)
+            }
+            6 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT6: [[usize; 5]; 6] = [
+                    [1, 2, 3, 4, 5],
+                    [2, 3, 4, 5, 0],
+                    [3, 4, 5, 0, 1],
+                    [4, 5, 0, 1, 2],
+                    [5, 0, 1, 2, 3],
+                    [0, 1, 2, 3, 4],
+                ];
+                let c = [c0, c1, c2, c3, c4, c5];
+                let mut best_inside_exact = false;
+
+                for i in 0..6 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id, ie] = ROT6[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+                    let ce = c[ie];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+                    let re = unsafe { *gi_ptr.add(ce) };
+
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
+                        return (11, true);
+                    }
+                    best_inside_exact = true;
+                }
+
+                (12, best_inside_exact)
+            }
+            7 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT7: [[usize; 6]; 7] = [
+                    [1, 2, 3, 4, 5, 6],
+                    [2, 3, 4, 5, 6, 0],
+                    [3, 4, 5, 6, 0, 1],
+                    [4, 5, 6, 0, 1, 2],
+                    [5, 6, 0, 1, 2, 3],
+                    [6, 0, 1, 2, 3, 4],
+                    [0, 1, 2, 3, 4, 5],
+                ];
+                let c = [c0, c1, c2, c3, c4, c5, c6];
+                let mut best_inside_exact = false;
+
+                for i in 0..7 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id, ie, if_] = ROT7[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+                    let ce = c[ie];
+                    let cf = c[if_];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+                    let re = unsafe { *gi_ptr.add(ce) };
+                    let rf = unsafe { *gi_ptr.add(cf) };
+
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
+                        return (13, true);
+                    }
+                    best_inside_exact = true;
+                }
+
+                (14, best_inside_exact)
+            }
+            8 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT8: [[usize; 7]; 8] = [
+                    [1, 2, 3, 4, 5, 6, 7],
+                    [2, 3, 4, 5, 6, 7, 0],
+                    [3, 4, 5, 6, 7, 0, 1],
+                    [4, 5, 6, 7, 0, 1, 2],
+                    [5, 6, 7, 0, 1, 2, 3],
+                    [6, 7, 0, 1, 2, 3, 4],
+                    [7, 0, 1, 2, 3, 4, 5],
+                    [0, 1, 2, 3, 4, 5, 6],
+                ];
+                let c = [c0, c1, c2, c3, c4, c5, c6, c7];
+                let mut best_inside_exact = false;
+
+                for i in 0..8 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id, ie, if_, ig] = ROT8[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+                    let ce = c[ie];
+                    let cf = c[if_];
+                    let cg = c[ig];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+                    let re = unsafe { *gi_ptr.add(ce) };
+                    let rf = unsafe { *gi_ptr.add(cf) };
+                    let rg = unsafe { *gi_ptr.add(cg) };
+
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rf == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
+                        return (15, true);
+                    }
+                    best_inside_exact = true;
+                }
+
+                (16, best_inside_exact)
+            }
+            9 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let c8 = unsafe { *bucket_ptr.add(8) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                const ROT9: [[usize; 8]; 9] = [
+                    [1, 2, 3, 4, 5, 6, 7, 8],
+                    [2, 3, 4, 5, 6, 7, 8, 0],
+                    [3, 4, 5, 6, 7, 8, 0, 1],
+                    [4, 5, 6, 7, 8, 0, 1, 2],
+                    [5, 6, 7, 8, 0, 1, 2, 3],
+                    [6, 7, 8, 0, 1, 2, 3, 4],
+                    [7, 8, 0, 1, 2, 3, 4, 5],
+                    [8, 0, 1, 2, 3, 4, 5, 6],
+                    [0, 1, 2, 3, 4, 5, 6, 7],
+                ];
+                let c = [c0, c1, c2, c3, c4, c5, c6, c7, c8];
+                let mut best_inside_exact = false;
+
+                for i in 0..9 {
+                    let gi = unsafe { *cand_to_guess_ptr.add(c[i]) };
+                    let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                    let [ia, ib, ic, id, ie, if_, ig, ih] = ROT9[i];
+                    let ca = c[ia];
+                    let cb = c[ib];
+                    let cc = c[ic];
+                    let cd = c[id];
+                    let ce = c[ie];
+                    let cf = c[if_];
+                    let cg = c[ig];
+                    let ch = c[ih];
+
+                    let ra = unsafe { *gi_ptr.add(ca) };
+                    let rb = unsafe { *gi_ptr.add(cb) };
+                    let rc = unsafe { *gi_ptr.add(cc) };
+                    let rd = unsafe { *gi_ptr.add(cd) };
+                    let re = unsafe { *gi_ptr.add(ce) };
+                    let rf = unsafe { *gi_ptr.add(cf) };
+                    let rg = unsafe { *gi_ptr.add(cg) };
+                    let rh = unsafe { *gi_ptr.add(ch) };
+
+                    let limit = if best_inside_exact { 1 } else { 2 };
+                    let mut coll = 0;
+                    if ra == rb {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if ra == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rc {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rb == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rd {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rc == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == re {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rd == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rf {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if re == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rf == rg {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rf == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+                    if rg == rh {
+                        coll += 1;
+                        if coll >= limit {
+                            continue;
+                        }
+                    }
+
+                    if coll == 0 {
+                        return (17, true);
+                    }
+                    best_inside_exact = true;
+                }
+
+                (18, best_inside_exact)
+            }
+            _ => {
+                let mut best_inside = u32::MAX;
+                let target_exact = (2 * n) as u32;
+                let data_ptr = matrix.data_ptr::<Elem>();
+
+                if M <= 4 {
+                    let bucket_ptr = bucket.as_ptr();
+                    let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+                    for (idx, &ci) in bucket.iter().enumerate() {
+                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
+                        let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
+
+                        let mut seen_mask = [0u64; M];
+                        let seen_ptr = seen_mask.as_mut_ptr();
+                        let mut collisions = 0;
+                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+
+                        for i in 0..idx {
+                            let c = unsafe { *bucket_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            let word_idx = r >> 6;
+                            let bit = 1u64 << (r & 63);
+                            let word_ptr = unsafe { seen_ptr.add(word_idx) };
+                            let word_val = unsafe { *word_ptr };
+                            if (word_val & bit) != 0 {
+                                collisions += 1;
+                                if collisions >= max_collisions {
+                                    break;
+                                }
+                            } else {
+                                unsafe {
+                                    *word_ptr = word_val | bit;
+                                }
+                            }
+                        }
+                        if collisions < max_collisions {
+                            for i in (idx + 1)..n {
+                                let c = unsafe { *bucket_ptr.add(i) };
+                                let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                                let word_idx = r >> 6;
+                                let bit = 1u64 << (r & 63);
+                                let word_ptr = unsafe { seen_ptr.add(word_idx) };
+                                let word_val = unsafe { *word_ptr };
+                                if (word_val & bit) != 0 {
+                                    collisions += 1;
+                                    if collisions >= max_collisions {
+                                        break;
+                                    }
+                                } else {
+                                    unsafe {
+                                        *word_ptr = word_val | bit;
+                                    }
+                                }
+                            }
+                        }
+
+                        if collisions == 0 {
+                            return ((2 * n - 1) as u32, true);
+                        }
+                        if collisions == 1 && max_collisions == 2 {
+                            best_inside = target_exact;
+                        }
+                    }
+                } else {
+                    let bucket_ptr = bucket.as_ptr();
+                    let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+                    for (idx, &ci) in bucket.iter().enumerate() {
+                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
+                        let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
+
+                        let mut seen = [0u16; 16];
+                        let mut seen_len = 0;
+                        let mut collisions = 0;
+                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+
+                        for i in 0..n {
+                            if i == idx {
+                                continue;
+                            }
+                            let c = unsafe { *bucket_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                            let mut duplicate = false;
+                            for &prev in &seen[..seen_len] {
+                                if prev == r {
+                                    duplicate = true;
+                                    break;
+                                }
+                            }
+                            if duplicate {
+                                collisions += 1;
+                                if collisions >= max_collisions {
+                                    break;
+                                }
+                            } else {
+                                seen[seen_len] = r;
+                                seen_len += 1;
+                            }
+                        }
+
+                        if collisions == 0 {
+                            return ((2 * n - 1) as u32, true);
+                        }
+                        if collisions == 1 && max_collisions == 2 {
+                            best_inside = target_exact;
+                        }
+                    }
+                }
+
+                if best_inside == target_exact {
+                    (target_exact, true)
+                } else {
+                    (target_exact, false)
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn min_state_val(
+        &mut self,
+        set: &[usize],
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let mut hash = 0;
+        let zobrist_ptr = self.matrix.zobrist.as_ptr();
+        for &c in set {
+            hash ^= unsafe { *zobrist_ptr.add(c) };
+        }
+        self.min_state_val_with_hash(
+            set,
+            hash,
+            parent_active_guesses,
+            beta,
+            depth,
+            parent_max_k,
+            0,
+        )
+    }
+
+    #[inline(always)]
+    fn get_or_compute_active_guesses(
+        &mut self,
+        set: &[usize],
+        depth: usize,
+        equiv_state: &mut EquivState,
+    ) -> *const [u64] {
+        let (set_hash, parent_ptr) = match *equiv_state {
+            EquivState::Ready(ptr) => return ptr,
+            EquivState::Cached(ref arc) => return arc.as_slice() as *const [u64],
+            EquivState::Uncomputed {
+                set_hash,
+                parent_ptr,
+            } => (set_hash, parent_ptr),
+        };
+
+        let parent_active_guesses = unsafe { &*parent_ptr };
+        let c_len = set.len();
+        let should_cache_equiv = c_len >= 10;
+        let shard_idx = ((set_hash ^ (set_hash >> 32)) as usize) & 1023;
+        if should_cache_equiv {
+            let cache = self.equiv_cache[shard_idx].read().unwrap();
+            if let Some(cached) = cache.get(&set_hash) {
+                self.local_metrics.equiv_cache_hits += 1;
+                let rc = std::sync::Arc::clone(cached);
+                let ptr = rc.as_slice() as *const [u64];
+                *equiv_state = EquivState::Cached(rc);
+                return ptr;
+            }
+        }
+
+        let mut bits =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
+        let num_u64s = parent_active_guesses.len();
+        if bits.len() != num_u64s {
+            bits.resize(num_u64s, 0);
+        }
+
+        let num_guesses = self.dict.guesses.len();
+        let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
+        let zobrist_ptr = self.matrix.zobrist.as_ptr();
+        let set_ptr = set.as_ptr();
+
+        let (table_ptr, mask, shift, added_ptr, z_tables_ptr) = {
+            let scratch_ref = self.scratch.as_mut().unwrap();
+            let table = &mut scratch_ref.scratch_hash_table[depth];
+            let m = table.len() - 1;
+            let s = 64 - table.len().trailing_zeros();
+            (
+                table.as_mut_ptr(),
+                m,
+                s,
+                scratch_ref.scratch_added_indices[depth].as_mut_ptr(),
+                scratch_ref.scratch_z_tables[depth].as_mut_ptr(),
+            )
+        };
+        let mut added_len = 0usize;
+
+        let mut c_cg_ptrs = [std::ptr::null::<Elem>(); 40];
+        let mut dummy_projs = [0u64; R];
+        for c_idx in 0..c_len {
+            let c = unsafe { *set_ptr.add(c_idx) };
+            c_cg_ptrs[c_idx] = unsafe { data_cg_ptr.add(c * num_guesses) };
+            let z = unsafe { *zobrist_ptr.add(c) };
+            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
+            let mut val = z;
+            for r in 0..R {
+                unsafe {
+                    *c_table_ptr.add(r) = val;
+                }
+                dummy_projs[r] ^= val;
+                val = val.wrapping_add(z);
+            }
+        }
+
+        for r in 0..R {
+            let mut proj = dummy_projs[r];
+            if proj == 0 {
+                proj = 1;
+            }
+            let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+            loop {
+                let slot = unsafe { *table_ptr.add(idx) };
+                if slot == 0 {
+                    unsafe {
+                        *table_ptr.add(idx) = proj;
+                        *added_ptr.add(added_len) = idx;
+                    }
+                    added_len += 1;
+                    break;
+                }
+                if slot == proj {
+                    break;
+                }
+                idx = (idx + 1) & mask;
+            }
+        }
+
+        let bits_ptr = bits.as_mut_ptr();
+        let mut kept_count = 0usize;
+        let mut projs_block = std::mem::MaybeUninit::<[u64; 64]>::uninit();
+        let projs_ptr = projs_block.as_mut_ptr() as *mut u64;
+
+        for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
+            if block == 0 {
+                unsafe {
+                    *bits_ptr.add(block_idx) = 0;
+                }
+                continue;
+            }
+            let block_start = block_idx << 6;
+
+            if (block & (block - 1)) == 0 {
+                let tz = block.trailing_zeros() as usize;
+                let g_idx = block_start + tz;
+                let mut proj = 0u64;
+                let mut c_table_ptr = z_tables_ptr as *const u64;
+                for c_idx in 0..c_len {
+                    let c_base = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
+                    let r = unsafe { (*c_base.add(g_idx)).to_usize() };
+                    proj ^= unsafe { *c_table_ptr.add(r) };
+                    c_table_ptr = unsafe { c_table_ptr.add(R) };
+                }
+                if proj == 0 {
+                    proj = 1;
+                }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                let mut kept_mask = 0u64;
+                loop {
+                    let slot = unsafe { *table_ptr.add(idx) };
+                    if slot == 0 {
+                        unsafe {
+                            *table_ptr.add(idx) = proj;
+                            *added_ptr.add(added_len) = idx;
+                        }
+                        added_len += 1;
+                        kept_mask = block;
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
+                }
+                unsafe {
+                    *bits_ptr.add(block_idx) = kept_mask;
+                }
+                kept_count += (kept_mask != 0) as usize;
+                continue;
+            }
+
+            let ones = block.count_ones() as usize;
+            if ones <= 16 {
+                let mut active_offsets = std::mem::MaybeUninit::<[u8; 16]>::uninit();
+                let offsets_mut_ptr = active_offsets.as_mut_ptr() as *mut u8;
+                let mut sparse_projs = std::mem::MaybeUninit::<[u64; 16]>::uninit();
+                let mut b = block;
+                let mut k = 0usize;
+                while b != 0 {
+                    unsafe {
+                        *offsets_mut_ptr.add(k) = b.trailing_zeros() as u8;
+                    }
+                    b &= b - 1;
+                    k += 1;
+                }
+                let sparse_ptr = sparse_projs.as_mut_ptr() as *mut u64;
+                let offsets_ptr = offsets_mut_ptr as *const u8;
+                {
+                    let c_table_ptr = z_tables_ptr as *const u64;
+                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) };
+                    let mut j = 0usize;
+                    while j + 3 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                        let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) = *c_table_ptr.add(r1);
+                            *sparse_ptr.add(j + 2) = *c_table_ptr.add(r2);
+                            *sparse_ptr.add(j + 3) = *c_table_ptr.add(r3);
+                        }
+                        j += 4;
+                    }
+                    while j < ones {
+                        let off = unsafe { *offsets_ptr.add(j) as usize };
+                        let r = unsafe { (*c_ptr.add(off)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r);
+                        }
+                        j += 1;
+                    }
+                }
+                let mut c_table_ptr = unsafe { (z_tables_ptr as *const u64).add(R) };
+                for c_idx in 1..c_len {
+                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
+                    let mut j = 0usize;
+                    while j + 3 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                        let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
+                            *sparse_ptr.add(j + 2) ^= *c_table_ptr.add(r2);
+                            *sparse_ptr.add(j + 3) ^= *c_table_ptr.add(r3);
+                        }
+                        j += 4;
+                    }
+                    while j < ones {
+                        let off = unsafe { *offsets_ptr.add(j) as usize };
+                        let r = unsafe { (*c_ptr.add(off)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r);
+                        }
+                        j += 1;
+                    }
+                    c_table_ptr = unsafe { c_table_ptr.add(R) };
+                }
+                let mut kept_mask = 0u64;
+                for j in 0..ones {
+                    let tz = unsafe { *offsets_ptr.add(j) };
+                    let bit = 1u64 << tz;
+                    let mut proj = unsafe { *sparse_ptr.add(j) };
+                    if proj == 0 {
+                        proj = 1;
+                    }
+                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                    loop {
+                        let slot = unsafe { *table_ptr.add(idx) };
+                        if slot == 0 {
+                            unsafe {
+                                *table_ptr.add(idx) = proj;
+                                *added_ptr.add(added_len) = idx;
+                            }
+                            added_len += 1;
+                            kept_mask |= bit;
+                            break;
+                        }
+                        if slot == proj {
+                            break;
+                        }
+                        idx = (idx + 1) & mask;
+                    }
+                }
+                unsafe {
+                    *bits_ptr.add(block_idx) = kept_mask;
+                }
+                kept_count += kept_mask.count_ones() as usize;
+                continue;
+            }
+
+            let chunk_len = (block_start + 64).min(num_guesses) - block_start;
+            if Elem::IS_U8 {
+                {
+                    let c_table_ptr = z_tables_ptr as *const u64;
+                    let c_u8_ptr =
+                        unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) as *const u8 };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r0 = (r_u64 & 0xFF) as usize;
+                        let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let r7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) = *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) = *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) = *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) = *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) = *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) = *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) = *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { *c_u8_ptr.add(i) as usize };
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                }
+                let mut c_table_ptr = unsafe { (z_tables_ptr as *const u64).add(R) };
+                for c_idx in 1..c_len {
+                    let c_u8_ptr =
+                        unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) as *const u8 };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r0 = (r_u64 & 0xFF) as usize;
+                        let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let r7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { *c_u8_ptr.add(i) as usize };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                    c_table_ptr = unsafe { c_table_ptr.add(R) };
+                }
+            } else {
+                unsafe {
+                    std::ptr::write_bytes(projs_ptr, 0, chunk_len);
+                }
+                let mut c_table_ptr = z_tables_ptr as *const u64;
+                for c_idx in 0..c_len {
+                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(i + 4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(i + 5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(i + 6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(i + 7)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                    c_table_ptr = unsafe { c_table_ptr.add(R) };
+                }
+            }
+
+            let mut b = block;
+            let mut kept_mask = 0u64;
+            while b != 0 {
+                let tz = b.trailing_zeros();
+                b &= b - 1;
+                let bit = 1u64 << tz;
+
+                let mut proj = unsafe { *projs_ptr.add(tz as usize) };
+                if proj == 0 {
+                    proj = 1;
+                }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                loop {
+                    let slot = unsafe { *table_ptr.add(idx) };
+                    if slot == 0 {
+                        unsafe {
+                            *table_ptr.add(idx) = proj;
+                            *added_ptr.add(added_len) = idx;
+                        }
+                        added_len += 1;
+                        kept_mask |= bit;
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
+                }
+            }
+            unsafe {
+                *bits_ptr.add(block_idx) = kept_mask;
+            }
+            kept_count += kept_mask.count_ones() as usize;
+        }
+
+        for i in 0..added_len {
+            unsafe {
+                let idx = *added_ptr.add(i);
+                *table_ptr.add(idx) = 0;
+            }
+        }
+
+        if should_cache_equiv {
+            let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
+            if let Some(cached) = cache_mut.get(&set_hash) {
+                self.local_metrics.equiv_cache_hits += 1;
+                let rc = std::sync::Arc::clone(cached);
+                self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+                let ptr = rc.as_slice() as *const [u64];
+                *equiv_state = EquivState::Cached(rc);
+                ptr
+            } else {
+                let rc = std::sync::Arc::new(bits.clone());
+                self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+                self.local_metrics.equiv_cache_misses += 1;
+                self.local_metrics.pruned_by_equivalence += num_guesses - kept_count;
+                let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
+                if cache_mut.len() > cap {
+                    let evict = (cap / 4).max(1);
+                    let keys_to_remove: Vec<_> = cache_mut.keys().take(evict).copied().collect();
+                    for k in keys_to_remove {
+                        cache_mut.remove(&k);
+                    }
+                }
+                cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
+                let ptr = rc.as_slice() as *const [u64];
+                *equiv_state = EquivState::Cached(rc);
+                ptr
+            }
+        } else {
+            self.local_metrics.equiv_cache_misses += 1;
+            self.local_metrics.pruned_by_equivalence += num_guesses - kept_count;
+            self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+            let ptr = self.scratch.as_ref().unwrap().scratch_active_bits[depth].as_slice()
+                as *const [u64];
+            *equiv_state = EquivState::Ready(ptr);
+            ptr
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn min_state_val_with_hash(
+        &mut self,
+        set: &[usize],
+        hash: u64,
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+        known_quick_lb: u32,
+    ) -> u32 {
+        let c_len = set.len();
+        if c_len <= 2 {
+            return match c_len {
+                0 => 0,
+                1 => 1,
+                _ => 3,
+            };
+        }
+
+        self.local_metrics.max_depth = self.local_metrics.max_depth.max(depth);
+
+        let mut cached_lower_bound = 0;
+        if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+            self.local_metrics.cache_hits += 1;
+            if is_exact {
+                return cached_val;
+            } else {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cached_val >= cutoff {
+                    return cached_val;
+                }
+                cached_lower_bound = cached_val;
+            }
+        }
+
+        self.local_metrics.states_evaluated += 1;
+        if known_quick_lb != 0 {
+            cached_lower_bound = cached_lower_bound.max(known_quick_lb);
+        } else if c_len <= 15 {
+            let (val, is_exact) = Self::quick_bucket_eval_specialized(self.matrix, self.dict, set);
+            if is_exact {
+                self.cache.insert_set(hash, set, val, true);
+                cert_record!(1, set, val, true);
+                return val;
+            }
+            cached_lower_bound = cached_lower_bound.max(val);
+        }
+
+        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
+        let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
+        cached_lower_bound = cached_lower_bound.max(parent_lb);
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+        if cached_lower_bound >= cutoff {
+            self.cache.insert_set(hash, set, cached_lower_bound, false);
+            cert_record!(2, set, cached_lower_bound, false);
+            return cached_lower_bound;
+        }
+
+        let mut best_val = beta;
+        let mut cut_by_global = false;
+        let mut equiv_state = if c_len >= 40 {
+            EquivState::Ready(parent_active_guesses as *const [u64])
+        } else {
+            EquivState::Uncomputed {
+                set_hash: hash,
+                parent_ptr: parent_active_guesses as *const [u64],
+            }
+        };
+
+        let mut local_lb = parent_lb.max(cached_lower_bound);
+        let counts_ptr = self
+            .scratch
+            .as_mut()
+            .unwrap()
+            .scratch_state_counts
+            .as_mut_ptr();
+        let mut non_empty_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
+        let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+
+        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
+        let matrix_data_ptr = self.matrix.data_ptr::<Elem>();
+
+        let mut phase1_tuples =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth]);
+        phase1_tuples.clear();
+        let mut phase2_tuples =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth]);
+        phase2_tuples.clear();
+
+        let mut local_max_k = 0;
+        let mut valid_phase1_k = 0;
+        let mut min_val_found = u32::MAX;
+        let mut k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+        let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+        let mut max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+
+        let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+        let parent_active_ptr = parent_active_guesses.as_ptr();
+        let set_ptr = set.as_ptr();
+        phase1_tuples.reserve(c_len);
+        for (cand_idx, &cand) in set.iter().enumerate() {
+            let g = unsafe { *cand_to_guess_ptr.add(cand) };
+            if (unsafe { *parent_active_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
+                continue;
+            }
+            let g_off = g * self.matrix.num_candidates;
+            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
+            if M <= 4 && max_allowed_duplicates == 0 {
+                let mut seen = [0u64; M];
+                let mut dup = false;
+                for i in 0..cand_idx {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                    let bit = 1u64 << (r & 63);
+                    if (*word & bit) != 0 {
+                        dup = true;
+                        break;
+                    }
+                    *word |= bit;
+                }
+                if !dup {
+                    for i in (cand_idx + 1)..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                        let bit = 1u64 << (r & 63);
+                        if (*word & bit) != 0 {
+                            dup = true;
+                            break;
+                        }
+                        *word |= bit;
+                    }
+                }
+                if dup {
+                    min_val_found = min_val_found.min(best_val);
+                    continue;
+                }
+                let lb_cost = (2 * c_len - 1) as u32;
+                local_max_k = c_len;
+                if lb_cost < best_val {
+                    valid_phase1_k = c_len;
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                } else {
+                    min_val_found = min_val_found.min(lb_cost);
+                }
+                break;
+            }
+            let mut num_non_empty = 0;
+            let mut duplicates = 0;
+            let mut aborted = false;
+            for i in 0..cand_idx {
+                let c = unsafe { *set_ptr.add(i) };
+                let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                unsafe {
+                    let cnt_ptr = counts_ptr.add(r);
+                    let cnt = *cnt_ptr;
+                    if cnt == 0 {
+                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        num_non_empty += 1;
+                    } else {
+                        duplicates += 1;
+                        if duplicates > max_allowed_duplicates {
+                            for j in 0..num_non_empty {
+                                let r_idx = *non_empty_indices_ptr.add(j) as usize;
+                                *counts_ptr.add(r_idx) = 0;
+                            }
+                            aborted = true;
+                            break;
+                        }
+                    }
+                    *cnt_ptr = cnt + 1;
+                }
+            }
+            if !aborted {
+                for i in (cand_idx + 1)..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
+                        } else {
+                            duplicates += 1;
+                            if duplicates > max_allowed_duplicates {
+                                for j in 0..num_non_empty {
+                                    let r_idx = *non_empty_indices_ptr.add(j) as usize;
+                                    *counts_ptr.add(r_idx) = 0;
+                                }
+                                aborted = true;
+                                break;
+                            }
+                        }
+                        *cnt_ptr = cnt + 1;
+                    }
+                }
+            }
+            if aborted {
+                min_val_found = min_val_found.min(best_val);
+                continue;
+            }
+            let total_non_empty = num_non_empty + 1;
+            if total_non_empty > local_max_k {
+                local_max_k = total_non_empty;
+                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+            }
+            let (expected_rem, lb_cost) = if num_non_empty == 1 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                }
+                let rem_c = (c_len as u32) - 1;
+                (
+                    1 + rem_c * rem_c,
+                    (c_len as u32) + unsafe { *parent_cap_bounds_ptr.add(rem_c as usize) },
+                )
+            } else if num_non_empty == 2 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                }
+                let count1 = (c_len as u32 - 1) - count0;
+                (
+                    1 + count0 * count0 + count1 * count1,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) },
+                )
+            } else if num_non_empty == 3 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                }
+                let count2 = (c_len as u32 - 1) - count0 - count1;
+                (
+                    1 + count0 * count0 + count1 * count1 + count2 * count2,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) },
+                )
+            } else if num_non_empty == 4 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                }
+                let count3 = (c_len as u32 - 1) - count0 - count1 - count2;
+                (
+                    1 + count0 * count0 + count1 * count1 + count2 * count2 + count3 * count3,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) },
+                )
+            } else if num_non_empty == 5 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                let count3 = unsafe { *counts_ptr.add(r3) } as u32;
+                let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    *counts_ptr.add(r4) = 0;
+                }
+                let count4 = (c_len as u32 - 1) - count0 - count1 - count2 - count3;
+                (
+                    1 + count0 * count0
+                        + count1 * count1
+                        + count2 * count2
+                        + count3 * count3
+                        + count4 * count4,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) },
+                )
+            } else {
+                let mut exp = 1u32;
+                let mut lb = c_len as u32;
+                for i in 0..num_non_empty {
+                    let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                    let count = unsafe { *counts_ptr.add(r_idx) };
+                    unsafe {
+                        *counts_ptr.add(r_idx) = 0;
+                    }
+                    exp += (count as u32) * (count as u32);
+                    lb += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
+                }
+                (exp, lb)
+            };
+            if lb_cost < best_val {
+                if total_non_empty > valid_phase1_k {
+                    valid_phase1_k = total_non_empty;
+                }
+                if expected_rem == (c_len + 2 * duplicates) as u32 {
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                    k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                } else {
+                    phase1_tuples.push((g, expected_rem, lb_cost, total_non_empty));
+                }
+            } else {
+                min_val_found = min_val_found.min(lb_cost);
+            }
+            if min_k_needed > c_len {
+                break;
+            }
+        }
+        if best_val > local_lb && !phase1_tuples.is_empty() {
+            if phase1_tuples.len() == 2 {
+                let t0 = phase1_tuples[0];
+                let t1 = phase1_tuples[1];
+                let k0 = (t0.2, t0.1, t0.0);
+                let k1 = (t1.2, t1.1, t1.0);
+                if k0 > k1 {
+                    phase1_tuples[0] = t1;
+                    phase1_tuples[1] = t0;
+                }
+            } else if phase1_tuples.len() == 3 {
+                let mut t0 = phase1_tuples[0];
+                let mut t1 = phase1_tuples[1];
+                let mut t2 = phase1_tuples[2];
+                let mut k0 = (t0.2, t0.1, t0.0);
+                let mut k1 = (t1.2, t1.1, t1.0);
+                let mut k2 = (t2.2, t2.1, t2.0);
+                if k0 > k1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k1 > k2 {
+                    std::mem::swap(&mut t1, &mut t2);
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k0 > k1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                }
+                phase1_tuples[0] = t0;
+                phase1_tuples[1] = t1;
+                phase1_tuples[2] = t2;
+            } else if phase1_tuples.len() == 4 {
+                let mut t0 = phase1_tuples[0];
+                let mut t1 = phase1_tuples[1];
+                let mut t2 = phase1_tuples[2];
+                let mut t3 = phase1_tuples[3];
+                let mut k0 = (t0.2, t0.1, t0.0);
+                let mut k1 = (t1.2, t1.1, t1.0);
+                let mut k2 = (t2.2, t2.1, t2.0);
+                let mut k3 = (t3.2, t3.1, t3.0);
+                if k0 > k1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 > k3 {
+                    std::mem::swap(&mut t2, &mut t3);
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 > k2 {
+                    std::mem::swap(&mut t0, &mut t2);
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 > k3 {
+                    std::mem::swap(&mut t1, &mut t3);
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 > k2 {
+                    std::mem::swap(&mut t1, &mut t2);
+                }
+                phase1_tuples[0] = t0;
+                phase1_tuples[1] = t1;
+                phase1_tuples[2] = t2;
+                phase1_tuples[3] = t3;
+            } else if phase1_tuples.len() > 4 && phase1_tuples.len() <= 32 {
+                let p1_ptr = phase1_tuples.as_mut_ptr();
+                let p1_len = phase1_tuples.len();
+                for j in 1..p1_len {
+                    let key = unsafe { *p1_ptr.add(j) };
+                    let mut k = j;
+                    while k > 0 {
+                        let prev = unsafe { *p1_ptr.add(k - 1) };
+                        let prev_greater = prev.2 > key.2
+                            || (prev.2 == key.2
+                                && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
+                        if prev_greater {
+                            unsafe {
+                                *p1_ptr.add(k) = prev;
+                            }
+                            k -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    unsafe {
+                        *p1_ptr.add(k) = key;
+                    }
+                }
+            } else if phase1_tuples.len() > 32 {
+                phase1_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
+            }
+
+            for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                if self.current_cost_so_far + local_lb >= current_global_beta {
+                    cut_by_global = true;
+                    break;
+                }
+                if self.current_cost_so_far + g_lb >= current_global_beta {
+                    cut_by_global = true;
+                    min_val_found = min_val_found.min(g_lb);
+                    self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                    break;
+                }
+                if g_lb >= best_val {
+                    min_val_found = min_val_found.min(g_lb);
+                    self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                    break;
+                }
+                let val = self.min_guess_val_inner(
+                    set,
+                    &mut equiv_state,
+                    _g,
+                    best_val,
+                    depth,
+                    parent_max_k,
+                );
+                min_val_found = min_val_found.min(val);
+                if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                    cut_by_global = true;
+                }
+                if val < best_val {
+                    best_val = val;
+                    if best_val <= local_lb {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let phase2_min_lb = heuristic::phase2_capacity_bound(c_len, parent_max_k, parent_max_k);
+        let phase2_effective_lb = local_lb.max(phase2_min_lb);
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        if best_val > phase2_effective_lb
+            && self.current_cost_so_far + phase2_effective_lb < current_global_beta
+        {
+            let mut valid_phase2_k = 0;
+            let mut k_to_beat_best =
+                (3 * c_len as u32).saturating_sub(best_val.saturating_sub(1)) as usize;
+            let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+            if c_len >= min_k_needed {
+                let active_guesses_slice =
+                    unsafe { &*self.get_or_compute_active_guesses(set, depth, &mut equiv_state) };
+                let num_guesses = self.dict.guesses.len();
+                phase2_tuples.reserve(num_guesses);
+
+                let mut max_allowed_duplicates = c_len - min_k_needed;
+                let mut is_in_set =
+                    std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
+                let is_in_set_ptr = is_in_set.as_mut_ptr();
+                let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+                let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
+                let set_ptr = set.as_ptr();
+                let mut c_mask = 0u32;
+                let mut multi_c_mask = 0u32;
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    let m = unsafe { *cand_masks_ptr.add(c) };
+                    multi_c_mask |= c_mask & m;
+                    c_mask |= m;
+                    unsafe {
+                        *is_in_set_ptr.add(g >> 6) |= 1u64 << (g & 63);
+                    }
+                }
+                let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
+                let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
+                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
+                let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
+                let heap_c_ptrs = if c_len > 256 {
+                    let mut v = Vec::with_capacity(c_len);
+                    let set_ptr = set.as_ptr();
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+                let c_ptrs: &[*const Elem] = if c_len <= 256 {
+                    let set_ptr = set.as_ptr();
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        unsafe {
+                            *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                        }
+                    }
+                    unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
+                } else {
+                    heap_c_ptrs.as_ref().unwrap()
+                };
+
+                let c_ptrs_ptr = c_ptrs.as_ptr();
+                'guess_loop: for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
+                    if block == 0 {
+                        continue;
+                    }
+                    let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
+                    let block_base = block_idx << 6;
+                    while b != 0 {
+                        let tz = b.trailing_zeros();
+                        let g = block_base | (tz as usize);
+                        b &= b - 1;
+
+                        let g_mask = unsafe { *guess_masks_ptr.add(g) };
+                        let shared = g_mask & c_mask;
+                        if (shared & shared.wrapping_sub(1)) == 0 && (shared & multi_c_mask) == 0 {
+                            continue;
+                        }
+
+                        if M <= 4 && max_allowed_duplicates == 0 {
+                            let mut seen = [0u64; M];
+                            let mut dup = false;
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
+                                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                                let bit = 1u64 << (r & 63);
+                                if (*word & bit) != 0 {
+                                    dup = true;
+                                    break;
+                                }
+                                *word |= bit;
+                            }
+                            if dup {
+                                min_val_found = min_val_found.min(best_val);
+                                continue;
+                            }
+                            let lb_cost = (2 * c_len) as u32;
+                            local_max_k = c_len;
+                            valid_phase2_k = c_len;
+                            self.local_metrics.guesses_evaluated += 1;
+                            min_val_found = min_val_found.min(lb_cost);
+                            best_val = lb_cost;
+                            break 'guess_loop;
+                        }
+
+                        let mut num_non_empty = 0;
+                        let mut duplicates = 0;
+                        let mut aborted = false;
+                        for c_idx in 0..c_len {
+                            let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                            let r = unsafe { (*c_base.add(g)).to_usize() };
+                            unsafe {
+                                let cnt_ptr = counts_ptr.add(r);
+                                let cnt = *cnt_ptr;
+                                if cnt == 0 {
+                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                    num_non_empty += 1;
+                                } else {
+                                    duplicates += 1;
+                                    if duplicates > max_allowed_duplicates {
+                                        for i in 0..num_non_empty {
+                                            let r_idx = *non_empty_indices_ptr.add(i) as usize;
+                                            *counts_ptr.add(r_idx) = 0;
+                                        }
+                                        aborted = true;
+                                        break;
+                                    }
+                                }
+                                *cnt_ptr = cnt + 1;
+                            }
+                        }
+                        if aborted {
+                            min_val_found = min_val_found.min(best_val);
+                            continue;
+                        }
+                        if num_non_empty == 1 {
+                            unsafe {
+                                let r_idx = *non_empty_indices_ptr.add(0) as usize;
+                                *counts_ptr.add(r_idx) = 0;
+                            }
+                            continue;
+                        }
+                        let (expected_rem, lb_cost) = if num_non_empty == 2 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                            }
+                            if count0 == 1 || count0 == (c_len as u16 - 1) {
+                                continue;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = (c_len as u32) - c0;
+                            (
+                                c0 * c0 + c1 * c1,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) },
+                            )
+                        } else if num_non_empty == 3 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = (c_len as u32) - c0 - c1;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) },
+                            )
+                        } else if num_non_empty == 4 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = (c_len as u32) - c0 - c1 - c2;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) },
+                            )
+                        } else if num_non_empty == 5 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            let count3 = unsafe { *counts_ptr.add(r3) };
+                            let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                                *counts_ptr.add(r4) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = count3 as u32;
+                            let c4 = (c_len as u32) - c0 - c1 - c2 - c3;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) },
+                            )
+                        } else {
+                            let mut exp = 0u32;
+                            let mut lb = c_len as u32;
+                            for i in 0..num_non_empty {
+                                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                                let count = unsafe { *counts_ptr.add(r_idx) };
+                                unsafe {
+                                    *counts_ptr.add(r_idx) = 0;
+                                }
+                                exp += (count as u32) * (count as u32);
+                                debug_assert_ne!(r_idx, WIN);
+                                lb += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
+                            }
+                            (exp, lb)
+                        };
+                        if num_non_empty > local_max_k {
+                            local_max_k = num_non_empty;
+                            min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                            max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                        }
+                        if lb_cost < best_val {
+                            if num_non_empty > valid_phase2_k {
+                                valid_phase2_k = num_non_empty;
+                            }
+                            if expected_rem == (c_len + 2 * duplicates) as u32 {
+                                self.local_metrics.guesses_evaluated += 1;
+                                min_val_found = min_val_found.min(lb_cost);
+                                best_val = lb_cost;
+                                k_to_beat_best = (3 * c_len as u32)
+                                    .saturating_sub(best_val.saturating_sub(1))
+                                    as usize;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            } else {
+                                phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                            }
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
+                        }
+                        if min_k_needed > c_len {
+                            break 'guess_loop;
+                        }
+                    }
+                }
+                let set_ptr = set.as_ptr();
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    unsafe {
+                        *is_in_set_ptr.add(g >> 6) = 0;
+                    }
+                }
+                self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
+            } else {
+                min_val_found = min_val_found.min(best_val);
+            }
+
+            let base_lb = unsafe {
+                *self
+                    .capacity_bounds_2d
+                    .get_unchecked(local_max_k)
+                    .get_unchecked(c_len)
+            };
+            if base_lb > local_lb {
+                local_lb = base_lb;
+            }
+
+            let phase1_lb = if valid_phase1_k > 0 {
+                heuristic::tight_capacity_bound(c_len, valid_phase1_k, local_max_k)
+            } else {
+                u32::MAX
+            };
+            let phase2_lb = if valid_phase2_k > 0 {
+                heuristic::phase2_capacity_bound(c_len, valid_phase2_k, local_max_k)
+            } else {
+                u32::MAX
+            };
+            let tight_lb = phase1_lb.min(phase2_lb);
+            if tight_lb != u32::MAX && tight_lb > local_lb {
+                local_lb = tight_lb;
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if local_lb < best_val && self.current_cost_so_far + local_lb >= current_global_beta {
+                cut_by_global = true;
+            }
+            if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
+                if phase2_tuples.len() == 2 {
+                    let t0 = phase2_tuples[0];
+                    let t1 = phase2_tuples[1];
+                    let k0 = (t0.2, t0.1, t0.0);
+                    let k1 = (t1.2, t1.1, t1.0);
+                    if k0 > k1 {
+                        phase2_tuples[0] = t1;
+                        phase2_tuples[1] = t0;
+                    }
+                } else if phase2_tuples.len() == 3 {
+                    let mut t0 = phase2_tuples[0];
+                    let mut t1 = phase2_tuples[1];
+                    let mut t2 = phase2_tuples[2];
+                    let mut k0 = (t0.2, t0.1, t0.0);
+                    let mut k1 = (t1.2, t1.1, t1.0);
+                    let mut k2 = (t2.2, t2.1, t2.0);
+                    if k0 > k1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                        std::mem::swap(&mut k0, &mut k1);
+                    }
+                    if k1 > k2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                        std::mem::swap(&mut k1, &mut k2);
+                    }
+                    if k0 > k1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                    }
+                    phase2_tuples[0] = t0;
+                    phase2_tuples[1] = t1;
+                    phase2_tuples[2] = t2;
+                } else if phase2_tuples.len() == 4 {
+                    let mut t0 = phase2_tuples[0];
+                    let mut t1 = phase2_tuples[1];
+                    let mut t2 = phase2_tuples[2];
+                    let mut t3 = phase2_tuples[3];
+                    let mut k0 = (t0.2, t0.1, t0.0);
+                    let mut k1 = (t1.2, t1.1, t1.0);
+                    let mut k2 = (t2.2, t2.1, t2.0);
+                    let mut k3 = (t3.2, t3.1, t3.0);
+                    if k0 > k1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                        std::mem::swap(&mut k0, &mut k1);
+                    }
+                    if k2 > k3 {
+                        std::mem::swap(&mut t2, &mut t3);
+                        std::mem::swap(&mut k2, &mut k3);
+                    }
+                    if k0 > k2 {
+                        std::mem::swap(&mut t0, &mut t2);
+                        std::mem::swap(&mut k0, &mut k2);
+                    }
+                    if k1 > k3 {
+                        std::mem::swap(&mut t1, &mut t3);
+                        std::mem::swap(&mut k1, &mut k3);
+                    }
+                    if k1 > k2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                    }
+                    phase2_tuples[0] = t0;
+                    phase2_tuples[1] = t1;
+                    phase2_tuples[2] = t2;
+                    phase2_tuples[3] = t3;
+                } else if phase2_tuples.len() > 4 && phase2_tuples.len() <= 32 {
+                    let p2_ptr = phase2_tuples.as_mut_ptr();
+                    let p2_len = phase2_tuples.len();
+                    for j in 1..p2_len {
+                        let key = unsafe { *p2_ptr.add(j) };
+                        let mut k = j;
+                        while k > 0 {
+                            let prev = unsafe { *p2_ptr.add(k - 1) };
+                            let prev_greater = prev.2 > key.2
+                                || (prev.2 == key.2
+                                    && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
+                            if prev_greater {
+                                unsafe {
+                                    *p2_ptr.add(k) = prev;
+                                }
+                                k -= 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        unsafe {
+                            *p2_ptr.add(k) = key;
+                        }
+                    }
+                } else if phase2_tuples.len() > 32 {
+                    phase2_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
+                }
+
+                for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    if self.current_cost_so_far + local_lb >= current_global_beta {
+                        cut_by_global = true;
+                        break;
+                    }
+                    if self.current_cost_so_far + g_lb >= current_global_beta {
+                        cut_by_global = true;
+                        min_val_found = min_val_found.min(g_lb);
+                        self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
+                        break;
+                    }
+                    if g_lb >= best_val {
+                        min_val_found = min_val_found.min(g_lb);
+                        self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
+                        break;
+                    }
+                    let val = self.min_guess_val_inner(
+                        set,
+                        &mut equiv_state,
+                        _g,
+                        best_val,
+                        depth,
+                        local_max_k,
+                    );
+                    min_val_found = min_val_found.min(val);
+                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                        cut_by_global = true;
+                    }
+                    if val < best_val {
+                        best_val = val;
+                        if best_val <= local_lb {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            if best_val > phase2_effective_lb {
+                cut_by_global = true;
+            }
+            min_val_found = min_val_found.min(phase2_min_lb);
+        }
+
+        self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth] = phase1_tuples;
+        self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth] = phase2_tuples;
+
+        let is_exact = best_val < beta;
+        if is_exact {
+            if !cut_by_global {
+                self.cache.insert_set(hash, set, best_val, true);
+            }
+            crate::certlog::record_tagged(10, set, best_val, true, cut_by_global);
+            best_val
+        } else {
+            let mut final_lb = beta.max(local_lb);
+            if best_val > local_lb && min_val_found != u32::MAX {
+                final_lb = final_lb.max(min_val_found);
+            }
+            if !cut_by_global {
+                self.cache.insert_set(hash, set, final_lb, false);
+            }
+            crate::certlog::record_tagged(11, set, final_lb, false, cut_by_global);
+            final_lb
+        }
+    }
+
+    #[inline(always)]
+    pub fn min_guess_val(
+        &mut self,
+        set: &[usize],
+        active_guesses_slice: &[u64],
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let mut equiv_state = EquivState::Ready(active_guesses_slice as *const [u64]);
+        self.min_guess_val_inner(set, &mut equiv_state, guess, beta, depth, parent_max_k)
+    }
+
+    fn min_guess_val_inner(
+        &mut self,
+        set: &[usize],
+        equiv_state: &mut EquivState,
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        let beta = beta.min(current_global_beta);
+
+        self.local_metrics.guesses_evaluated += 1;
+        if self.local_metrics.guesses_evaluated >= 1024 {
+            self.flush_metrics();
+        }
+
+        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
+        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
+        let c_len = set.len();
+        let g_offset = guess * self.matrix.num_candidates;
+        let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
+
+        if c_len <= 16 {
+            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16); 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16);
+            let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
+            let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
+            let set_ptr = set.as_ptr();
+            let c0 = unsafe { *set_ptr };
+            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() as u16 };
+            unsafe {
+                *local_counts_ptr = (r0, 1);
+                *c_responses_ptr = r0;
+            }
+            let mut num_non_empty = 1;
+            let mut prev_idx = 0usize;
+            for cand_idx in 1..c_len {
+                let c = unsafe { *set_ptr.add(cand_idx) };
+                let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                unsafe {
+                    *c_responses_ptr.add(cand_idx) = r;
+                }
+                let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
+                if prev_entry.0 == r {
+                    prev_entry.1 += 1;
+                    continue;
+                }
+                let mut found = false;
+                for i in 0..num_non_empty {
+                    let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                    if entry.0 == r {
+                        entry.1 += 1;
+                        prev_idx = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    prev_idx = num_non_empty;
+                    unsafe {
+                        *local_counts_ptr.add(num_non_empty) = (r, 1);
+                    }
+                    num_non_empty += 1;
+                }
+            }
+
+            if num_non_empty == 1 {
+                return beta;
+            }
+
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            let mut cost = c_len as u32;
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+
+            let mut max_p_len = 0;
+            let mut num_eval = 0;
+            let mut eval_entries = [(0u16, 0u16); 5];
+
+            for i in 0..num_non_empty {
+                let entry = unsafe { *local_counts_ptr.add(i) };
+                let r_idx = entry.0 as usize;
+                if r_idx == WIN {
+                    continue;
+                }
+                let p_len = entry.1 as usize;
+                if p_len > max_p_len {
+                    max_p_len = p_len;
+                }
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                if lb > 0 {
+                    cost += lb;
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        return cost;
+                    }
+                }
+                if p_len > 2 {
+                    eval_entries[num_eval] = entry;
+                    num_eval += 1;
+                }
+            }
+
+            if max_p_len <= 2 {
+                return cost;
+            }
+
+            if num_eval == 2 {
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
+                }
+            } else if num_eval == 3 {
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
+                }
+                if eval_entries[1].1 < eval_entries[2].1 {
+                    eval_entries.swap(1, 2);
+                }
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
+                }
+            } else if num_eval == 4 {
+                if eval_entries[0].1 < eval_entries[1].1 {
+                    eval_entries.swap(0, 1);
+                }
+                if eval_entries[2].1 < eval_entries[3].1 {
+                    eval_entries.swap(2, 3);
+                }
+                if eval_entries[0].1 < eval_entries[2].1 {
+                    eval_entries.swap(0, 2);
+                }
+                if eval_entries[1].1 < eval_entries[3].1 {
+                    eval_entries.swap(1, 3);
+                }
+                if eval_entries[1].1 < eval_entries[2].1 {
+                    eval_entries.swap(1, 2);
+                }
+            } else if num_eval == 5 {
+                for j in 1..5 {
+                    let key = eval_entries[j];
+                    let mut k = j;
+                    while k > 0 && eval_entries[k - 1].1 < key.1 {
+                        eval_entries[k] = eval_entries[k - 1];
+                        k -= 1;
+                    }
+                    eval_entries[k] = key;
+                }
+            }
+
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let mut eval_hashes = [0u64; 5];
+            let mut small_p = std::mem::MaybeUninit::<[[usize; 16]; 5]>::uninit();
+            let small_p_ptr = small_p.as_mut_ptr() as *mut usize;
+
+            if num_eval == 1 {
+                let r0 = eval_entries[0].0;
+                let target_count = eval_entries[0].1 as usize;
+                let mut found_count = 0;
+                let p0_ptr = small_p_ptr;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(found_count) = c;
+                        }
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    }
+                }
+            } else if num_eval == 2 {
+                let r0 = eval_entries[0].0;
+                let r1 = eval_entries[1].0;
+                let target_count = (eval_entries[0].1 + eval_entries[1].1) as usize;
+                let mut found_count = 0;
+                let mut p0_len = 0;
+                let mut p1_len = 0;
+                let p0_ptr = small_p_ptr;
+                let p1_ptr = unsafe { small_p_ptr.add(16) };
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(p0_len) = c;
+                        }
+                        p0_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p1_ptr.add(p1_len) = c;
+                        }
+                        p1_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    }
+                }
+            } else if num_eval == 3 {
+                let r0 = eval_entries[0].0;
+                let r1 = eval_entries[1].0;
+                let r2 = eval_entries[2].0;
+                let target_count =
+                    (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1) as usize;
+                let mut found_count = 0;
+                let mut p0_len = 0;
+                let mut p1_len = 0;
+                let mut p2_len = 0;
+                let p0_ptr = small_p_ptr;
+                let p1_ptr = unsafe { small_p_ptr.add(16) };
+                let p2_ptr = unsafe { small_p_ptr.add(32) };
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(p0_len) = c;
+                        }
+                        p0_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p1_ptr.add(p1_len) = c;
+                        }
+                        p1_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p2_ptr.add(p2_len) = c;
+                        }
+                        p2_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    }
+                }
+            } else if num_eval == 4 {
+                let r0 = eval_entries[0].0;
+                let r1 = eval_entries[1].0;
+                let r2 = eval_entries[2].0;
+                let r3 = eval_entries[3].0;
+                let target_count =
+                    (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1 + eval_entries[3].1)
+                        as usize;
+                let mut found_count = 0;
+                let mut p0_len = 0;
+                let mut p1_len = 0;
+                let mut p2_len = 0;
+                let mut p3_len = 0;
+                let p0_ptr = small_p_ptr;
+                let p1_ptr = unsafe { small_p_ptr.add(16) };
+                let p2_ptr = unsafe { small_p_ptr.add(32) };
+                let p3_ptr = unsafe { small_p_ptr.add(48) };
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p0_ptr.add(p0_len) = c;
+                        }
+                        p0_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p1_ptr.add(p1_len) = c;
+                        }
+                        p1_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p2_ptr.add(p2_len) = c;
+                        }
+                        p2_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    } else if r == r3 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        eval_hashes[3] ^= unsafe { *zobrist_ptr.add(c) };
+                        unsafe {
+                            *p3_ptr.add(p3_len) = c;
+                        }
+                        p3_len += 1;
+                        found_count += 1;
+                        if found_count == target_count {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                let mut p_lens = [0usize; 5];
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    for j in 0..num_eval {
+                        if eval_entries[j].0 == r {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            eval_hashes[j] ^= unsafe { *zobrist_ptr.add(c) };
+                            let pj_ptr = unsafe { small_p_ptr.add(j * 16) };
+                            unsafe {
+                                *pj_ptr.add(p_lens[j]) = c;
+                            }
+                            p_lens[j] += 1;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let mut small_p_len = [0u8; 5];
+            let mut small_p_hash = [0u64; 5];
+            let mut small_used_val = [0u32; 5];
+            let mut small_is_exact = [false; 5];
+            let mut all_exact = true;
+
+            for i in 0..num_eval {
+                let entry = eval_entries[i];
+                let p_len = entry.1 as usize;
+                let p_hash = eval_hashes[i];
+                small_p_len[i] = p_len as u8;
+                small_p_hash[i] = p_hash;
+                let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let (used_val, is_exact) =
+                    if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
+                        self.local_metrics.cache_hits += 1;
+                        (cached_val.max(initial_lb), is_exact)
+                    } else {
+                        let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                        let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
+                        let (quick_val, is_exact) =
+                            Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
+                        let used_val = quick_val.max(initial_lb);
+                        self.cache.insert_set(p_hash, p_slice, used_val, is_exact);
+                        cert_record!(4, p_slice, used_val, is_exact);
+                        (used_val, is_exact)
+                    };
+
+                small_used_val[i] = used_val;
+                small_is_exact[i] = is_exact;
+                if !is_exact {
+                    all_exact = false;
+                }
+
+                if used_val > initial_lb {
+                    cost += used_val - initial_lb;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        return cost;
+                    }
+                }
+            }
+
+            if all_exact {
+                return cost;
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            if cost >= cutoff {
+                return cost;
+            }
+            let active_guesses_slice =
+                unsafe { &*self.get_or_compute_active_guesses(set, depth, equiv_state) };
+
+            for i in 0..num_eval {
+                if small_is_exact[i] {
+                    continue;
+                }
+                let used_val = small_used_val[i];
+                let b = cost - used_val;
+                let new_beta = beta.saturating_sub(b);
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let effective_beta =
+                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                if effective_beta == 0 {
+                    return cost;
+                }
+
+                let p_len = small_p_len[i] as usize;
+                let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
+                let p_hash = small_p_hash[i];
+
+                self.current_cost_so_far += b;
+                let val = self.min_state_val_with_hash(
+                    p_slice,
+                    p_hash,
+                    active_guesses_slice,
+                    effective_beta,
+                    depth + 1,
+                    p_len.min(parent_max_k).max(2),
+                    used_val,
+                );
+                self.current_cost_so_far -= b;
+
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if b + val >= cutoff {
+                    return b + val;
+                }
+                cost = b + val;
+            }
+            cost
+        } else {
+            let (counts_ptr, hashes_ptr, p_lbs_ptr, child_max_ks_ptr) = {
+                let s = self.scratch.as_mut().unwrap();
+                (
+                    s.scratch_guess_counts[depth].as_mut_ptr(),
+                    s.scratch_guess_hashes[depth].as_mut_ptr(),
+                    s.scratch_guess_p_lbs[depth].as_mut_ptr(),
+                    s.scratch_guess_child_max_ks[depth].as_mut_ptr(),
+                )
+            };
+
+            let mut eval_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
+            let eval_indices_ptr = eval_indices.as_mut_ptr() as *mut u16;
+            let mut num_eval = 0;
+
+            struct GuessCleanup {
+                counts_ptr: *mut u16,
+                hashes_ptr: *mut u64,
+                r_len: usize,
+            }
+
+            impl Drop for GuessCleanup {
+                #[inline(always)]
+                fn drop(&mut self) {
+                    unsafe {
+                        std::ptr::write_bytes(self.counts_ptr, 0, self.r_len);
+                        std::ptr::write_bytes(self.hashes_ptr, 0, self.r_len);
+                    }
+                }
+            }
+
+            let _cleanup = GuessCleanup {
+                counts_ptr,
+                hashes_ptr,
+                r_len: R,
+            };
+
+            let is_contiguous_root = c_len == self.matrix.num_candidates
+                && Elem::IS_U8
+                && unsafe {
+                    *set.get_unchecked(0) == 0 && *set.get_unchecked(c_len - 1) == c_len - 1
+                };
+
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let set_ptr = set.as_ptr();
+            let mut i = 0;
+            if is_contiguous_root {
+                let g_u8_ptr = g_ptr as *const u8;
+                while i + 15 < c_len {
+                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                    let r0 = (r_u64_0 & 0xFF) as usize;
+                    let r1 = ((r_u64_0 >> 8) & 0xFF) as usize;
+                    let r2 = ((r_u64_0 >> 16) & 0xFF) as usize;
+                    let r3 = ((r_u64_0 >> 24) & 0xFF) as usize;
+                    let r4 = ((r_u64_0 >> 32) & 0xFF) as usize;
+                    let r5 = ((r_u64_0 >> 40) & 0xFF) as usize;
+                    let r6 = ((r_u64_0 >> 48) & 0xFF) as usize;
+                    let r7 = (r_u64_0 >> 56) as usize;
+
+                    let r8 = (r_u64_1 & 0xFF) as usize;
+                    let r9 = ((r_u64_1 >> 8) & 0xFF) as usize;
+                    let r10 = ((r_u64_1 >> 16) & 0xFF) as usize;
+                    let r11 = ((r_u64_1 >> 24) & 0xFF) as usize;
+                    let r12 = ((r_u64_1 >> 32) & 0xFF) as usize;
+                    let r13 = ((r_u64_1 >> 40) & 0xFF) as usize;
+                    let r14 = ((r_u64_1 >> 48) & 0xFF) as usize;
+                    let r15 = (r_u64_1 >> 56) as usize;
+
+                    let z0 = unsafe { *zobrist_ptr.add(i) };
+                    let z1 = unsafe { *zobrist_ptr.add(i + 1) };
+                    let z2 = unsafe { *zobrist_ptr.add(i + 2) };
+                    let z3 = unsafe { *zobrist_ptr.add(i + 3) };
+                    let z4 = unsafe { *zobrist_ptr.add(i + 4) };
+                    let z5 = unsafe { *zobrist_ptr.add(i + 5) };
+                    let z6 = unsafe { *zobrist_ptr.add(i + 6) };
+                    let z7 = unsafe { *zobrist_ptr.add(i + 7) };
+                    let z8 = unsafe { *zobrist_ptr.add(i + 8) };
+                    let z9 = unsafe { *zobrist_ptr.add(i + 9) };
+                    let z10 = unsafe { *zobrist_ptr.add(i + 10) };
+                    let z11 = unsafe { *zobrist_ptr.add(i + 11) };
+                    let z12 = unsafe { *zobrist_ptr.add(i + 12) };
+                    let z13 = unsafe { *zobrist_ptr.add(i + 13) };
+                    let z14 = unsafe { *zobrist_ptr.add(i + 14) };
+                    let z15 = unsafe { *zobrist_ptr.add(i + 15) };
+
+                    unsafe {
+                        *counts_ptr.add(r0) += 1;
+                        *counts_ptr.add(r1) += 1;
+                        *counts_ptr.add(r2) += 1;
+                        *counts_ptr.add(r3) += 1;
+                        *counts_ptr.add(r4) += 1;
+                        *counts_ptr.add(r5) += 1;
+                        *counts_ptr.add(r6) += 1;
+                        *counts_ptr.add(r7) += 1;
+                        *counts_ptr.add(r8) += 1;
+                        *counts_ptr.add(r9) += 1;
+                        *counts_ptr.add(r10) += 1;
+                        *counts_ptr.add(r11) += 1;
+                        *counts_ptr.add(r12) += 1;
+                        *counts_ptr.add(r13) += 1;
+                        *counts_ptr.add(r14) += 1;
+                        *counts_ptr.add(r15) += 1;
+
+                        *hashes_ptr.add(r0) ^= z0;
+                        *hashes_ptr.add(r1) ^= z1;
+                        *hashes_ptr.add(r2) ^= z2;
+                        *hashes_ptr.add(r3) ^= z3;
+                        *hashes_ptr.add(r4) ^= z4;
+                        *hashes_ptr.add(r5) ^= z5;
+                        *hashes_ptr.add(r6) ^= z6;
+                        *hashes_ptr.add(r7) ^= z7;
+                        *hashes_ptr.add(r8) ^= z8;
+                        *hashes_ptr.add(r9) ^= z9;
+                        *hashes_ptr.add(r10) ^= z10;
+                        *hashes_ptr.add(r11) ^= z11;
+                        *hashes_ptr.add(r12) ^= z12;
+                        *hashes_ptr.add(r13) ^= z13;
+                        *hashes_ptr.add(r14) ^= z14;
+                        *hashes_ptr.add(r15) ^= z15;
+                    }
+                    i += 16;
+                }
+                while i < c_len {
+                    let r = unsafe { *g_u8_ptr.add(i) as usize };
+                    let z = unsafe { *zobrist_ptr.add(i) };
+                    unsafe {
+                        *counts_ptr.add(r) += 1;
+                        *hashes_ptr.add(r) ^= z;
+                    }
+                    i += 1;
+                }
+            } else {
+                while i + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+                    let z0 = unsafe { *zobrist_ptr.add(c0) };
+                    let z1 = unsafe { *zobrist_ptr.add(c1) };
+                    let z2 = unsafe { *zobrist_ptr.add(c2) };
+                    let z3 = unsafe { *zobrist_ptr.add(c3) };
+                    let z4 = unsafe { *zobrist_ptr.add(c4) };
+                    let z5 = unsafe { *zobrist_ptr.add(c5) };
+                    let z6 = unsafe { *zobrist_ptr.add(c6) };
+                    let z7 = unsafe { *zobrist_ptr.add(c7) };
+
+                    unsafe {
+                        *counts_ptr.add(r0) += 1;
+                        *counts_ptr.add(r1) += 1;
+                        *counts_ptr.add(r2) += 1;
+                        *counts_ptr.add(r3) += 1;
+                        *counts_ptr.add(r4) += 1;
+                        *counts_ptr.add(r5) += 1;
+                        *counts_ptr.add(r6) += 1;
+                        *counts_ptr.add(r7) += 1;
+                        *hashes_ptr.add(r0) ^= z0;
+                        *hashes_ptr.add(r1) ^= z1;
+                        *hashes_ptr.add(r2) ^= z2;
+                        *hashes_ptr.add(r3) ^= z3;
+                        *hashes_ptr.add(r4) ^= z4;
+                        *hashes_ptr.add(r5) ^= z5;
+                        *hashes_ptr.add(r6) ^= z6;
+                        *hashes_ptr.add(r7) ^= z7;
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    let z = unsafe { *zobrist_ptr.add(c) };
+                    unsafe {
+                        *counts_ptr.add(r) += 1;
+                        *hashes_ptr.add(r) ^= z;
+                    }
+                    i += 1;
+                }
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+
+            let mut cost = set.len() as u32;
+            let mut max_p_len = 0;
+            let mut num_buckets = 0;
+
+            for r in 0..R {
+                let p_len = unsafe { *counts_ptr.add(r) as usize };
+                if p_len == 0 {
+                    continue;
+                }
+                num_buckets += 1;
+                if r == WIN {
+                    continue;
+                }
+                if p_len > max_p_len {
+                    max_p_len = p_len;
+                }
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                if lb > 0 {
+                    cost += lb;
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        return cost;
+                    }
+                }
+                if p_len > 2 {
+                    unsafe {
+                        *eval_indices_ptr.add(num_eval) = r as u16;
+                    }
+                    num_eval += 1;
+                }
+            }
+
+            if num_buckets <= 1 {
+                return beta;
+            }
+
+            if max_p_len <= 2 {
+                return cost;
+            }
+
+            let split_idx = if num_eval == 1 {
+                let r0 = unsafe { *eval_indices_ptr as usize };
+                if unsafe { *counts_ptr.add(r0) > 15 } {
+                    1
+                } else {
+                    0
+                }
+            } else if num_eval == 2 {
+                let mut r0 = unsafe { *eval_indices_ptr };
+                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
+                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                    unsafe {
+                        *eval_indices_ptr = r0;
+                        *eval_indices_ptr.add(1) = r1;
+                    }
+                }
+                if c0 > 15 {
+                    if c1 > 15 { 2 } else { 1 }
+                } else {
+                    0
+                }
+            } else if num_eval == 3 {
+                let mut r0 = unsafe { *eval_indices_ptr };
+                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
+                let mut r2 = unsafe { *eval_indices_ptr.add(2) };
+                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                let mut c2 = unsafe { *counts_ptr.add(r2 as usize) };
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                }
+                if c1 < c2 || (c1 == c2 && r1 > r2) {
+                    std::mem::swap(&mut r1, &mut r2);
+                    std::mem::swap(&mut c1, &mut c2);
+                }
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                }
+                unsafe {
+                    *eval_indices_ptr = r0;
+                    *eval_indices_ptr.add(1) = r1;
+                    *eval_indices_ptr.add(2) = r2;
+                }
+                if c0 > 15 {
+                    if c1 > 15 {
+                        if c2 > 15 { 3 } else { 2 }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 4 {
+                let mut r0 = unsafe { *eval_indices_ptr };
+                let mut r1 = unsafe { *eval_indices_ptr.add(1) };
+                let mut r2 = unsafe { *eval_indices_ptr.add(2) };
+                let mut r3 = unsafe { *eval_indices_ptr.add(3) };
+                let mut c0 = unsafe { *counts_ptr.add(r0 as usize) };
+                let mut c1 = unsafe { *counts_ptr.add(r1 as usize) };
+                let mut c2 = unsafe { *counts_ptr.add(r2 as usize) };
+                let mut c3 = unsafe { *counts_ptr.add(r3 as usize) };
+                if c0 < c1 || (c0 == c1 && r0 > r1) {
+                    std::mem::swap(&mut r0, &mut r1);
+                    std::mem::swap(&mut c0, &mut c1);
+                }
+                if c2 < c3 || (c2 == c3 && r2 > r3) {
+                    std::mem::swap(&mut r2, &mut r3);
+                    std::mem::swap(&mut c2, &mut c3);
+                }
+                if c0 < c2 || (c0 == c2 && r0 > r2) {
+                    std::mem::swap(&mut r0, &mut r2);
+                    std::mem::swap(&mut c0, &mut c2);
+                }
+                if c1 < c3 || (c1 == c3 && r1 > r3) {
+                    std::mem::swap(&mut r1, &mut r3);
+                    std::mem::swap(&mut c1, &mut c3);
+                }
+                if c1 < c2 || (c1 == c2 && r1 > r2) {
+                    std::mem::swap(&mut r1, &mut r2);
+                    std::mem::swap(&mut c1, &mut c2);
+                }
+                unsafe {
+                    *eval_indices_ptr = r0;
+                    *eval_indices_ptr.add(1) = r1;
+                    *eval_indices_ptr.add(2) = r2;
+                    *eval_indices_ptr.add(3) = r3;
+                }
+                if c0 > 15 {
+                    if c1 > 15 {
+                        if c2 > 15 {
+                            if c3 > 15 { 4 } else { 3 }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else {
+                for i in 1..num_eval {
+                    let r_curr = unsafe { *eval_indices_ptr.add(i) };
+                    let c_curr = unsafe { *counts_ptr.add(r_curr as usize) };
+                    let mut j = i;
+                    while j > 0 {
+                        let r_prev = unsafe { *eval_indices_ptr.add(j - 1) };
+                        let c_prev = unsafe { *counts_ptr.add(r_prev as usize) };
+                        if c_prev < c_curr || (c_prev == c_curr && r_prev > r_curr) {
+                            unsafe {
+                                *eval_indices_ptr.add(j) = r_prev;
+                            }
+                            j -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    unsafe {
+                        *eval_indices_ptr.add(j) = r_curr;
+                    }
+                }
+                let mut split = 0;
+                while split < num_eval
+                    && unsafe { *counts_ptr.add(*eval_indices_ptr.add(split) as usize) > 15 }
+                {
+                    split += 1;
+                }
+                split
+            };
+
+            let mut exact_mask = [0u64; M];
+            let mut cached_mask = [0u64; M];
+            let mut num_exact = 0;
+
+            for i in 0..num_eval {
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let hash = unsafe { *hashes_ptr.add(r_idx) };
+                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                    self.local_metrics.cache_hits += 1;
+                    let used_val = cached_val.max(cap_lb);
+                    unsafe {
+                        *p_lbs_ptr.add(i) = used_val;
+                    }
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if is_exact {
+                        unsafe {
+                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                        }
+                        num_exact += 1;
+                    }
+                    unsafe {
+                        *cached_mask.get_unchecked_mut(word_idx) |= bit;
+                    }
+
+                    if used_val > cap_lb {
+                        cost += used_val - cap_lb;
+                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                        let cutoff =
+                            beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                        if cost >= cutoff {
+                            self.local_metrics.pruned_by_bounds += 1;
+                            return cost;
+                        }
+                    }
+                } else {
+                    unsafe {
+                        *p_lbs_ptr.add(i) = cap_lb;
+                    }
+                }
+            }
+
+            if num_exact == num_eval {
+                return cost;
+            }
+
+            let mut sorted_set =
+                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
+            if sorted_set.len() < set.len() {
+                sorted_set.resize(set.len(), 0);
+            }
+            let sorted_set_ptr = sorted_set.as_mut_ptr();
+
+            let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
+            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
+            let mut curr = 0;
+            for r in 0..R {
+                unsafe {
+                    *current_offsets_ptr.add(r) = curr;
+                    curr += *counts_ptr.add(r);
+                }
+            }
+
+            let mut i = 0;
+            if is_contiguous_root {
+                let g_u8_ptr = g_ptr as *const u8;
+                while i + 7 < c_len {
+                    let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r0 = (r_u64 & 0xFF) as usize;
+                    let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+                    let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+                    let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+                    let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+                    let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+                    let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+                    let r7 = (r_u64 >> 56) as usize;
+
+                    unsafe {
+                        let pos_ptr0 = current_offsets_ptr.add(r0);
+                        let pos0 = *pos_ptr0 as usize;
+                        *sorted_set_ptr.add(pos0) = i;
+                        *pos_ptr0 += 1;
+
+                        let pos_ptr1 = current_offsets_ptr.add(r1);
+                        let pos1 = *pos_ptr1 as usize;
+                        *sorted_set_ptr.add(pos1) = i + 1;
+                        *pos_ptr1 += 1;
+
+                        let pos_ptr2 = current_offsets_ptr.add(r2);
+                        let pos2 = *pos_ptr2 as usize;
+                        *sorted_set_ptr.add(pos2) = i + 2;
+                        *pos_ptr2 += 1;
+
+                        let pos_ptr3 = current_offsets_ptr.add(r3);
+                        let pos3 = *pos_ptr3 as usize;
+                        *sorted_set_ptr.add(pos3) = i + 3;
+                        *pos_ptr3 += 1;
+
+                        let pos_ptr4 = current_offsets_ptr.add(r4);
+                        let pos4 = *pos_ptr4 as usize;
+                        *sorted_set_ptr.add(pos4) = i + 4;
+                        *pos_ptr4 += 1;
+
+                        let pos_ptr5 = current_offsets_ptr.add(r5);
+                        let pos5 = *pos_ptr5 as usize;
+                        *sorted_set_ptr.add(pos5) = i + 5;
+                        *pos_ptr5 += 1;
+
+                        let pos_ptr6 = current_offsets_ptr.add(r6);
+                        let pos6 = *pos_ptr6 as usize;
+                        *sorted_set_ptr.add(pos6) = i + 6;
+                        *pos_ptr6 += 1;
+
+                        let pos_ptr7 = current_offsets_ptr.add(r7);
+                        let pos7 = *pos_ptr7 as usize;
+                        *sorted_set_ptr.add(pos7) = i + 7;
+                        *pos_ptr7 += 1;
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    let r_idx = unsafe { *g_u8_ptr.add(i) as usize };
+                    let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
+                    let pos = unsafe { *pos_ptr as usize };
+                    unsafe {
+                        *sorted_set_ptr.add(pos) = i;
+                        *pos_ptr += 1;
+                    }
+                    i += 1;
+                }
+            } else {
+                while i + 3 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    unsafe {
+                        let pos_ptr0 = current_offsets_ptr.add(r0);
+                        let pos0 = *pos_ptr0 as usize;
+                        *sorted_set_ptr.add(pos0) = c0;
+                        *pos_ptr0 += 1;
+
+                        let pos_ptr1 = current_offsets_ptr.add(r1);
+                        let pos1 = *pos_ptr1 as usize;
+                        *sorted_set_ptr.add(pos1) = c1;
+                        *pos_ptr1 += 1;
+
+                        let pos_ptr2 = current_offsets_ptr.add(r2);
+                        let pos2 = *pos_ptr2 as usize;
+                        *sorted_set_ptr.add(pos2) = c2;
+                        *pos_ptr2 += 1;
+
+                        let pos_ptr3 = current_offsets_ptr.add(r3);
+                        let pos3 = *pos_ptr3 as usize;
+                        *sorted_set_ptr.add(pos3) = c3;
+                        *pos_ptr3 += 1;
+                    }
+                    i += 4;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
+                    let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
+                    let pos = unsafe { *pos_ptr as usize };
+                    unsafe {
+                        *sorted_set_ptr.add(pos) = c;
+                        *pos_ptr += 1;
+                    }
+                    i += 1;
+                }
+            }
+
+            for i in split_idx..num_eval {
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
+                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                    continue;
+                }
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                let hash = unsafe { *hashes_ptr.add(r_idx) };
+
+                let (quick_val, is_exact) =
+                    Self::quick_bucket_eval_specialized(self.matrix, self.dict, p);
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let used_val = quick_val.max(lb);
+                unsafe {
+                    *p_lbs_ptr.add(i) = used_val;
+                }
+                if is_exact {
+                    unsafe {
+                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                    }
+                    num_exact += 1;
+                }
+                self.cache.insert_set(hash, p, used_val, is_exact);
+                cert_record!(5, p, used_val, is_exact);
+
+                if used_val > lb {
+                    cost += used_val - lb;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return cost;
+                    }
+                }
+            }
+
+            if num_exact == num_eval {
+                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+
+            for i in 0..split_idx {
+                unsafe {
+                    *child_max_ks_ptr.add(i) = 0;
+                }
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
+                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                    continue;
+                }
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                let hash = unsafe { *hashes_ptr.add(r_idx) };
+
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
+                if target_k == 2 {
+                    self.cache.insert_set(hash, p, lb, false);
+                    cert_record!(6, p, lb, false);
+                } else {
+                    let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
+                        self.matrix,
+                        p,
+                        target_k,
+                    );
+                    if k_cand >= target_k {
+                        self.cache.insert_set(hash, p, lb, false);
+                        cert_record!(7, p, lb, false);
+                    } else {
+                        let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
+                            self.matrix,
+                            p,
+                            k_cand,
+                            target_k,
+                        );
+                        if k >= target_k {
+                            self.cache.insert_set(hash, p, lb, false);
+                            cert_record!(8, p, lb, false);
+                        } else {
+                            unsafe {
+                                *child_max_ks_ptr.add(i) = k as u16;
+                            }
+                            let tight_lb =
+                                crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                            let used_val = tight_lb.max(lb);
+                            unsafe {
+                                *p_lbs_ptr.add(i) = used_val;
+                            }
+                            self.cache.insert_set(hash, p, used_val, false);
+                            cert_record!(9, p, used_val, false);
+
+                            if used_val > lb {
+                                cost += used_val - lb;
+                                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                                let cutoff = beta.min(
+                                    current_global_beta.saturating_sub(self.current_cost_so_far),
+                                );
+                                if cost >= cutoff {
+                                    self.local_metrics.pruned_by_bounds += 1;
+                                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
+                                        sorted_set;
+                                    return cost;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            if cost >= cutoff {
+                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+            let active_guesses_slice =
+                unsafe { &*self.get_or_compute_active_guesses(set, depth, equiv_state) };
+
+            for i in 0..num_eval {
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
+                if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
+                    continue;
+                }
+                let r_idx = unsafe { *eval_indices_ptr.add(i) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
+
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = current_global_beta.saturating_sub(self.current_cost_so_far);
+                if cost >= cutoff {
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
+                }
+
+                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+
+                let actual_lb = unsafe { *p_lbs_ptr.add(i) };
+                let b = cost - actual_lb;
+                let new_beta = beta - b;
+
+                let effective_beta =
+                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                if effective_beta == 0 {
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
+                }
+
+                let child_k = if i < split_idx {
+                    let stored_k = unsafe { *child_max_ks_ptr.add(i) as usize };
+                    if stored_k != 0 {
+                        stored_k
+                    } else {
+                        p_len.min(parent_max_k)
+                    }
+                } else {
+                    p_len.min(parent_max_k)
+                };
+
+                let hash = unsafe { *hashes_ptr.add(r_idx) };
+                let known_quick = if i >= split_idx { actual_lb } else { 0 };
+                self.current_cost_so_far += b;
+                let val = self.min_state_val_with_hash(
+                    p,
+                    hash,
+                    active_guesses_slice,
+                    effective_beta,
+                    depth + 1,
+                    child_k,
+                    known_quick,
+                );
+                self.current_cost_so_far -= b;
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if b + val >= cutoff {
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return b + val;
+                }
+                cost = b + val;
+            }
+
+            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+
+            cost
+        }
+    }
+}
+
+macro_rules! dispatch_solver {
+    ($word_len:expr, $fn_name:ident ($($arg:expr),*)) => {
+        match $word_len {
+            1 => SpecializedSolver::<3, 1, 1, u8>::$fn_name($($arg),*),
+            2 => SpecializedSolver::<9, 1, 4, u8>::$fn_name($($arg),*),
+            3 => SpecializedSolver::<27, 1, 13, u8>::$fn_name($($arg),*),
+            4 => SpecializedSolver::<81, 2, 40, u8>::$fn_name($($arg),*),
+            5 => SpecializedSolver::<243, 4, 121, u8>::$fn_name($($arg),*),
+            6 => SpecializedSolver::<729, 12, 364, Response>::$fn_name($($arg),*),
+            7 => SpecializedSolver::<2187, 35, 1093, Response>::$fn_name($($arg),*),
+            8 => SpecializedSolver::<6561, 103, 3280, Response>::$fn_name($($arg),*),
+            9 => SpecializedSolver::<19683, 308, 9841, Response>::$fn_name($($arg),*),
+            10 => SpecializedSolver::<59049, 923, 29524, Response>::$fn_name($($arg),*),
+            _ => SpecializedSolver::<243, 4, 121, u8>::$fn_name($($arg),*),
+        }
+    };
+}
+
+macro_rules! new_solver_variant {
+    ($word_len:expr, $($arg:expr),*) => {
+        match $word_len {
+            1 => Solver::L1(SpecializedSolver::<3, 1, 1, u8>::new_with_global_beta($($arg),*)),
+            2 => Solver::L2(SpecializedSolver::<9, 1, 4, u8>::new_with_global_beta($($arg),*)),
+            3 => Solver::L3(SpecializedSolver::<27, 1, 13, u8>::new_with_global_beta($($arg),*)),
+            4 => Solver::L4(SpecializedSolver::<81, 2, 40, u8>::new_with_global_beta($($arg),*)),
+            5 => Solver::L5(SpecializedSolver::<243, 4, 121, u8>::new_with_global_beta($($arg),*)),
+            6 => Solver::L6(SpecializedSolver::<729, 12, 364, Response>::new_with_global_beta($($arg),*)),
+            7 => Solver::L7(SpecializedSolver::<2187, 35, 1093, Response>::new_with_global_beta($($arg),*)),
+            8 => Solver::L8(SpecializedSolver::<6561, 103, 3280, Response>::new_with_global_beta($($arg),*)),
+            9 => Solver::L9(SpecializedSolver::<19683, 308, 9841, Response>::new_with_global_beta($($arg),*)),
+            10 => Solver::L10(SpecializedSolver::<59049, 923, 29524, Response>::new_with_global_beta($($arg),*)),
+            _ => Solver::L5(SpecializedSolver::<243, 4, 121, u8>::new_with_global_beta($($arg),*)),
+        }
+    };
+}
+
+macro_rules! match_solver_mut {
+    ($self:expr, $inner:ident => $body:expr) => {
+        match $self {
+            Solver::L1($inner) => $body,
+            Solver::L2($inner) => $body,
+            Solver::L3($inner) => $body,
+            Solver::L4($inner) => $body,
+            Solver::L5($inner) => $body,
+            Solver::L6($inner) => $body,
+            Solver::L7($inner) => $body,
+            Solver::L8($inner) => $body,
+            Solver::L9($inner) => $body,
+            Solver::L10($inner) => $body,
+        }
+    };
+}
+
+/// The optimal Wordle solver using Branch and Bound.
+pub enum Solver<'a> {
+    L1(SpecializedSolver<'a, 3, 1, 1, u8>),
+    L2(SpecializedSolver<'a, 9, 1, 4, u8>),
+    L3(SpecializedSolver<'a, 27, 1, 13, u8>),
+    L4(SpecializedSolver<'a, 81, 2, 40, u8>),
+    L5(SpecializedSolver<'a, 243, 4, 121, u8>),
+    L6(SpecializedSolver<'a, 729, 12, 364, Response>),
+    L7(SpecializedSolver<'a, 2187, 35, 1093, Response>),
+    L8(SpecializedSolver<'a, 6561, 103, 3280, Response>),
+    L9(SpecializedSolver<'a, 19683, 308, 9841, Response>),
+    L10(SpecializedSolver<'a, 59049, 923, 29524, Response>),
+}
+
+impl<'a> Solver<'a> {
     pub fn new(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -320,29 +4043,8 @@ impl<'a> Solver<'a> {
         global_beta: &'a AtomicU32,
         equiv_cache: &'a EquivCache,
     ) -> Self {
-        let mut scratch = THREAD_SCRATCH
-            .with(|ts| ts.borrow_mut().take())
-            .unwrap_or_else(|| {
-                Box::new(SolverScratch {
-                    scratch_is_in_set: std::array::from_fn(|_| {
-                        vec![0u64; dict.guesses.len().div_ceil(64)]
-                    }),
-                    scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
-                    scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
-                    scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
-                    scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
-                    scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
-                    scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
-                    scratch_active_bits: std::array::from_fn(|_| vec![0u64; 233]),
-                    scratch_guess_counts: [[0u16; 243]; 32],
-                    scratch_guess_hashes: [[0u64; 243]; 32],
-                    scratch_guess_p_lbs: [[0u32; 243]; 32],
-                    scratch_guess_child_max_ks: [[0u16; 243]; 32],
-                })
-            });
-        scratch.fit_dictionary(dict.guesses.len());
-
-        Self {
+        new_solver_variant!(
+            dict.word_len,
             matrix,
             max_k,
             dict,
@@ -350,16 +4052,264 @@ impl<'a> Solver<'a> {
             capacity_bounds_2d,
             cache,
             global_beta,
-            equiv_cache,
-            current_cost_so_far: 0,
-            scratch: Some(scratch),
+            equiv_cache
+        )
+    }
+
+    #[inline(always)]
+    pub fn quick_bucket_eval(
+        matrix: &ResponseMatrix,
+        dict: &Dictionary,
+        bucket: &[usize],
+    ) -> (u32, bool) {
+        dispatch_solver!(
+            dict.word_len,
+            quick_bucket_eval_specialized(matrix, dict, bucket)
+        )
+    }
+
+    #[inline(always)]
+    pub fn min_state_val(
+        &mut self,
+        set: &[usize],
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_state_val(set, parent_active_guesses, beta, depth, parent_max_k))
+    }
+
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn min_state_val_with_hash(
+        &mut self,
+        set: &[usize],
+        hash: u64,
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+        known_quick_lb: u32,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k, known_quick_lb))
+    }
+
+    #[inline(always)]
+    pub fn min_guess_val(
+        &mut self,
+        set: &[usize],
+        active_guesses_slice: &[u64],
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_guess_val(set, active_guesses_slice, guess, beta, depth, parent_max_k))
+    }
+
+    #[inline(always)]
+    pub fn flush_metrics(&mut self) {
+        match_solver_mut!(self, s => s.flush_metrics());
+    }
+
+    pub fn greedy_solve(
+        matrix: &ResponseMatrix,
+        dict: &'a crate::dict::Dictionary,
+        set: &[usize],
+    ) -> u32 {
+        if set.len() <= 2 {
+            return (set.len() * (set.len() + 1) / 2) as u32;
+        }
+
+        let mut c_mask = 0u32;
+        for &c in set {
+            c_mask |= matrix.candidate_masks[c];
+        }
+
+        let mut best_guess = usize::MAX;
+        let mut min_expected_rem = u32::MAX;
+
+        let mut counts = vec![0u16; matrix.num_responses];
+        let mut non_empty_indices = vec![0u16; matrix.num_responses];
+
+        let skip_projections = c_mask.count_ones() >= 26;
+        let mut seen_projections = if skip_projections {
+            rustc_hash::FxHashSet::default()
+        } else {
+            rustc_hash::FxHashSet::with_capacity_and_hasher(
+                dict.guesses.len().min(4096),
+                Default::default(),
+            )
+        };
+
+        if matrix.num_responses <= 256 {
+            let matrix_data_ptr = matrix.data_u8.as_ptr();
+            for g in 0..dict.guesses.len() {
+                if !skip_projections {
+                    let chars = &dict.guess_chars[g];
+                    let mut proj = 0u64;
+                    for i in 0..dict.word_len.min(8) {
+                        let li = chars[i] as u64;
+                        proj |= ((li + 1) * (((c_mask >> li) & 1) as u64)) << (i * 5);
+                    }
+                    if !seen_projections.insert(proj) {
+                        continue;
+                    }
+                }
+
+                let g_offset = g * matrix.num_candidates;
+                let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
+                let mut num_non_empty = 0;
+                for &c in set {
+                    let r = unsafe { *g_ptr.add(c) as usize };
+                    if counts[r] == 0 {
+                        non_empty_indices[num_non_empty] = r as u16;
+                        num_non_empty += 1;
+                    }
+                    counts[r] += 1;
+                }
+
+                if num_non_empty <= 1 {
+                    for i in 0..num_non_empty {
+                        counts[non_empty_indices[i] as usize] = 0;
+                    }
+                    continue;
+                }
+
+                let mut expected_rem = 0u32;
+                for i in 0..num_non_empty {
+                    let r = non_empty_indices[i] as usize;
+                    let count = counts[r] as u32;
+                    expected_rem += count * count;
+                    counts[r] = 0;
+                }
+                if expected_rem < min_expected_rem {
+                    min_expected_rem = expected_rem;
+                    best_guess = g;
+                }
+            }
+
+            if best_guess == usize::MAX {
+                return u32::MAX;
+            }
+
+            let best_g_offset = best_guess * matrix.num_candidates;
+            let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
+            for &c in set {
+                let r = unsafe { *best_g_ptr.add(c) as usize };
+                counts[r] += 1;
+            }
+
+            let mut offsets = vec![0usize; matrix.num_responses + 1];
+            for r_idx in 0..matrix.num_responses {
+                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+            }
+            let mut sorted_set = vec![0usize; set.len()];
+            let mut current_offsets = offsets.clone();
+            for &c in set {
+                let r = unsafe { *best_g_ptr.add(c) as usize };
+                let pos = current_offsets[r];
+                sorted_set[pos] = c;
+                current_offsets[r] += 1;
+            }
+
+            let mut cost = set.len() as u32;
+            for r_idx in 0..matrix.num_responses {
+                let p_len = counts[r_idx] as usize;
+                if p_len == 0 || r_idx == matrix.win_response.0 as usize {
+                    continue;
+                }
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
+            }
+            cost
+        } else {
+            let matrix_data_ptr = matrix.data.as_ptr();
+            for g in 0..dict.guesses.len() {
+                if !skip_projections {
+                    let chars = &dict.guess_chars[g];
+                    let mut proj = 0u64;
+                    for i in 0..dict.word_len.min(8) {
+                        let li = chars[i] as u64;
+                        proj |= ((li + 1) * (((c_mask >> li) & 1) as u64)) << (i * 5);
+                    }
+                    if !seen_projections.insert(proj) {
+                        continue;
+                    }
+                }
+
+                let g_offset = g * matrix.num_candidates;
+                let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
+                let mut num_non_empty = 0;
+                for &c in set {
+                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                    if counts[r] == 0 {
+                        non_empty_indices[num_non_empty] = r as u16;
+                        num_non_empty += 1;
+                    }
+                    counts[r] += 1;
+                }
+
+                if num_non_empty <= 1 {
+                    for i in 0..num_non_empty {
+                        counts[non_empty_indices[i] as usize] = 0;
+                    }
+                    continue;
+                }
+
+                let mut expected_rem = 0u32;
+                for i in 0..num_non_empty {
+                    let r = non_empty_indices[i] as usize;
+                    let count = counts[r] as u32;
+                    expected_rem += count * count;
+                    counts[r] = 0;
+                }
+                if expected_rem < min_expected_rem {
+                    min_expected_rem = expected_rem;
+                    best_guess = g;
+                }
+            }
+
+            if best_guess == usize::MAX {
+                return u32::MAX;
+            }
+
+            let best_g_offset = best_guess * matrix.num_candidates;
+            let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
+            for &c in set {
+                let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
+                counts[r] += 1;
+            }
+
+            let mut offsets = vec![0usize; matrix.num_responses + 1];
+            for r_idx in 0..matrix.num_responses {
+                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+            }
+            let mut sorted_set = vec![0usize; set.len()];
+            let mut current_offsets = offsets.clone();
+            for &c in set {
+                let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
+                let pos = current_offsets[r];
+                sorted_set[pos] = c;
+                current_offsets[r] += 1;
+            }
+
+            let mut cost = set.len() as u32;
+            for r_idx in 0..matrix.num_responses {
+                let p_len = counts[r_idx] as usize;
+                if p_len == 0 || r_idx == matrix.win_response.0 as usize {
+                    continue;
+                }
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
+            }
+            cost
         }
     }
 
-    /// Solves the given candidate subset to minimize the total expected guesses.
-    ///
-    /// Evaluates all initial guesses in parallel using Rayon, sharing the global
-    /// best upper bound (`beta`) atomically for heavy cross-thread pruning.
     pub fn solve(
         matrix: &'a ResponseMatrix,
         initial_candidates: &[usize],
@@ -373,7 +4323,6 @@ impl<'a> Solver<'a> {
             2 => return 3,
             _ => {}
         }
-        // 64 M units x 16 bytes (two AtomicU64 slots per unit) = 1 GB.
         let cache_size = 64 * 1024 * 1024;
         let global_cache = crate::cache::GlobalCache::new(cache_size);
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
@@ -382,10 +4331,8 @@ impl<'a> Solver<'a> {
         heuristic::sort_guesses_by_expected_remaining(matrix, initial_candidates, &mut guesses);
 
         let set = initial_candidates;
-
         let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
 
-        // Filter active guesses
         let mut active_guesses = Vec::with_capacity(guesses.len());
         for &g in &guesses {
             let mut first_r = None;
@@ -416,29 +4363,26 @@ impl<'a> Solver<'a> {
         if !active_guesses.is_empty() {
             let first_g = active_guesses[0];
 
-            // To prevent 7 cores from sitting idle while evaluating the massive first guess,
-            // we parallelize its buckets! Since this is the best guess, it's very unlikely to be pruned,
-            // so we don't lose much alpha-beta efficiency by evaluating buckets in parallel.
-
-            let mut counts = [0u16; 243];
-            let mut non_empty_indices = [0u8; 243];
+            let num_resp = matrix.num_responses;
+            let mut counts = vec![0u16; num_resp];
+            let mut non_empty_indices = vec![0u16; num_resp];
             let mut num_non_empty = 0;
 
             for &c in set {
                 let r_idx = matrix.get(first_g, c).0 as usize;
                 if counts[r_idx] == 0 {
-                    non_empty_indices[num_non_empty] = r_idx as u8;
+                    non_empty_indices[num_non_empty] = r_idx as u16;
                     num_non_empty += 1;
                 }
                 counts[r_idx] += 1;
             }
 
-            let mut offsets = [0usize; 244];
-            for r_idx in 0..243 {
+            let mut offsets = vec![0usize; num_resp + 1];
+            for r_idx in 0..num_resp {
                 offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
             }
             let mut sorted_set = vec![0usize; set.len()];
-            let mut current_offsets = offsets;
+            let mut current_offsets = offsets.clone();
             for &c in set {
                 let r_idx = matrix.get(first_g, c).0 as usize;
                 let pos = current_offsets[r_idx];
@@ -451,7 +4395,7 @@ impl<'a> Solver<'a> {
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize {
+                if r_idx == matrix.win_response.0 as usize {
                     continue;
                 }
                 if p_len <= 2 {
@@ -494,42 +4438,67 @@ impl<'a> Solver<'a> {
             let first_guess_cost = base_cost + bucket_costs;
             let greedy_cost_to_beat = initial_greedy_cost.min(first_guess_cost);
 
-            // Pre-filter alternative root guesses: only retain those whose
-            // capacity_bound lb is strictly less than the current beta.
-            // A guess with lb >= beta cannot possibly improve the solution,
-            // so we can skip it entirely. Note: allowed_guesses (active_guesses)
-            // is passed unchanged to sub-problems; this filter only affects
-            // which root tasks we launch.
-            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = active_guesses[1..]
-                .iter()
-                .copied()
-                .filter_map(|g| {
-                    let mut counts = [0u16; 243];
-                    for &c in set {
-                        counts[matrix.get(g, c).0 as usize] += 1;
-                    }
-                    let lb: u32 = set.len() as u32
-                        + counts
-                            .iter()
-                            .enumerate()
-                            .filter(|&(r_idx, &cnt)| {
-                                cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize
-                            })
-                            .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
-                            .sum::<u32>();
-                    let mut expected_rem = 0u32;
-                    for &cnt in &counts {
-                        if cnt > 0 {
-                            expected_rem += (cnt as u32) * (cnt as u32);
+            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = if matrix.num_responses <= 256
+            {
+                active_guesses[1..]
+                    .par_iter()
+                    .copied()
+                    .filter_map(|g| {
+                        let g_ptr =
+                            unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
+                        let mut counts = [0u16; 256];
+                        for &c in set {
+                            let r = unsafe { *g_ptr.add(c) as usize };
+                            counts[r] += 1;
                         }
-                    }
-                    if lb < greedy_cost_to_beat {
-                        Some((g, lb, expected_rem))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+                        let mut lb = set.len() as u32;
+                        let win_r = matrix.win_response.0 as usize;
+                        let mut expected_rem = 0u32;
+                        for (r_idx, &cnt) in counts[..matrix.num_responses].iter().enumerate() {
+                            if cnt > 0 {
+                                expected_rem += (cnt as u32) * (cnt as u32);
+                                if r_idx != win_r {
+                                    lb += capacity_bounds_2d[max_k][cnt as usize];
+                                }
+                            }
+                        }
+                        if lb < greedy_cost_to_beat {
+                            Some((g, lb, expected_rem))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                active_guesses[1..]
+                    .par_iter()
+                    .copied()
+                    .filter_map(|g| {
+                        let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                        let mut counts = vec![0u16; matrix.num_responses];
+                        for &c in set {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            counts[r] += 1;
+                        }
+                        let mut lb = set.len() as u32;
+                        let win_r = matrix.win_response.0 as usize;
+                        let mut expected_rem = 0u32;
+                        for (r_idx, &cnt) in counts.iter().enumerate() {
+                            if cnt > 0 {
+                                expected_rem += (cnt as u32) * (cnt as u32);
+                                if r_idx != win_r {
+                                    lb += capacity_bounds_2d[max_k][cnt as usize];
+                                }
+                            }
+                        }
+                        if lb < greedy_cost_to_beat {
+                            Some((g, lb, expected_rem))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
 
             root_candidates_tuples.sort_unstable_by_key(|t| (t.1, t.2));
             let root_candidates: Vec<usize> =
@@ -541,11 +4510,6 @@ impl<'a> Solver<'a> {
                 active_guesses.len() - 1
             );
 
-            // Single tight-beta scan over remaining root candidates.
-            // first_guess_cost is computed exactly above via bucket parallelization,
-            // so it is already the tightest possible upper bound. One pass with
-            // beta=greedy_cost_to_beat prunes almost all root candidates immediately.
-            // IDA* is not needed here: beta is already exact after evaluating first_g.
             if !root_candidates.is_empty() {
                 let scan_beta = std::sync::atomic::AtomicU32::new(greedy_cost_to_beat);
                 let result_beta = crate::parallel_depth::solve_parallel_depth2(
@@ -568,1270 +4532,7 @@ impl<'a> Solver<'a> {
 
         initial_greedy_cost
     }
-
-    /// Quickly evaluates small candidate sets (<= 15) using in-set partitions.
-    /// Returns (cost, is_exact).
-    /// - If an in-set guess partitions the remaining n-1 candidates into n-1 distinct buckets,
-    ///   the exact cost is 2*n - 1.
-    /// - If no in-set guess achieves n-1, but at least one achieves n-2 distinct buckets,
-    ///   the exact cost is 2*n.
-    /// - Otherwise, no guess (in-set or out-of-set) can achieve < 2*n, so 2*n is a guaranteed
-    ///   lower bound.
-    #[inline(always)]
-    pub fn quick_bucket_eval(
-        matrix: &ResponseMatrix,
-        dict: &Dictionary,
-        bucket: &[usize],
-    ) -> (u32, bool) {
-        let n = bucket.len();
-        match n {
-            0 => (0, true),
-            1 => (1, true),
-            2 => (3, true),
-            _ => {
-                let mut best_inside = u32::MAX;
-                let target_exact = (2 * n) as u32;
-                let data_ptr = matrix.data.as_ptr();
-                for &ci in bucket {
-                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
-                    let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
-
-                    let mut mask = [0u64; 4];
-                    let mut collisions = 0;
-                    let max_collisions = if best_inside == target_exact { 1 } else { 2 };
-
-                    for &c in bucket {
-                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                        let word_idx = r >> 6;
-                        let bit = 1u64 << (r & 63);
-                        let word = unsafe { mask.get_unchecked_mut(word_idx) };
-                        if (*word & bit) != 0 {
-                            collisions += 1;
-                            if collisions >= max_collisions {
-                                break;
-                            }
-                        } else {
-                            *word |= bit;
-                        }
-                    }
-
-                    if collisions == 0 {
-                        return ((2 * n - 1) as u32, true);
-                    }
-                    if collisions == 1 && max_collisions == 2 {
-                        best_inside = target_exact;
-                    }
-                }
-
-                if best_inside == target_exact {
-                    (target_exact, true)
-                } else {
-                    (target_exact, false)
-                }
-            }
-        }
-    }
-
-    /// Computes the minimum expected cost to solve `set`, minimizing over every guess in
-    /// `allowed_guesses`. This is the search's main per-state entry point:
-    /// 1. **Transposition table lookup**: an exact cached value returns immediately; a cached
-    ///    lower bound `>= beta` fails high immediately (see the module-level note above on
-    ///    fail-hard transposition pruning).
-    /// 2. **Capacity lower bound pruning**: `capacity_bounds[c_len]` (global) and a per-node
-    ///    `local_max_k`-derived bound both give an instant return once they prove `beta`
-    ///    can't be beaten.
-    /// 3. **Equivalence-class projection**: guesses that partition `set` identically to one
-    ///    already tried at this node are skipped via a bitwise projection over the candidate
-    ///    set's letter inventory (`seen_projections`).
-    /// 4. **Guess ordering + fail-hard alpha-beta**: remaining guesses are sorted by expected
-    ///    remaining candidates and evaluated via `min_guess_val`, tightening `best_val` as
-    ///    better guesses are found and stopping early once `best_val` reaches the proven
-    ///    local lower bound.
-    pub fn min_state_val(
-        &mut self,
-        set: &[usize],
-        parent_active_guesses: &[u64],
-        beta: u32,
-        depth: usize,
-        parent_max_k: usize,
-    ) -> u32 {
-        self.metrics
-            .max_depth
-            .fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
-
-        let mut hash = 0;
-        for &c in set {
-            hash ^= self.matrix.zobrist[c];
-        }
-
-        let mut cached_lower_bound = 0;
-        if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-            self.metrics
-                .cache_hits
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if is_exact {
-                return cached_val;
-            } else {
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cached_val >= beta
-                    || self.current_cost_so_far + cached_val >= current_global_beta
-                {
-                    return cached_val;
-                }
-                cached_lower_bound = cached_val;
-            }
-        }
-
-        self.metrics
-            .states_evaluated
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let c_len = set.len();
-        if c_len == 0 {
-            return 0;
-        }
-        if c_len == 1 {
-            return 1;
-        }
-        if c_len == 2 {
-            return 3;
-        }
-        if c_len <= 15 {
-            let (val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, set);
-            if is_exact {
-                self.cache.insert_set(hash, set, val, true);
-                cert_record!(1, set, val, true);
-                return val;
-            }
-            cached_lower_bound = cached_lower_bound.max(val);
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cached_lower_bound >= beta
-                || self.current_cost_so_far + cached_lower_bound >= current_global_beta
-            {
-                self.cache.insert_set(hash, set, cached_lower_bound, false);
-                cert_record!(2, set, cached_lower_bound, false);
-                return cached_lower_bound;
-            }
-        }
-
-        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
-        let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if parent_lb >= beta || self.current_cost_so_far + parent_lb >= current_global_beta {
-            cert_record!(3, set, parent_lb, false);
-            return parent_lb;
-        }
-
-        let mut best_val = beta;
-        // Set when the shared global beta, rather than this node's own `beta`,
-        // stops the search before every guess is resolved. Such a result is not
-        // proven for this set alone, so it must not reach the transposition
-        // table: a later search of the set with a different cost so far would
-        // trust it as an exact value or lower bound.
-        let mut cut_by_global = false;
-
-        let set_hash = hash;
-
-        let should_cache_equiv = set.len() >= 10 && set.len() < 40;
-        let shard_idx = (set_hash as usize) % 1024;
-        let mut active_bits_scratch =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
-        let rc_opt = if should_cache_equiv {
-            let cache = self.equiv_cache[shard_idx].read().unwrap();
-            if let Some(cached) = cache.get(&set_hash) {
-                self.metrics
-                    .equiv_cache_hits
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Some(std::sync::Arc::clone(cached))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let slice_ptr: *const [u64];
-        let _keep_alive = if set.len() >= 40 {
-            slice_ptr = parent_active_guesses as *const _;
-            None
-        } else if let Some(rc) = &rc_opt {
-            slice_ptr = rc.as_slice() as *const _;
-            None
-        } else {
-            let num_u64s = self.dict.guesses.len().div_ceil(64);
-            active_bits_scratch.clear();
-            active_bits_scratch.resize(num_u64s, 0);
-
-            let scratch_ref = self.scratch.as_mut().unwrap();
-            let table = &mut scratch_ref.scratch_hash_table[depth];
-            let added_indices = &mut scratch_ref.scratch_added_indices[depth];
-            added_indices.clear();
-            let num_guesses = self.dict.guesses.len();
-
-            let projs = &mut scratch_ref.scratch_projs[depth];
-
-            let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size =
-                (((active_count + 243) * 2).next_power_of_two() as usize).clamp(1024, table.len());
-            let mask = table_size - 1;
-            let shift = 64 - table_size.trailing_zeros();
-
-            let chunk_size = 512;
-            for chunk_start in (0..num_guesses).step_by(chunk_size) {
-                let chunk_end = (chunk_start + chunk_size).min(num_guesses);
-                let b_start = chunk_start / 64;
-                let b_end = chunk_end.div_ceil(64);
-                let mut has_active = false;
-                for b in b_start..b_end {
-                    if unsafe { *parent_active_guesses.get_unchecked(b) } != 0 {
-                        has_active = true;
-                        break;
-                    }
-                }
-                if !has_active {
-                    continue;
-                }
-
-                let projs_chunk = &mut projs[chunk_start..chunk_end];
-                projs_chunk.fill(0);
-                for &c in set {
-                    let c_off = c * num_guesses;
-                    let z = unsafe { *self.matrix.zobrist.get_unchecked(c) };
-                    let c_slice = unsafe {
-                        self.matrix
-                            .data_c_g
-                            .get_unchecked(c_off + chunk_start..c_off + chunk_end)
-                    };
-                    for (p, &r) in projs_chunk.iter_mut().zip(c_slice.iter()) {
-                        *p ^= z.wrapping_mul(r.0 as u64 + 1);
-                    }
-                }
-            }
-
-            let mut useless_projs = [0u64; 243];
-            for r in 0..243 {
-                let mut p = 0u64;
-                let m = r as u64 + 1;
-                for &c in set {
-                    p ^= unsafe { *self.matrix.zobrist.get_unchecked(c) }.wrapping_mul(m);
-                }
-                if p == 0 {
-                    p = 1;
-                }
-                useless_projs[r] = p;
-            }
-            for r in 0..243 {
-                let proj = useless_projs[r];
-                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                loop {
-                    let slot = table[idx];
-                    if slot == 0 {
-                        table[idx] = proj;
-                        added_indices.push(idx);
-                        break;
-                    }
-                    if slot == proj {
-                        break;
-                    }
-                    idx = (idx + 1) & mask;
-                }
-            }
-
-            for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
-                if block == u64::MAX {
-                    for tz in 0..64 {
-                        let g = block_idx * 64 + tz;
-                        if g >= num_guesses {
-                            break;
-                        }
-                        let mut proj = unsafe { *projs.get_unchecked(g) };
-                        if proj == 0 {
-                            proj = 1;
-                        }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                        loop {
-                            let slot = table[idx];
-                            if slot == 0 {
-                                table[idx] = proj;
-                                unsafe {
-                                    *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
-                                }
-                                added_indices.push(idx);
-                                break;
-                            }
-                            if slot == proj {
-                                break;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                    }
-                } else if block != 0 {
-                    let mut b = block;
-                    while b != 0 {
-                        let tz = b.trailing_zeros();
-                        let g = block_idx * 64 + tz as usize;
-                        let mut proj = unsafe { *projs.get_unchecked(g) };
-                        if proj == 0 {
-                            proj = 1;
-                        }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                        loop {
-                            let slot = table[idx];
-                            if slot == 0 {
-                                table[idx] = proj;
-                                active_bits_scratch[block_idx] |= 1 << tz;
-                                added_indices.push(idx);
-                                break;
-                            }
-                            if slot == proj {
-                                break;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                        b &= b - 1;
-                    }
-                }
-            }
-
-            for &idx in added_indices.iter() {
-                table[idx] = 0;
-            }
-
-            let rc_new = if should_cache_equiv {
-                let rc = std::sync::Arc::new(active_bits_scratch.clone());
-                let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
-                if let Some(cached) = cache_mut.get(&set_hash) {
-                    self.metrics
-                        .equiv_cache_hits
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(std::sync::Arc::clone(cached))
-                } else {
-                    self.metrics
-                        .equiv_cache_misses
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    self.metrics.pruned_by_equivalence.fetch_add(
-                        self.dict.guesses.len()
-                            - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
-                    let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
-                    if cache_mut.len() > cap {
-                        let evict = (cap / 4).max(1);
-                        let keys_to_remove: Vec<_> =
-                            cache_mut.keys().take(evict).copied().collect();
-                        for k in keys_to_remove {
-                            cache_mut.remove(&k);
-                        }
-                    }
-                    cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
-                    Some(rc)
-                }
-            } else {
-                self.metrics
-                    .equiv_cache_misses
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                self.metrics.pruned_by_equivalence.fetch_add(
-                    self.dict.guesses.len()
-                        - active_bits_scratch
-                            .iter()
-                            .map(|b| b.count_ones() as usize)
-                            .sum::<usize>(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                None
-            };
-
-            if let Some(rc_val) = &rc_new {
-                slice_ptr = rc_val.as_slice() as *const _;
-            } else {
-                slice_ptr = active_bits_scratch.as_slice() as *const _;
-            }
-            rc_new
-        };
-
-        let active_guesses_slice = unsafe { &*slice_ptr };
-
-        self.scratch.as_mut().unwrap().scratch_active_bits[depth] = active_bits_scratch;
-
-        let mut local_lb = parent_lb.max(cached_lower_bound);
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
-
-        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
-        let matrix_data_ptr = self.matrix.data.as_ptr();
-
-        let mut phase1_tuples =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth]);
-        phase1_tuples.clear();
-        let mut phase2_tuples =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth]);
-        phase2_tuples.clear();
-
-        let mut local_max_k = 0;
-        let mut valid_phase1_k = 0;
-        let mut min_val_found = u32::MAX;
-
-        for &cand in set {
-            let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(cand) };
-            if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
-                continue;
-            }
-            let mut num_non_empty = 0;
-            let g_off = g * self.matrix.num_candidates;
-            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                unsafe {
-                    let cnt = counts.get_unchecked_mut(r);
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                    num_non_empty += (*cnt == 0) as usize;
-                    *cnt += 1;
-                }
-            }
-            if num_non_empty == 1 {
-                unsafe {
-                    let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                    *counts.get_unchecked_mut(r_idx) = 0;
-                }
-                continue;
-            }
-            if num_non_empty > local_max_k {
-                local_max_k = num_non_empty;
-            }
-            let mut expected_rem = 0u32;
-            let mut lb_cost = c_len as u32;
-            for i in 0..num_non_empty {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                let count = unsafe { *counts.get_unchecked(r_idx) };
-                unsafe {
-                    *counts.get_unchecked_mut(r_idx) = 0;
-                }
-                expected_rem += (count as u32) * (count as u32);
-                if r_idx != Response::WIN.0 as usize {
-                    lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                }
-            }
-            if lb_cost < beta {
-                if num_non_empty > valid_phase1_k {
-                    valid_phase1_k = num_non_empty;
-                }
-                phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-            } else {
-                min_val_found = min_val_found.min(lb_cost);
-            }
-        }
-        phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
-
-        for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if self.current_cost_so_far + local_lb >= current_global_beta {
-                cut_by_global = true;
-                break;
-            }
-            if self.current_cost_so_far + g_lb >= current_global_beta {
-                cut_by_global = true;
-                min_val_found = min_val_found.min(g_lb);
-                self.metrics.pruned_by_bounds.fetch_add(
-                    phase1_tuples.len() - idx,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                break;
-            }
-            if g_lb >= best_val {
-                min_val_found = min_val_found.min(g_lb);
-                self.metrics.pruned_by_bounds.fetch_add(
-                    phase1_tuples.len() - idx,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                break;
-            }
-            let val =
-                self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
-            min_val_found = min_val_found.min(val);
-            // A guess cut short by the global beta returns a partial cost.
-            if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                cut_by_global = true;
-            }
-            if val < best_val {
-                best_val = val;
-                if best_val <= local_lb {
-                    break;
-                }
-            }
-        }
-
-        let phase2_min_lb = heuristic::phase2_capacity_bound(c_len, parent_max_k, parent_max_k);
-        let phase2_effective_lb = local_lb.max(phase2_min_lb);
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if best_val > phase2_effective_lb
-            && self.current_cost_so_far + phase2_effective_lb < current_global_beta
-        {
-            // Gather Phase 2 guesses: active guesses not in set
-            let mut valid_phase2_k = 0;
-            let mut is_in_set =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
-            for &c in set {
-                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
-                unsafe {
-                    *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
-                }
-            }
-            let num_guesses = self.dict.guesses.len();
-            let data_c_g_ptr = self.matrix.data_c_g.as_ptr();
-            let mut stack_c_ptrs = [std::ptr::null::<Response>(); 256];
-            let mut heap_c_ptrs = Vec::new();
-            let c_ptrs: &[*const Response] = if c_len <= 256 {
-                for (i, &c) in set.iter().enumerate() {
-                    unsafe {
-                        *stack_c_ptrs.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
-                    }
-                }
-                &stack_c_ptrs[..c_len]
-            } else {
-                heap_c_ptrs.reserve(c_len);
-                for &c in set {
-                    heap_c_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-                }
-                &heap_c_ptrs
-            };
-
-            for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-                if block == 0 {
-                    continue;
-                }
-                let mut b = block & !is_in_set[block_idx];
-                while b != 0 {
-                    let tz = b.trailing_zeros();
-                    let g = block_idx * 64 + tz as usize;
-                    b &= b - 1;
-
-                    let mut num_non_empty = 0;
-                    for &c_base in c_ptrs {
-                        let r = unsafe { (*c_base.add(g)).0 as usize };
-                        unsafe {
-                            let cnt = counts.get_unchecked_mut(r);
-                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                            num_non_empty += (*cnt == 0) as usize;
-                            *cnt += 1;
-                        }
-                    }
-                    if num_non_empty == 1 {
-                        unsafe {
-                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                            *counts.get_unchecked_mut(r_idx) = 0;
-                        }
-                        continue;
-                    }
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
-                    for i in 0..num_non_empty {
-                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                        let count = unsafe { *counts.get_unchecked(r_idx) };
-                        unsafe {
-                            *counts.get_unchecked_mut(r_idx) = 0;
-                        }
-                        expected_rem += (count as u32) * (count as u32);
-                        if r_idx != Response::WIN.0 as usize {
-                            lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                        }
-                    }
-                    if num_non_empty == 2
-                        && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                    {
-                        continue;
-                    }
-                    if num_non_empty > local_max_k {
-                        local_max_k = num_non_empty;
-                    }
-                    if lb_cost < best_val {
-                        if num_non_empty > valid_phase2_k {
-                            valid_phase2_k = num_non_empty;
-                        }
-                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                    } else {
-                        min_val_found = min_val_found.min(lb_cost);
-                    }
-                }
-            }
-            for &c in set {
-                let g = self.dict.candidate_to_guess[c];
-                is_in_set[g / 64] = 0;
-            }
-            self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
-
-            let base_lb = unsafe {
-                *self
-                    .capacity_bounds_2d
-                    .get_unchecked(local_max_k)
-                    .get_unchecked(c_len)
-            };
-            if base_lb > local_lb {
-                local_lb = base_lb;
-            }
-
-            let phase1_lb = if valid_phase1_k > 0 {
-                heuristic::tight_capacity_bound(c_len, valid_phase1_k, local_max_k)
-            } else {
-                u32::MAX
-            };
-            let phase2_lb = if valid_phase2_k > 0 {
-                heuristic::phase2_capacity_bound(c_len, valid_phase2_k, local_max_k)
-            } else {
-                u32::MAX
-            };
-            let tight_lb = phase1_lb.min(phase2_lb);
-            if tight_lb != u32::MAX && tight_lb > local_lb {
-                local_lb = tight_lb;
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if local_lb < best_val && self.current_cost_so_far + local_lb >= current_global_beta {
-                cut_by_global = true;
-            }
-            if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
-                phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
-
-                for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    if self.current_cost_so_far + local_lb >= current_global_beta {
-                        cut_by_global = true;
-                        break;
-                    }
-                    if self.current_cost_so_far + g_lb >= current_global_beta {
-                        cut_by_global = true;
-                        min_val_found = min_val_found.min(g_lb);
-                        self.metrics.pruned_by_bounds.fetch_add(
-                            phase2_tuples.len() - idx,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                        break;
-                    }
-                    if g_lb >= best_val {
-                        min_val_found = min_val_found.min(g_lb);
-                        self.metrics.pruned_by_bounds.fetch_add(
-                            phase2_tuples.len() - idx,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                        break;
-                    }
-                    let val = self.min_guess_val(
-                        set,
-                        active_guesses_slice,
-                        _g,
-                        best_val,
-                        depth,
-                        local_max_k,
-                    );
-                    min_val_found = min_val_found.min(val);
-                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                        cut_by_global = true;
-                    }
-                    if val < best_val {
-                        best_val = val;
-                        if best_val <= local_lb {
-                            break;
-                        }
-                    }
-                }
-            }
-        } else {
-            if best_val > phase2_effective_lb {
-                // Phase 2 was skipped because of the global beta.
-                cut_by_global = true;
-            }
-            min_val_found = min_val_found.min(phase2_min_lb);
-        }
-
-        self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth] = phase1_tuples;
-        self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth] = phase2_tuples;
-
-        let is_exact = best_val < beta;
-        if is_exact {
-            if !cut_by_global {
-                self.cache.insert_set(hash, set, best_val, true);
-            }
-            crate::certlog::record_tagged(10, set, best_val, true, cut_by_global);
-            best_val
-        } else {
-            let mut final_lb = beta.max(local_lb);
-            if best_val > local_lb && min_val_found != u32::MAX {
-                final_lb = final_lb.max(min_val_found);
-            }
-            if !cut_by_global {
-                self.cache.insert_set(hash, set, final_lb, false);
-            }
-            crate::certlog::record_tagged(11, set, final_lb, false, cut_by_global);
-            final_lb
-        }
-    }
-    /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
-    ///
-    /// This mathematically partitions the candidates into up to 243 ternary response buckets.
-    /// It recursively queries `min_state_val` on each sub-bucket. Alpha-beta pruning is applied
-    /// at the bucket level: if the cumulative cost of resolved buckets plus the theoretical
-    /// heuristic minimum cost of the remaining unresolved buckets exceeds `beta`, evaluation
-    /// is immediately aborted.
-    pub fn min_guess_val(
-        &mut self,
-        set: &[usize],
-        active_guesses_slice: &[u64],
-        guess: usize,
-
-        beta: u32,
-        depth: usize,
-        parent_max_k: usize,
-    ) -> u32 {
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        let beta = beta.min(current_global_beta);
-
-        self.metrics
-            .guesses_evaluated
-            .fetch_add(1, Ordering::Relaxed);
-
-        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
-        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
-        let c_len = set.len();
-        let g_offset = guess * self.matrix.num_candidates;
-        let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
-
-        if c_len <= 16 {
-            let mut local_counts = [(0u8, 0u8, 0u32); 16];
-            let mut c_responses = [0u8; 16];
-            let mut num_non_empty = 0;
-            for (cand_idx, &c) in set.iter().enumerate() {
-                let r = unsafe { (*g_ptr.add(c)).0 };
-                unsafe {
-                    *c_responses.get_unchecked_mut(cand_idx) = r;
-                }
-                let mut found = false;
-                for i in 0..num_non_empty {
-                    let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                    if entry.0 == r {
-                        entry.1 += 1;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    unsafe {
-                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
-                    }
-                    num_non_empty += 1;
-                }
-            }
-
-            if num_non_empty == 1 {
-                return beta;
-            }
-
-            let mut cost = c_len as u32;
-            let mut max_p_len = 0;
-
-            for i in 0..num_non_empty {
-                let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                let r_idx = entry.0 as usize;
-                if r_idx == Response::WIN.0 as usize {
-                    continue;
-                }
-                let p_len = entry.1 as usize;
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                cost += lb;
-                entry.2 = lb;
-            }
-
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                return cost;
-            }
-
-            if max_p_len <= 2 {
-                return cost;
-            }
-
-            local_counts[0..num_non_empty]
-                .sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
-
-            for i in 0..num_non_empty {
-                let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                let p_len = entry.1 as usize;
-                let r_idx = entry.0 as usize;
-                if r_idx == Response::WIN.0 as usize || p_len <= 2 {
-                    continue;
-                }
-
-                let mut p = [0usize; 16];
-                let mut p_idx = 0;
-                for (cand_idx, &c) in set.iter().enumerate() {
-                    let r = unsafe { *c_responses.get_unchecked(cand_idx) as usize };
-                    if r == r_idx {
-                        unsafe {
-                            *p.get_unchecked_mut(p_idx) = c;
-                        }
-                        p_idx += 1;
-                    }
-                }
-
-                let (quick_val, is_exact) =
-                    Self::quick_bucket_eval(self.matrix, self.dict, unsafe {
-                        p.get_unchecked(0..p_len)
-                    });
-                let lb = entry.2;
-                let used_val = quick_val.max(lb);
-                cost += used_val - lb;
-                entry.2 = used_val;
-                cert_record!(4, unsafe { p.get_unchecked(0..p_len) }, used_val, is_exact);
-
-                if is_exact {
-                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                        return cost;
-                    }
-                    continue;
-                }
-
-                let b = cost - entry.2;
-                let new_beta = beta - b;
-                let effective_beta =
-                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
-
-                if effective_beta == 0 {
-                    return cost;
-                }
-
-                self.current_cost_so_far += b;
-                let val = self.min_state_val(
-                    &p[0..p_len],
-                    active_guesses_slice,
-                    effective_beta,
-                    depth + 1,
-                    p_len.min(parent_max_k).max(2),
-                );
-                self.current_cost_so_far -= b;
-
-                // Reload the global beta: a child cut short by it returns a
-                // value that only means something against its current value.
-                if b + val >= beta
-                    || self.current_cost_so_far + b + val
-                        >= self.global_beta.load(Ordering::Relaxed)
-                {
-                    return b + val;
-                }
-                cost = b + val;
-                entry.2 = val;
-            }
-            cost
-        } else {
-            let (counts_ptr, hashes_ptr, p_lbs_ptr, child_max_ks_ptr) = {
-                let s = self.scratch.as_mut().unwrap();
-                (
-                    s.scratch_guess_counts[depth].as_mut_ptr(),
-                    s.scratch_guess_hashes[depth].as_mut_ptr(),
-                    s.scratch_guess_p_lbs[depth].as_mut_ptr(),
-                    s.scratch_guess_child_max_ks[depth].as_mut_ptr(),
-                )
-            };
-
-            let mut non_empty_indices = [0u8; 243];
-            let num_non_empty = std::cell::Cell::new(0usize);
-            let mut eval_indices = [0u8; 243];
-            let mut num_eval = 0;
-            let num_p_lbs = std::cell::Cell::new(0usize);
-
-            struct GuessCleanup<'a> {
-                counts_ptr: *mut u16,
-                hashes_ptr: *mut u64,
-                p_lbs_ptr: *mut u32,
-                child_max_ks_ptr: *mut u16,
-                non_empty_indices_ptr: *const u8,
-                eval_indices_ptr: *const u8,
-                num_non_empty: &'a std::cell::Cell<usize>,
-                num_p_lbs: &'a std::cell::Cell<usize>,
-            }
-
-            impl<'a> Drop for GuessCleanup<'a> {
-                #[inline(always)]
-                fn drop(&mut self) {
-                    unsafe {
-                        let n_non_empty = self.num_non_empty.get();
-                        for i in 0..n_non_empty {
-                            let r = *self.non_empty_indices_ptr.add(i) as usize;
-                            *self.counts_ptr.add(r) = 0;
-                            *self.hashes_ptr.add(r) = 0;
-                        }
-                        let n_p_lbs = self.num_p_lbs.get();
-                        for i in 0..n_p_lbs {
-                            let r = *self.eval_indices_ptr.add(i) as usize;
-                            *self.p_lbs_ptr.add(r) = 0;
-                            *self.child_max_ks_ptr.add(r) = 0;
-                        }
-                    }
-                }
-            }
-
-            let _cleanup = GuessCleanup {
-                counts_ptr,
-                hashes_ptr,
-                p_lbs_ptr,
-                child_max_ks_ptr,
-                non_empty_indices_ptr: non_empty_indices.as_ptr(),
-                eval_indices_ptr: eval_indices.as_ptr(),
-                num_non_empty: &num_non_empty,
-                num_p_lbs: &num_p_lbs,
-            };
-
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                unsafe {
-                    let cnt = counts_ptr.add(r);
-                    let curr_non_empty = num_non_empty.get();
-                    *non_empty_indices.get_unchecked_mut(curr_non_empty) = r as u8;
-                    num_non_empty.set(curr_non_empty + (*cnt == 0) as usize);
-                    *cnt += 1;
-                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
-                }
-            }
-
-            if num_non_empty.get() == 1 {
-                return beta;
-            }
-
-            let mut cost = set.len() as u32;
-            let mut max_p_len = 0;
-
-            for i in 0..num_non_empty.get() {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                if r_idx == Response::WIN.0 as usize {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
-                if p_len > 2 {
-                    unsafe {
-                        *eval_indices.get_unchecked_mut(num_eval) = r_idx as u8;
-                    }
-                    num_eval += 1;
-                }
-                cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                return cost;
-            }
-
-            if max_p_len <= 2 {
-                return cost;
-            }
-
-            // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
-            // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
-            // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
-            // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
-            // Ties broken by response index for deterministic order.
-            eval_indices[0..num_eval].sort_unstable_by_key(|&r| {
-                (std::cmp::Reverse(unsafe { *counts_ptr.add(r as usize) }), r)
-            });
-
-            let split_idx = eval_indices[0..num_eval]
-                .partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 });
-
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                unsafe {
-                    *p_lbs_ptr.add(r_idx) = *parent_cap_bounds_ptr.add(p_len);
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-            }
-            num_p_lbs.set(num_eval);
-
-            // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
-            // If cached bounds alone push cost >= beta or current_cost_so_far + cost >= current_global_beta,
-            // we prune immediately without spending time on counting sort or scratch buffer partitioning.
-            let mut exact_mask = [0u64; 4];
-            let mut cached_mask = [0u64; 4];
-            let mut num_exact = 0;
-
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                    let used_val = cached_val.max(lb);
-                    cost += used_val - lb;
-                    unsafe {
-                        *p_lbs_ptr.add(r_idx) = used_val;
-                    }
-                    let word_idx = r_idx >> 6;
-                    let bit = 1u64 << (r_idx & 63);
-                    if is_exact {
-                        unsafe {
-                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
-                        }
-                        num_exact += 1;
-                    }
-                    unsafe {
-                        *cached_mask.get_unchecked_mut(word_idx) |= bit;
-                    }
-
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
-                        return cost;
-                    }
-                }
-            }
-
-            // If all buckets with p_len > 2 were exact in cache, no partitioning or evaluation is needed.
-            if num_exact == num_eval {
-                return cost;
-            }
-
-            // Fast slice partition using counting sort
-            let mut sorted_set =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
-            sorted_set.resize(set.len(), 0);
-
-            let mut offsets = [0u16; 243];
-            let mut curr = 0;
-            let n_non_empty = num_non_empty.get();
-            for i in 0..n_non_empty {
-                let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                unsafe {
-                    *offsets.get_unchecked_mut(r) = curr;
-                    curr += *counts_ptr.add(r);
-                }
-            }
-
-            let mut current_offsets = offsets;
-            for &c in set {
-                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
-                let pos = unsafe { *current_offsets.get_unchecked(r_idx) as usize };
-                unsafe {
-                    *sorted_set.get_unchecked_mut(pos) = c;
-                    *current_offsets.get_unchecked_mut(r_idx) += 1;
-                }
-            }
-
-            // Pass 2a: Cheap uncached buckets evaluation (quick_bucket_eval on p_len <= 15).
-            // Evaluating small buckets first takes nanoseconds and often prunes cost >= beta
-            // immediately, completely bypassing expensive full-dictionary branching factor searches
-            // on any p_len > 15 buckets for this guess.
-            for i in split_idx..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-
-                let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
-                let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                let used_val = quick_val.max(lb);
-                cost += used_val - lb;
-                unsafe {
-                    *p_lbs_ptr.add(r_idx) = used_val;
-                }
-                if is_exact {
-                    unsafe {
-                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
-                    }
-                    num_exact += 1;
-                }
-                self.cache.insert_set(hash, p, used_val, is_exact);
-                cert_record!(5, p, used_val, is_exact);
-                unsafe {
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                    break;
-                }
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
-            if num_exact == num_eval {
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
-            // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
-            // Only reached if small buckets alone did not exceed beta.
-            for i in 0..split_idx {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-
-                let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
-                if target_k == 2 {
-                    unsafe {
-                        *child_max_ks_ptr.add(r_idx) =
-                            (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                    }
-                    self.cache.insert_set(hash, p, lb, false);
-                    cert_record!(6, p, lb, false);
-                } else {
-                    let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
-                        self.matrix,
-                        p,
-                        target_k,
-                    );
-                    if k_cand >= target_k {
-                        unsafe {
-                            *child_max_ks_ptr.add(r_idx) =
-                                (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                        }
-                        self.cache.insert_set(hash, p, lb, false);
-                        cert_record!(7, p, lb, false);
-                    } else {
-                        let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
-                            self.matrix,
-                            p,
-                            k_cand,
-                            target_k,
-                        );
-                        if k >= target_k {
-                            unsafe {
-                                *child_max_ks_ptr.add(r_idx) =
-                                    (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                            }
-                            self.cache.insert_set(hash, p, lb, false);
-                            cert_record!(8, p, lb, false);
-                        } else {
-                            unsafe {
-                                *child_max_ks_ptr.add(r_idx) =
-                                    (k as u16).min(*child_max_ks_ptr.add(r_idx));
-                            }
-                            let tight_lb =
-                                crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
-                            let used_val = tight_lb.max(lb);
-                            cost += used_val - lb;
-                            unsafe {
-                                *p_lbs_ptr.add(r_idx) = used_val;
-                            }
-                            self.cache.insert_set(hash, p, used_val, false);
-                            cert_record!(9, p, used_val, false);
-                        }
-                    }
-                }
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                    break;
-                }
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
-                if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + cost >= current_global_beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
-                }
-
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
-
-                let b = cost - unsafe { *p_lbs_ptr.add(r_idx) };
-                let new_beta = beta - b;
-
-                // Also respect the global beta from concurrent threads: if another thread
-                // already found a solution cheaper than beta, tighten our local bound.
-                let effective_beta =
-                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
-
-                if effective_beta == 0 {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
-                }
-
-                self.current_cost_so_far += b;
-                let val = self.min_state_val(
-                    p,
-                    active_guesses_slice,
-                    effective_beta,
-                    depth + 1,
-                    (unsafe { *child_max_ks_ptr.add(r_idx) } as usize).max(2),
-                );
-                self.current_cost_so_far -= b;
-                if b + val >= beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return b + val;
-                }
-                // Propagate any tightening from the global beta.
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + b + val >= current_global_beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return b + val;
-                }
-                cost = b + val;
-            }
-
-            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-
-            cost
-        }
-    }
 }
-
-// Note: GlobalCache now stores both Exact values (when a full search completes)
-// and Lower Bounds (when a search fails high against `beta`).
-// This implements Fail-Hard Alpha-Beta Transposition Table Pruning, ensuring that
-// if we revisit a state with a `beta` that is <= a previously established lower bound,
-// we can instantly prune the subtree and return `beta`, avoiding massive redundant deep searches.
 
 #[cfg(test)]
 mod tests {
@@ -2102,9 +4803,9 @@ mod solver_cache_tests {
         let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
-        // Test multiple small subsets of candidates (sizes 2, 3, 4)
-        for offset in (0..15).step_by(5) {
-            for size in 2..=4 {
+        // Test multiple small subsets of candidates (sizes 2..=9)
+        for offset in (0..30).step_by(5) {
+            for size in 2..=9 {
                 let bucket: Vec<usize> = (offset..offset + size).collect();
                 let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
                 let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);

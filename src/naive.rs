@@ -1,5 +1,4 @@
 #![allow(clippy::needless_range_loop)]
-use crate::core::Response;
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
 
@@ -41,7 +40,7 @@ impl<'a> NaiveSolver<'a> {
         let mut best_val = beta;
 
         for &g in allowed_guesses {
-            let mut counts = [0u16; 243];
+            let mut counts = vec![0u16; self.matrix.num_responses];
             let mut num_non_empty = 0;
             for &c in set {
                 let r = self.matrix.get(g, c).0 as usize;
@@ -61,8 +60,8 @@ impl<'a> NaiveSolver<'a> {
                 continue;
             }
 
-            for r_idx in 0..243 {
-                if r_idx == Response::WIN.0 as usize {
+            for r_idx in 0..self.matrix.num_responses {
+                if r_idx == self.matrix.win_response.0 as usize {
                     continue;
                 }
                 let p_len = counts[r_idx] as usize;

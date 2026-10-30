@@ -14,7 +14,7 @@ beat the best strategy found so far.
 For the bundled word lists (2,340 answers, 14,855 allowed guesses), the optimal
 strategy needs 8,001 guesses in total, or 3.419 guesses per game on average.
 It opens with `tarse` and needs at most 6 guesses for any answer. Building that
-tree takes about 37 seconds on a 16-core machine.
+tree takes under 28 seconds on a 16-core machine.
 
 The solver also reproduces every optimum that [Alex Selby](https://github.com/alex1770/wordle) published for the
 official Wordle lists, which were computed with his own independent program:
@@ -112,7 +112,7 @@ displayed. The file is read locally and is not uploaded anywhere.
 
 Both files contain one word per line.
 
-- Every word must have exactly 5 characters.
+- Words can be any length from 1 to 10 characters (Wordle defaults to 5), but all words across both files must have the same length.
 - Any characters are allowed, not just `a` to `z`. Letters are converted to
   lowercase, so `Crane` and `crane` are the same word.
 - Blank lines and duplicate words are ignored.
@@ -251,9 +251,9 @@ it with the same rules as `validate` before showing it. It has two modes:
 - **Explore** shows statistics for the tree, a chart of how many games take 1,
   2, 3 or more guesses, and the full tree, which you can expand and search.
 
-The viewer reads the word length from the tree, so it also works with trees
-for words of other lengths. `site/examples/` has 3, 4 and 6 letter examples.
-The solver itself only handles 5-letter words.
+The viewer reads the word length from the tree, so it works with trees
+for words of any length from 1 to 10 characters. `site/examples/` has 3, 4 and
+6 letter examples.
 
 Bundled examples:
 

@@ -114,8 +114,8 @@ fn build(case: &Case) -> Instance {
 
 fn naive_optimum(inst: &Instance) -> u64 {
     let dict = Dictionary::from_words(
-        inst.guesses.iter().map(|&w| Word(w)).collect(),
-        inst.candidates.iter().map(|&w| Word(w)).collect(),
+        inst.guesses.iter().map(|&w| Word::from(w)).collect(),
+        inst.candidates.iter().map(|&w| Word::from(w)).collect(),
     );
     let matrix = ResponseMatrix::new(&dict);
     let all: Vec<usize> = (0..dict.candidates.len()).collect();

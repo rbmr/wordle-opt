@@ -10,17 +10,41 @@ pub fn compute_expected_remaining(
     candidates: &[usize],
     guess: usize,
 ) -> u32 {
-    let mut counts = [0u32; 243];
-    for &c in candidates {
-        let r = matrix.get(guess, c);
-        counts[r.0 as usize] += 1;
-    }
+    if matrix.num_responses <= 256 {
+        let mut counts = [0u16; 256];
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            counts[r.0 as usize] += 1;
+        }
 
-    let mut score = 0;
-    for &count in &counts {
-        score += count * count;
+        let mut score = 0;
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            let count = counts[r.0 as usize];
+            if count > 0 {
+                score += (count as u32) * (count as u32);
+                counts[r.0 as usize] = 0;
+            }
+        }
+        score
+    } else {
+        let mut counts = [0u16; 2187];
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            counts[r.0 as usize] += 1;
+        }
+
+        let mut score = 0;
+        for &c in candidates {
+            let r = matrix.get(guess, c);
+            let count = counts[r.0 as usize];
+            if count > 0 {
+                score += (count as u32) * (count as u32);
+                counts[r.0 as usize] = 0;
+            }
+        }
+        score
     }
-    score
 }
 
 /// Sorts a slice of guesses in-place by their `expected_remaining` heuristic score.
@@ -30,6 +54,53 @@ pub fn sort_guesses_by_expected_remaining(
     guesses: &mut [usize],
 ) {
     guesses.sort_by_cached_key(|&g| compute_expected_remaining(matrix, candidates, g));
+}
+
+#[inline(always)]
+fn combine_and_count_u8(mask: &[u64; 16]) -> usize {
+    let m0 = mask[0] | mask[4] | mask[8] | mask[12];
+    let m1 = mask[1] | mask[5] | mask[9] | mask[13];
+    let m2 = mask[2] | mask[6] | mask[10] | mask[14];
+    let m3 = mask[3] | mask[7] | mask[11] | mask[15];
+    (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
+}
+
+#[inline(always)]
+fn count_unique_responses_from_row_u8(
+    g_ptr: *const u8,
+    candidates: &[usize],
+    mask: &mut [u64; 16],
+) {
+    let n = candidates.len();
+    let mut c_it = candidates.as_ptr();
+    let c_end4 = unsafe { c_it.add(n & !3) };
+    let mask_ptr = mask.as_mut_ptr();
+    while c_it < c_end4 {
+        let c0 = unsafe { *c_it };
+        let c1 = unsafe { *c_it.add(1) };
+        let c2 = unsafe { *c_it.add(2) };
+        let c3 = unsafe { *c_it.add(3) };
+        let r0 = unsafe { *g_ptr.add(c0) as usize };
+        let r1 = unsafe { *g_ptr.add(c1) as usize };
+        let r2 = unsafe { *g_ptr.add(c2) as usize };
+        let r3 = unsafe { *g_ptr.add(c3) as usize };
+        unsafe {
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
+            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
+            c_it = c_it.add(4);
+        }
+    }
+    let c_end = unsafe { candidates.as_ptr().add(n) };
+    while c_it < c_end {
+        let c0 = unsafe { *c_it };
+        let r0 = unsafe { *g_ptr.add(c0) as usize };
+        unsafe {
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            c_it = c_it.add(1);
+        }
+    }
 }
 
 /// Computes the maximum number of distinct response patterns (branches)
@@ -42,24 +113,34 @@ pub fn compute_max_branching_factor(
 ) -> usize {
     use rayon::prelude::*;
 
-    (0..matrix.num_guesses)
-        .into_par_iter()
-        .map(|g| {
-            let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
-            let mut mask = [0u64; 4];
-            for &c in candidates {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                unsafe {
-                    *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+    if matrix.num_responses <= 256 {
+        (0..matrix.num_guesses)
+            .into_par_iter()
+            .map(|g| {
+                let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
+                let mut mask = [0u64; 16];
+                count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
+                combine_and_count_u8(&mask)
+            })
+            .max()
+            .unwrap_or(0)
+    } else {
+        (0..matrix.num_guesses)
+            .into_par_iter()
+            .map(|g| {
+                let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                let mut mask = [0u64; 36];
+                for &c in candidates {
+                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                    unsafe {
+                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    }
                 }
-            }
-            (mask[0].count_ones()
-                + mask[1].count_ones()
-                + mask[2].count_ones()
-                + mask[3].count_ones()) as usize
-        })
-        .max()
-        .unwrap_or(0)
+                mask.iter().map(|w| w.count_ones() as usize).sum::<usize>()
+            })
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 /// Computes the maximum branching factor achievable among candidate words only.
@@ -72,27 +153,41 @@ pub fn compute_candidate_branching_factor_with_target(
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let effective_target = target_k.min(candidates.len()).min(243);
+    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = 0;
-    let data_ptr = matrix.data.as_ptr();
-    for &c in candidates {
-        let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
-        let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
-        let mut mask = [0u64; 4];
-        for &other in candidates {
-            let r = unsafe { (*g_ptr.add(other)).0 as usize };
-            unsafe {
-                *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+    if matrix.num_responses <= 256 {
+        let data_ptr = matrix.data_u8.as_ptr();
+        for &c in candidates {
+            let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
+            let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
+            let mut mask = [0u64; 16];
+            count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
+            let k = combine_and_count_u8(&mask);
+            if k > max_k {
+                max_k = k;
+                if max_k >= effective_target {
+                    return max_k;
+                }
             }
         }
-        let k = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
-        if k > max_k {
-            max_k = k;
-            if max_k >= effective_target {
-                return max_k;
+    } else {
+        let data_ptr = matrix.data.as_ptr();
+        for &c in candidates {
+            let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
+            let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
+            let mut mask = [0u64; 36];
+            for &other in candidates {
+                let r = unsafe { (*g_ptr.add(other)).0 as usize };
+                unsafe {
+                    *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                }
+            }
+            let k: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
+            if k > max_k {
+                max_k = k;
+                if max_k >= effective_target {
+                    return max_k;
+                }
             }
         }
     }
@@ -104,14 +199,25 @@ pub fn compute_candidate_branching_factor(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
 ) -> usize {
-    compute_candidate_branching_factor_with_target(matrix, candidates, candidates.len().min(243))
+    compute_candidate_branching_factor_with_target(
+        matrix,
+        candidates,
+        candidates.len().min(matrix.num_responses),
+    )
 }
 
-/// Finds the smallest branching factor `k` in 2..=n.min(243) such that
+/// Finds the smallest branching factor `k` in 2..=n.min(num_responses) such that
 /// `tight_capacity_bound(n, k, max_k) <= target_bound`.
-/// If no such `k` exists (even for k = n.min(243)), returns `n.min(243) + 1`.
+/// If no such `k` exists (even for k = n.min(num_responses)), returns `n.min(num_responses) + 1`.
 pub fn min_k_for_target_bound(n: usize, max_k: usize, target_bound: u32) -> usize {
-    let max_possible_k = n.min(max_k).min(243);
+    if n >= 3 && n <= max_k {
+        let tb = target_bound as usize;
+        if tb < 2 * n - 1 {
+            return n + 1;
+        }
+        return (3 * n - 1).saturating_sub(tb).max(2);
+    }
+    let max_possible_k = n.min(max_k);
     let cap_lb = capacity_bound(n, max_k);
     if target_bound < cap_lb {
         return max_possible_k + 1;
@@ -135,7 +241,63 @@ pub fn min_k_for_target_bound(n: usize, max_k: usize, target_bound: u32) -> usiz
     high
 }
 
+#[inline(always)]
+fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
+    let min_vp = if max_k >= 2187 {
+        8
+    } else if max_k >= 729 {
+        7
+    } else if max_k >= 243 {
+        6
+    } else if max_k >= 81 {
+        5
+    } else if max_k >= 27 {
+        4
+    } else if max_k >= 9 {
+        3
+    } else if max_k >= 3 {
+        2
+    } else {
+        1
+    };
+    (word_len.saturating_sub(min_vp) + 1) as u32
+}
+
 /// Sequential version of `compute_max_branching_factor` with early stopping and target_k.
+#[inline(always)]
+fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 16]) {
+    let n = ptrs.len();
+    let mut p_it = ptrs.as_ptr();
+    let p_end4 = unsafe { p_it.add(n & !3) };
+    let mask_ptr = mask.as_mut_ptr();
+    while p_it < p_end4 {
+        let c_ptr0 = unsafe { *p_it };
+        let c_ptr1 = unsafe { *p_it.add(1) };
+        let c_ptr2 = unsafe { *p_it.add(2) };
+        let c_ptr3 = unsafe { *p_it.add(3) };
+        let r0 = unsafe { *c_ptr0.add(g) as usize };
+        let r1 = unsafe { *c_ptr1.add(g) as usize };
+        let r2 = unsafe { *c_ptr2.add(g) as usize };
+        let r3 = unsafe { *c_ptr3.add(g) as usize };
+        unsafe {
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
+            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
+            p_it = p_it.add(4);
+        }
+    }
+    let p_end = unsafe { ptrs.as_ptr().add(n) };
+    while p_it < p_end {
+        let c_ptr0 = unsafe { *p_it };
+        let r0 = unsafe { *c_ptr0.add(g) as usize };
+        unsafe {
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            p_it = p_it.add(1);
+        }
+    }
+}
+
 pub fn compute_max_branching_factor_seq_with_target(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
@@ -145,7 +307,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let effective_target = target_k.min(candidates.len()).min(243);
+    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = initial_max_k;
     if max_k >= effective_target {
         return max_k;
@@ -159,102 +321,304 @@ pub fn compute_max_branching_factor_seq_with_target(
         }
     }
 
+    let word_len = matrix.word_len;
     let mut c_mask = 0u32;
+    let mut c_all_mask = u32::MAX;
+    let mut c_dup_mask = 0u32;
+    let mut at_mask = [0u32; 8];
+    let mut elsewhere_mask = [0u32; 8];
+    let mut dup_elsewhere_mask = [0u32; 8];
     for &c in candidates {
-        c_mask |= matrix.candidate_masks[c];
+        let cp = unsafe { matrix.candidate_profiles.get_unchecked(c) };
+        let m = cp.mask;
+        c_mask |= m;
+        c_all_mask &= m;
+        if m != u32::MAX && word_len <= 8 {
+            let dup = cp.dup_mask;
+            c_dup_mask |= dup;
+            if word_len == 5 {
+                let b0 = cp.at_mask[0];
+                at_mask[0] |= b0;
+                elsewhere_mask[0] |= m & !b0;
+                dup_elsewhere_mask[0] |= dup & !b0;
+
+                let b1 = cp.at_mask[1];
+                at_mask[1] |= b1;
+                elsewhere_mask[1] |= m & !b1;
+                dup_elsewhere_mask[1] |= dup & !b1;
+
+                let b2 = cp.at_mask[2];
+                at_mask[2] |= b2;
+                elsewhere_mask[2] |= m & !b2;
+                dup_elsewhere_mask[2] |= dup & !b2;
+
+                let b3 = cp.at_mask[3];
+                at_mask[3] |= b3;
+                elsewhere_mask[3] |= m & !b3;
+                dup_elsewhere_mask[3] |= dup & !b3;
+
+                let b4 = cp.at_mask[4];
+                at_mask[4] |= b4;
+                elsewhere_mask[4] |= m & !b4;
+                dup_elsewhere_mask[4] |= dup & !b4;
+            } else {
+                for i in 0..word_len {
+                    let bit = cp.at_mask[i];
+                    at_mask[i] |= bit;
+                    elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
+                }
+            }
+        }
+    }
+    let has_profile = c_mask != u32::MAX && word_len <= 8;
+    let mut m_tab = [[1u8; 96]; 8];
+    let mut active_letter_mask = 0u32;
+    if has_profile {
+        let b_u = !c_all_mask;
+        let b_1_base = b_u | c_dup_mask;
+        for i in 0..word_len {
+            let a = at_mask[i];
+            let e = elsewhere_mask[i];
+            let e_dup = dup_elsewhere_mask[i];
+            let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
+            let b_1 = b_r & b_1_base;
+            let ae = a & e;
+            let a_or_e = a | e;
+            let ge2_u = ae | (a_or_e & b_u);
+            let eq3_u = ae & b_u;
+            let ge2_1 = ae | (a_or_e & b_1);
+            let eq3_1 = ae & b_1;
+            let ae_dup = a & e_dup;
+            let a_or_e_dup = a | e_dup;
+            let ge2_2 = ae_dup | (a_or_e_dup & b_r);
+            let eq3_2 = ae_dup & b_r;
+            active_letter_mask |= ge2_u | ge2_1 | ge2_2;
+
+            let tab_i = &mut m_tab[i];
+            let mut m = ge2_u;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                tab_i[l] = 2 + (((eq3_u >> l) & 1) as u8);
+            }
+            let mut m = ge2_1;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                tab_i[l + 32] = 2 + (((eq3_1 >> l) & 1) as u8);
+            }
+            let mut m = ge2_2;
+            while m != 0 {
+                let l = m.trailing_zeros() as usize;
+                m &= m - 1;
+                tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
+            }
+        }
     }
 
     let mid = candidates.len() / 2;
-    let (c_half1, c_half2) = candidates.split_at(mid);
-    let rem_len = c_half2.len();
+    let rem_len = candidates.len() - mid;
     let num_guesses = matrix.num_guesses;
-    let data_c_g_ptr = matrix.data_c_g.as_ptr();
-
-    let mut stack_ptrs1 = [std::ptr::null::<crate::core::Response>(); 256];
-    let mut stack_ptrs2 = [std::ptr::null::<crate::core::Response>(); 256];
-    let mut heap_ptrs1 = Vec::new();
-    let mut heap_ptrs2 = Vec::new();
-    let (c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
-        for (i, &c) in c_half1.iter().enumerate() {
-            unsafe {
-                *stack_ptrs1.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
+    if matrix.num_responses <= 256 {
+        let data_c_g_ptr = matrix.data_c_g_u8.as_ptr();
+        let mut stack_ptrs = std::mem::MaybeUninit::<[*const u8; 256]>::uninit();
+        let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const u8;
+        let mut heap_ptrs = Vec::new();
+        let (all_ptrs, c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
             }
-        }
-        for (i, &c) in c_half2.iter().enumerate() {
-            unsafe {
-                *stack_ptrs2.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
-            }
-        }
-        (&stack_ptrs1[..c_half1.len()], &stack_ptrs2[..c_half2.len()])
-    } else {
-        heap_ptrs1.reserve(c_half1.len());
-        for &c in c_half1 {
-            heap_ptrs1.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-        }
-        heap_ptrs2.reserve(c_half2.len());
-        for &c in c_half2 {
-            heap_ptrs2.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-        }
-        (&heap_ptrs1[..], &heap_ptrs2[..])
-    };
-
-    for (g, &g_mask) in matrix.guess_masks.iter().enumerate() {
-        let overlap = g_mask & c_mask;
-        if overlap == 0 {
-            continue;
-        }
-        let g_ones = g_mask.count_ones();
-        let overlap_count = overlap.count_ones();
-
-        let var_pos = if g_ones == 5 {
-            overlap_count
-        } else if overlap_count == g_ones {
-            5
+            let all = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
+            (all, &all[..mid], &all[mid..])
         } else {
-            let [c0, c1, c2, c3, c4] = unsafe { *matrix.guess_chars.get_unchecked(g) };
-            ((c_mask >> c0) & 1)
-                + ((c_mask >> c1) & 1)
-                + ((c_mask >> c2) & 1)
-                + ((c_mask >> c3) & 1)
-                + ((c_mask >> c4) & 1)
+            heap_ptrs.reserve(candidates.len());
+            for &c in candidates {
+                heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+            }
+            (&heap_ptrs[..], &heap_ptrs[..mid], &heap_ptrs[mid..])
         };
 
-        if (var_pos <= 1 && max_k >= 3)
-            || (var_pos <= 2 && (max_k >= 9 || (overlap_count == 1 && max_k >= 8)))
-            || (var_pos <= 3 && (max_k >= 27 || (overlap_count == 1 && max_k >= 12)))
-            || (var_pos <= 4 && max_k >= 81)
-        {
-            continue;
-        }
+        if has_profile && word_len == 5 {
+            let non_c_mask = !active_letter_mask;
+            let mut min_non_overlap = min_non_overlap_for_len(5, max_k);
+            let tab0 = &m_tab[0];
+            let tab1 = &m_tab[1];
+            let tab2 = &m_tab[2];
+            let tab3 = &m_tab[3];
+            let tab4 = &m_tab[4];
+            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+                if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
+                    continue;
+                }
+                let prod = unsafe {
+                    (*tab0.get_unchecked(p.chars[0] as usize) as u32)
+                        * (*tab1.get_unchecked(p.chars[1] as usize) as u32)
+                        * (*tab2.get_unchecked(p.chars[2] as usize) as u32)
+                        * (*tab3.get_unchecked(p.chars[3] as usize) as u32)
+                        * (*tab4.get_unchecked(p.chars[4] as usize) as u32)
+                };
+                if prod as usize <= max_k {
+                    continue;
+                }
 
-        let mut mask = [0u64; 4];
-        for &c_base in c_half1_ptrs {
-            let r = unsafe { (*c_base.add(g)).0 as usize };
-            unsafe {
-                *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                let mut mask = [0u64; 16];
+                if rem_len < max_k {
+                    count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
+                    let half_unique = combine_and_count_u8(&mask);
+                    if half_unique + rem_len <= max_k {
+                        continue;
+                    }
+                    count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
+                } else {
+                    count_unique_responses_u8(all_ptrs, g, &mut mask);
+                }
+                let k = combine_and_count_u8(&mask);
+                if k > max_k {
+                    max_k = k;
+                    if max_k >= effective_target {
+                        break;
+                    }
+                    min_non_overlap = min_non_overlap_for_len(5, max_k);
+                }
+            }
+        } else if has_profile {
+            let non_c_mask = !active_letter_mask;
+            let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+                if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
+                    continue;
+                }
+                let mut prod = 1u32;
+                for i in 0..word_len {
+                    prod *= unsafe { *m_tab[i].get_unchecked(p.chars[i] as usize) as u32 };
+                }
+                if prod as usize <= max_k {
+                    continue;
+                }
+
+                let mut mask = [0u64; 16];
+                if rem_len < max_k {
+                    count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
+                    let half_unique = combine_and_count_u8(&mask);
+                    if half_unique + rem_len <= max_k {
+                        continue;
+                    }
+                    count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
+                } else {
+                    count_unique_responses_u8(all_ptrs, g, &mut mask);
+                }
+                let k = combine_and_count_u8(&mask);
+                if k > max_k {
+                    max_k = k;
+                    if max_k >= effective_target {
+                        break;
+                    }
+                    min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+                }
+            }
+        } else {
+            for (g, p) in matrix.guess_profiles.iter().enumerate() {
+                let overlap = p.mask & c_mask;
+                if overlap == 0 {
+                    continue;
+                }
+                let mut mask = [0u64; 16];
+                if rem_len < max_k {
+                    count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
+                    let half_unique = combine_and_count_u8(&mask);
+                    if half_unique + rem_len <= max_k {
+                        continue;
+                    }
+                    count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
+                } else {
+                    count_unique_responses_u8(all_ptrs, g, &mut mask);
+                }
+                let k = combine_and_count_u8(&mask);
+                if k > max_k {
+                    max_k = k;
+                    if max_k >= effective_target {
+                        break;
+                    }
+                }
             }
         }
-        let half_unique = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
-        if half_unique + rem_len <= max_k {
-            continue;
-        }
-        for &c_base in c_half2_ptrs {
-            let r = unsafe { (*c_base.add(g)).0 as usize };
-            unsafe {
-                *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+    } else {
+        let data_c_g_ptr = matrix.data_c_g.as_ptr();
+        let mut stack_ptrs = std::mem::MaybeUninit::<[*const crate::core::Response; 256]>::uninit();
+        let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
+        let mut heap_ptrs = Vec::new();
+        let (all_ptrs, c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
             }
-        }
-        let k = (mask[0].count_ones()
-            + mask[1].count_ones()
-            + mask[2].count_ones()
-            + mask[3].count_ones()) as usize;
-        if k > max_k {
-            max_k = k;
-            if max_k >= effective_target {
-                break;
+            let all = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
+            (all, &all[..mid], &all[mid..])
+        } else {
+            heap_ptrs.reserve(candidates.len());
+            for &c in candidates {
+                heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+            }
+            (&heap_ptrs[..], &heap_ptrs[..mid], &heap_ptrs[mid..])
+        };
+
+        let non_c_mask = !active_letter_mask;
+        let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+        for (g, p) in matrix.guess_profiles.iter().enumerate() {
+            if has_profile {
+                if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
+                    continue;
+                }
+                let mut prod = 1u32;
+                for i in 0..word_len {
+                    prod *= unsafe { *m_tab[i].get_unchecked(p.chars[i] as usize) as u32 };
+                }
+                if prod as usize <= max_k {
+                    continue;
+                }
+            } else if (p.mask & c_mask) == 0 {
+                continue;
+            }
+
+            let mut mask = [0u64; 36];
+            if rem_len < max_k {
+                for &c_base in c_half1_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
+                    unsafe {
+                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    }
+                }
+                let half_unique: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
+                if half_unique + rem_len <= max_k {
+                    continue;
+                }
+                for &c_base in c_half2_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
+                    unsafe {
+                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    }
+                }
+            } else {
+                for &c_base in all_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
+                    unsafe {
+                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    }
+                }
+            }
+            let k: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
+            if k > max_k {
+                max_k = k;
+                if max_k >= effective_target {
+                    break;
+                }
+                if has_profile {
+                    min_non_overlap = min_non_overlap_for_len(word_len, max_k);
+                }
             }
         }
     }
@@ -267,7 +631,12 @@ pub fn compute_max_branching_factor_seq(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
 ) -> usize {
-    compute_max_branching_factor_seq_with_target(matrix, candidates, 0, candidates.len().min(243))
+    compute_max_branching_factor_seq_with_target(
+        matrix,
+        candidates,
+        0,
+        candidates.len().min(matrix.num_responses),
+    )
 }
 
 /// Lower bound on the total cost of solving `n` candidates when no guess
@@ -441,12 +810,7 @@ mod expected_remaining_tests {
             crate::core::Word::new("abcdf"),
             crate::core::Word::new("xyzab"),
         ];
-        let dict = Dictionary {
-            guesses: words.clone(),
-            candidates: words.clone(),
-            guess_chars: vec![[0, 1, 2, 3, 4], [0, 1, 2, 3, 5], [23, 24, 25, 0, 1]],
-            candidate_to_guess: vec![0, 1, 2],
-        };
+        let dict = Dictionary::from_words(words.clone(), words.clone());
         let matrix = ResponseMatrix::new(&dict);
         let set = vec![0, 1, 2];
 
@@ -473,6 +837,9 @@ pub fn phase2_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if root_k <= 1 || max_k <= 1 {
         return capacity_bound(n, max_k);
     }
+    if n <= max_k {
+        return (3 * n - root_k.min(n)) as u32;
+    }
     saturate(n as u64 + forest_bound(n as u64, root_k as u64, max_k as u64))
 }
 
@@ -493,6 +860,9 @@ pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     if root_k <= 1 || max_k <= 1 {
         // No guess separates the candidates; the caller prunes on the result.
         return capacity_bound(n, max_k);
+    }
+    if n <= max_k {
+        return (3 * n - 1 - root_k.min(n)) as u32;
     }
     saturate(n as u64 + forest_bound(n as u64 - 1, root_k as u64 - 1, max_k as u64))
 }
@@ -804,21 +1174,20 @@ mod target_bound_tests {
                 let overlap = g_mask & c_mask;
                 let overlap_count = overlap.count_ones();
                 let g_ones = g_mask.count_ones();
-                let var_pos = if g_ones == 5 {
+                let var_pos = if g_ones == matrix.word_len as u32 {
                     overlap_count
                 } else {
-                    let [c0, c1, c2, c3, c4] = matrix.guess_chars[g];
-                    ((c_mask >> c0) & 1)
-                        + ((c_mask >> c1) & 1)
-                        + ((c_mask >> c2) & 1)
-                        + ((c_mask >> c3) & 1)
-                        + ((c_mask >> c4) & 1)
+                    let chars = &matrix.guess_chars[g];
+                    let mut vp = 0u32;
+                    for i in 0..matrix.word_len.min(8) {
+                        vp += (c_mask >> chars[i]) & 1;
+                    }
+                    vp
                 };
 
                 let mut mask = [0u64; 4];
-                let g_offset = g * matrix.num_candidates;
                 for &c in subset {
-                    let r = matrix.data[g_offset + c].0 as usize;
+                    let r = matrix.get(g, c).0 as usize;
                     mask[r >> 6] |= 1u64 << (r & 63);
                 }
                 let actual_k = (mask[0].count_ones()
@@ -858,5 +1227,128 @@ mod target_bound_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_per_letter_profile_bound_soundness() {
+        use crate::dict::Dictionary;
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let mut rng = fastrand::Rng::with_seed(98765);
+        for size in [4, 12, 20, 35] {
+            let mut candidates: Vec<usize> = (0..matrix.num_candidates).collect();
+            rng.shuffle(&mut candidates);
+            let subset = &candidates[..size];
+
+            let mut c_all_mask = u32::MAX;
+            let mut c_dup_mask = 0u32;
+            let mut at_mask = [0u32; 8];
+            let mut elsewhere_mask = [0u32; 8];
+            let mut dup_elsewhere_mask = [0u32; 8];
+            for &c in subset {
+                let m = matrix.candidate_masks[c];
+                c_all_mask &= m;
+                let dup = matrix.candidate_dup_masks[c];
+                c_dup_mask |= dup;
+                let c_at = &matrix.candidate_at_masks[c];
+                for i in 0..5 {
+                    let bit = c_at[i];
+                    at_mask[i] |= bit;
+                    elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
+                }
+            }
+            let b_u = !c_all_mask;
+            let b_1_base = b_u | c_dup_mask;
+            let mut m_tab = [[1u8; 96]; 8];
+            let mut active_letter_mask = 0u32;
+            for i in 0..5 {
+                let a = at_mask[i];
+                let e = elsewhere_mask[i];
+                let e_dup = dup_elsewhere_mask[i];
+                let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
+                let b_1 = b_r & b_1_base;
+                let ae = a & e;
+                let a_or_e = a | e;
+                let ge2_u = ae | (a_or_e & b_u);
+                let eq3_u = ae & b_u;
+                let ge2_1 = ae | (a_or_e & b_1);
+                let eq3_1 = ae & b_1;
+                let ae_dup = a & e_dup;
+                let a_or_e_dup = a | e_dup;
+                let ge2_2 = ae_dup | (a_or_e_dup & b_r);
+                let eq3_2 = ae_dup & b_r;
+                active_letter_mask |= ge2_u | ge2_1 | ge2_2;
+
+                let tab_i = &mut m_tab[i];
+                let mut m = ge2_u;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l] = 2 + (((eq3_u >> l) & 1) as u8);
+                }
+                let mut m = ge2_1;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 32] = 2 + (((eq3_1 >> l) & 1) as u8);
+                }
+                let mut m = ge2_2;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    m &= m - 1;
+                    tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
+                }
+            }
+
+            let non_c_mask = !active_letter_mask;
+            for (g, chars) in matrix.guess_profile_chars.iter().enumerate() {
+                let mut prod = 1usize;
+                for i in 0..5 {
+                    let l = chars[i] as usize;
+                    prod *= m_tab[i][l] as usize;
+                }
+                let non_overlap = (matrix.guess_masks[g] & non_c_mask).count_ones();
+                let mut mask = [0u64; 4];
+                for &c in subset {
+                    let r = matrix.get(g, c).0 as usize;
+                    mask[r >> 6] |= 1u64 << (r & 63);
+                }
+                let actual_k = (mask[0].count_ones()
+                    + mask[1].count_ones()
+                    + mask[2].count_ones()
+                    + mask[3].count_ones()) as usize;
+                assert!(
+                    actual_k <= prod,
+                    "g={} ({}) actual_k={} > prod={}",
+                    g,
+                    dict.guesses[g],
+                    actual_k,
+                    prod
+                );
+                assert!(
+                    actual_k <= 3usize.pow(5u32.saturating_sub(non_overlap)),
+                    "g={} ({}) actual_k={} > 3^(5 - {})",
+                    g,
+                    dict.guesses[g],
+                    actual_k,
+                    non_overlap
+                );
+            }
+            assert_eq!(
+                compute_max_branching_factor_seq(&matrix, subset),
+                compute_max_branching_factor(&matrix, subset)
+            );
+        }
+
+        // Also a subset sharing fixed letters at the last two positions.
+        let er_subset: Vec<usize> = (0..matrix.num_candidates)
+            .filter(|&c| dict.candidates[c].ends_with(b"er"))
+            .take(30)
+            .collect();
+        assert_eq!(
+            compute_max_branching_factor_seq(&matrix, &er_subset),
+            compute_max_branching_factor(&matrix, &er_subset)
+        );
     }
 }
