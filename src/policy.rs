@@ -476,82 +476,49 @@ pub(crate) fn active_guesses_with_bound(
                     }
                 }
 
-                if max_allowed_duplicates < c_len {
-                    let mut seen = [0u64; 4];
-                    let mut dup = 0usize;
-                    for i in 0..c_len {
-                        let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
-                        unsafe {
-                            *r_buf_ptr.add(i) = r;
+                let mut seen = [0u64; 4];
+                let mut seen2 = [0u64; 4];
+                let mut has_size_3_plus = false;
+                let mut dup = 0usize;
+                for i in 0..c_len {
+                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
+                    unsafe {
+                        *r_buf_ptr.add(i) = r;
+                    }
+                    let word_idx = (r as usize) >> 6;
+                    let bit = 1u64 << (r & 63);
+                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                    if (*word & bit) != 0 {
+                        dup += 1;
+                        if dup > max_allowed_duplicates {
+                            break;
                         }
-                        let word = unsafe { seen.get_unchecked_mut((r as usize) >> 6) };
-                        let bit = 1u64 << (r & 63);
-                        if (*word & bit) != 0 {
-                            dup += 1;
-                            if dup > max_allowed_duplicates {
-                                break;
-                            }
+                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                        if (*word2 & bit) != 0 {
+                            has_size_3_plus = true;
                         } else {
-                            *word |= bit;
+                            *word2 |= bit;
                         }
+                    } else {
+                        *word |= bit;
                     }
-                    if dup > max_allowed_duplicates || c_len - dup <= 1 {
-                        continue;
+                }
+                if dup > max_allowed_duplicates || c_len - dup <= 1 {
+                    continue;
+                }
+                if !has_size_3_plus {
+                    let has_win = (seen[win_response >> 6] & (1u64 << (win_response & 63))) != 0;
+                    let expected_rem = (c_len + 2 * dup) as u32;
+                    let base_lb = (2 * c_len + dup - has_win as usize) as u32;
+                    if base_lb <= max_base_lb {
+                        out.push((g, expected_rem, base_lb));
                     }
-                    if dup <= 1 {
-                        let has_win =
-                            (seen[win_response >> 6] & (1u64 << (win_response & 63))) != 0;
-                        let expected_rem = (c_len + 2 * dup) as u32;
-                        let base_lb = (2 * c_len + dup - has_win as usize) as u32;
-                        if base_lb <= max_base_lb {
-                            out.push((g, expected_rem, base_lb));
-                        }
-                        continue;
-                    }
-                    for i in 0..c_len {
-                        let r = unsafe { *r_buf_ptr.add(i) as usize };
-                        unsafe {
-                            *counts_ptr.add(r) += 1;
-                        }
-                    }
-                } else {
-                    let mut i = 0;
-                    while i + 7 < c_len {
-                        let r0 = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
-                        let r1 = unsafe { *(*stack_c_ptrs_ptr.add(i + 1)).add(g) };
-                        let r2 = unsafe { *(*stack_c_ptrs_ptr.add(i + 2)).add(g) };
-                        let r3 = unsafe { *(*stack_c_ptrs_ptr.add(i + 3)).add(g) };
-                        let r4 = unsafe { *(*stack_c_ptrs_ptr.add(i + 4)).add(g) };
-                        let r5 = unsafe { *(*stack_c_ptrs_ptr.add(i + 5)).add(g) };
-                        let r6 = unsafe { *(*stack_c_ptrs_ptr.add(i + 6)).add(g) };
-                        let r7 = unsafe { *(*stack_c_ptrs_ptr.add(i + 7)).add(g) };
-                        unsafe {
-                            *r_buf_ptr.add(i) = r0;
-                            *r_buf_ptr.add(i + 1) = r1;
-                            *r_buf_ptr.add(i + 2) = r2;
-                            *r_buf_ptr.add(i + 3) = r3;
-                            *r_buf_ptr.add(i + 4) = r4;
-                            *r_buf_ptr.add(i + 5) = r5;
-                            *r_buf_ptr.add(i + 6) = r6;
-                            *r_buf_ptr.add(i + 7) = r7;
-                            *counts_ptr.add(r0 as usize) += 1;
-                            *counts_ptr.add(r1 as usize) += 1;
-                            *counts_ptr.add(r2 as usize) += 1;
-                            *counts_ptr.add(r3 as usize) += 1;
-                            *counts_ptr.add(r4 as usize) += 1;
-                            *counts_ptr.add(r5 as usize) += 1;
-                            *counts_ptr.add(r6 as usize) += 1;
-                            *counts_ptr.add(r7 as usize) += 1;
-                        }
-                        i += 8;
-                    }
-                    while i < c_len {
-                        let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
-                        unsafe {
-                            *r_buf_ptr.add(i) = r;
-                            *counts_ptr.add(r as usize) += 1;
-                        }
-                        i += 1;
+                    continue;
+                }
+                for i in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(i) as usize };
+                    unsafe {
+                        *counts_ptr.add(r) += 1;
                     }
                 }
 
