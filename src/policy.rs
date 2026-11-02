@@ -1217,7 +1217,7 @@ impl<'a> OptimalPolicy<'a> {
                 .collect();
 
             if !filtered_active.is_empty() {
-                const CHUNK_SIZE: usize = 4;
+                const CHUNK_SIZE: usize = 8;
                 let next = AtomicUsize::new(0);
                 let num_workers =
                     rayon::current_num_threads().min(filtered_active.len().div_ceil(CHUNK_SIZE));
@@ -1242,6 +1242,7 @@ impl<'a> OptimalPolicy<'a> {
                                 break;
                             }
                             let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
+                            let mut chunk_root_done = 0usize;
 
                             for i in start_idx..end_idx {
                                 let item = unsafe { *filtered_active.get_unchecked(i) };
@@ -1255,6 +1256,11 @@ impl<'a> OptimalPolicy<'a> {
                                 if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
                                     && orig_idx >= best_idx
                                 {
+                                    if chunk_root_done > 0 {
+                                        self.metrics
+                                            .root_guesses_done
+                                            .fetch_add(chunk_root_done, Ordering::Relaxed);
+                                    }
                                     break 'worker;
                                 }
                                 let guess_beta = if orig_idx < best_idx {
@@ -1275,9 +1281,7 @@ impl<'a> OptimalPolicy<'a> {
                                     1,
                                     self.max_k,
                                 );
-                                self.metrics
-                                    .root_guesses_done
-                                    .fetch_add(1, Ordering::Relaxed);
+                                chunk_root_done += 1;
 
                                 if v < guess_beta {
                                     let packed = ((v as u64) << 32) | (orig_idx as u64);
@@ -1288,8 +1292,13 @@ impl<'a> OptimalPolicy<'a> {
                                     }
                                 }
                             }
-                            solver.flush_metrics();
+                            if chunk_root_done > 0 {
+                                self.metrics
+                                    .root_guesses_done
+                                    .fetch_add(chunk_root_done, Ordering::Relaxed);
+                            }
                         }
+                        solver.flush_metrics();
                     });
             }
 
@@ -1451,7 +1460,7 @@ impl<'a> OptimalPolicy<'a> {
             .collect();
 
         if !filtered_active.is_empty() {
-            const CHUNK_SIZE: usize = 4;
+            const CHUNK_SIZE: usize = 8;
             let next = AtomicUsize::new(0);
             let num_workers =
                 rayon::current_num_threads().min(filtered_active.len().div_ceil(CHUNK_SIZE));
@@ -1476,6 +1485,7 @@ impl<'a> OptimalPolicy<'a> {
                             break;
                         }
                         let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
+                        let mut chunk_root_done = 0usize;
 
                         for i in start_idx..end_idx {
                             let item = unsafe { *filtered_active.get_unchecked(i) };
@@ -1489,6 +1499,11 @@ impl<'a> OptimalPolicy<'a> {
                             if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
                                 && orig_idx >= best_idx
                             {
+                                if chunk_root_done > 0 {
+                                    self.metrics
+                                        .root_guesses_done
+                                        .fetch_add(chunk_root_done, Ordering::Relaxed);
+                                }
                                 break 'worker;
                             }
                             let guess_beta = if orig_idx < best_idx {
@@ -1509,9 +1524,7 @@ impl<'a> OptimalPolicy<'a> {
                                 1,
                                 self.max_k,
                             );
-                            self.metrics
-                                .root_guesses_done
-                                .fetch_add(1, Ordering::Relaxed);
+                            chunk_root_done += 1;
 
                             if v < guess_beta {
                                 let packed = ((v as u64) << 32) | (orig_idx as u64);
@@ -1522,8 +1535,13 @@ impl<'a> OptimalPolicy<'a> {
                                 }
                             }
                         }
-                        solver.flush_metrics();
+                        if chunk_root_done > 0 {
+                            self.metrics
+                                .root_guesses_done
+                                .fetch_add(chunk_root_done, Ordering::Relaxed);
+                        }
                     }
+                    solver.flush_metrics();
                 });
         }
 
