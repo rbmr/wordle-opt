@@ -1524,16 +1524,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut seen2 = [0u64; M];
                 let mut has_size_3_plus = false;
                 let mut aborted = false;
-                let mut r_buf = std::mem::MaybeUninit::<[u16; 64]>::uninit();
-                let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
                 for i in 0..cand_idx {
                     let c = unsafe { *set_ptr.add(i) };
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    if c_len <= 64 {
-                        unsafe {
-                            *r_buf_ptr.add(i) = r as u16;
-                        }
-                    }
                     let word_idx = r >> 6;
                     let bit = 1u64 << (r & 63);
                     let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -1557,11 +1550,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     for i in (cand_idx + 1)..c_len {
                         let c = unsafe { *set_ptr.add(i) };
                         let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                        if c_len <= 64 {
-                            unsafe {
-                                *r_buf_ptr.add(i) = r as u16;
-                            }
-                        }
                         let word_idx = r >> 6;
                         let bit = 1u64 << (r & 63);
                         let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -1625,57 +1613,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     continue;
                 }
-                if c_len <= 64 {
-                    for i in 0..cand_idx {
-                        let r = unsafe { *r_buf_ptr.add(i) as usize };
-                        unsafe {
-                            let cnt_ptr = counts_ptr.add(r);
-                            let cnt = *cnt_ptr;
-                            if cnt == 0 {
-                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                num_non_empty += 1;
-                            }
-                            *cnt_ptr = cnt + 1;
+                for i in 0..cand_idx {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
                         }
+                        *cnt_ptr = cnt + 1;
                     }
-                    for i in (cand_idx + 1)..c_len {
-                        let r = unsafe { *r_buf_ptr.add(i) as usize };
-                        unsafe {
-                            let cnt_ptr = counts_ptr.add(r);
-                            let cnt = *cnt_ptr;
-                            if cnt == 0 {
-                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                num_non_empty += 1;
-                            }
-                            *cnt_ptr = cnt + 1;
+                }
+                for i in (cand_idx + 1)..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
                         }
-                    }
-                } else {
-                    for i in 0..cand_idx {
-                        let c = unsafe { *set_ptr.add(i) };
-                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                        unsafe {
-                            let cnt_ptr = counts_ptr.add(r);
-                            let cnt = *cnt_ptr;
-                            if cnt == 0 {
-                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                num_non_empty += 1;
-                            }
-                            *cnt_ptr = cnt + 1;
-                        }
-                    }
-                    for i in (cand_idx + 1)..c_len {
-                        let c = unsafe { *set_ptr.add(i) };
-                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                        unsafe {
-                            let cnt_ptr = counts_ptr.add(r);
-                            let cnt = *cnt_ptr;
-                            if cnt == 0 {
-                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                num_non_empty += 1;
-                            }
-                            *cnt_ptr = cnt + 1;
-                        }
+                        *cnt_ptr = cnt + 1;
                     }
                 }
             } else {
@@ -2079,16 +2040,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let mut seen2 = [0u64; M];
                             let mut has_size_3_plus = false;
                             let mut aborted = false;
-                            let mut r_buf = std::mem::MaybeUninit::<[u16; 64]>::uninit();
-                            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
-                                if c_len <= 64 {
-                                    unsafe {
-                                        *r_buf_ptr.add(c_idx) = r as u16;
-                                    }
-                                }
                                 let word_idx = r >> 6;
                                 let bit = 1u64 << (r & 63);
                                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -2149,32 +2103,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 }
                                 continue;
                             }
-                            if c_len <= 64 {
-                                for c_idx in 0..c_len {
-                                    let r = unsafe { *r_buf_ptr.add(c_idx) as usize };
-                                    unsafe {
-                                        let cnt_ptr = counts_ptr.add(r);
-                                        let cnt = *cnt_ptr;
-                                        if cnt == 0 {
-                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                            num_non_empty += 1;
-                                        }
-                                        *cnt_ptr = cnt + 1;
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
+                                unsafe {
+                                    let cnt_ptr = counts_ptr.add(r);
+                                    let cnt = *cnt_ptr;
+                                    if cnt == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                        num_non_empty += 1;
                                     }
-                                }
-                            } else {
-                                for c_idx in 0..c_len {
-                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                    let r = unsafe { (*c_base.add(g)).to_usize() };
-                                    unsafe {
-                                        let cnt_ptr = counts_ptr.add(r);
-                                        let cnt = *cnt_ptr;
-                                        if cnt == 0 {
-                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                            num_non_empty += 1;
-                                        }
-                                        *cnt_ptr = cnt + 1;
-                                    }
+                                    *cnt_ptr = cnt + 1;
                                 }
                             }
                         } else {
@@ -2591,8 +2530,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 32]>::uninit();
             let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
-            let mut c_responses = std::mem::MaybeUninit::<[u16; 32]>::uninit();
-            let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
 
@@ -2610,7 +2547,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     count: 1,
                     hash: h0,
                 };
-                *c_responses_ptr = r0;
             }
             let word_idx0 = (r0 as usize) >> 6;
             let bit0 = 1u64 << (r0 & 63);
@@ -2624,9 +2560,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_u16() };
                 let h = unsafe { *zobrist_ptr.add(c) };
-                unsafe {
-                    *c_responses_ptr.add(cand_idx) = r;
-                }
                 let word_idx = (r as usize) >> 6;
                 let bit = 1u64 << (r & 63);
                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -2761,9 +2694,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
                 let mut found = 0;
                 for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
+                    let c = unsafe { *set_ptr.add(cand_idx) };
+                    let r = unsafe { (*g_ptr.add(c)).to_u16() };
                     if r == target_r {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
                         unsafe {
                             *pi_ptr.add(found) = c;
                         }
