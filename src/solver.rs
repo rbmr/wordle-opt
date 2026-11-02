@@ -799,107 +799,46 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
                 let data_ptr = matrix.data_ptr::<Elem>();
+                let bucket_ptr = bucket.as_ptr();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+                let mut seen = std::mem::MaybeUninit::<[u16; 16]>::uninit();
+                let seen_ptr = seen.as_mut_ptr() as *mut u16;
 
-                if M <= 4 {
-                    let bucket_ptr = bucket.as_ptr();
-                    let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
-                    for (idx, &ci) in bucket.iter().enumerate() {
-                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
-                        let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
+                for idx in 0..n {
+                    let ci = unsafe { *bucket_ptr.add(idx) };
+                    let gi = unsafe { *cand_to_guess_ptr.add(ci) };
+                    let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                        let mut seen_mask = [0u64; M];
-                        let seen_ptr = seen_mask.as_mut_ptr();
-                        let mut collisions = 0;
-                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+                    let mut seen_len = 0;
+                    let mut collisions = 0;
+                    let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                        for i in 0..idx {
-                            let c = unsafe { *bucket_ptr.add(i) };
-                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                            let word_idx = r >> 6;
-                            let bit = 1u64 << (r & 63);
-                            let word_ptr = unsafe { seen_ptr.add(word_idx) };
-                            let word_val = unsafe { *word_ptr };
-                            if (word_val & bit) != 0 {
+                    'scan: for i in 0..n {
+                        if i == idx {
+                            continue;
+                        }
+                        let c = unsafe { *bucket_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                        for j in 0..seen_len {
+                            if unsafe { *seen_ptr.add(j) } == r {
                                 collisions += 1;
-                                if collisions >= max_collisions {
-                                    break;
+                                if collisions == max_collisions {
+                                    break 'scan;
                                 }
-                            } else {
-                                unsafe {
-                                    *word_ptr = word_val | bit;
-                                }
+                                continue 'scan;
                             }
                         }
-                        if collisions < max_collisions {
-                            for i in (idx + 1)..n {
-                                let c = unsafe { *bucket_ptr.add(i) };
-                                let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                                let word_idx = r >> 6;
-                                let bit = 1u64 << (r & 63);
-                                let word_ptr = unsafe { seen_ptr.add(word_idx) };
-                                let word_val = unsafe { *word_ptr };
-                                if (word_val & bit) != 0 {
-                                    collisions += 1;
-                                    if collisions >= max_collisions {
-                                        break;
-                                    }
-                                } else {
-                                    unsafe {
-                                        *word_ptr = word_val | bit;
-                                    }
-                                }
-                            }
+                        unsafe {
+                            *seen_ptr.add(seen_len) = r;
                         }
-
-                        if collisions == 0 {
-                            return ((2 * n - 1) as u32, true);
-                        }
-                        if collisions == 1 && max_collisions == 2 {
-                            best_inside = target_exact;
-                        }
+                        seen_len += 1;
                     }
-                } else {
-                    let bucket_ptr = bucket.as_ptr();
-                    let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
-                    for (idx, &ci) in bucket.iter().enumerate() {
-                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
-                        let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
 
-                        let mut seen = [0u16; 16];
-                        let mut seen_len = 0;
-                        let mut collisions = 0;
-                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
-
-                        for i in 0..n {
-                            if i == idx {
-                                continue;
-                            }
-                            let c = unsafe { *bucket_ptr.add(i) };
-                            let r = unsafe { (*g_ptr.add(c)).to_u16() };
-                            let mut duplicate = false;
-                            for &prev in &seen[..seen_len] {
-                                if prev == r {
-                                    duplicate = true;
-                                    break;
-                                }
-                            }
-                            if duplicate {
-                                collisions += 1;
-                                if collisions >= max_collisions {
-                                    break;
-                                }
-                            } else {
-                                seen[seen_len] = r;
-                                seen_len += 1;
-                            }
-                        }
-
-                        if collisions == 0 {
-                            return ((2 * n - 1) as u32, true);
-                        }
-                        if collisions == 1 && max_collisions == 2 {
-                            best_inside = target_exact;
-                        }
+                    if collisions == 0 {
+                        return ((2 * n - 1) as u32, true);
+                    }
+                    if collisions == 1 && max_collisions == 2 {
+                        best_inside = target_exact;
                     }
                 }
 
