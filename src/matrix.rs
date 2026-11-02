@@ -50,6 +50,7 @@ pub struct ResponseMatrix {
     pub guess_profile_chars: Vec<[u8; 8]>,
     pub candidate_at_masks: Vec<[u32; 8]>,
     pub candidate_dup_masks: Vec<u32>,
+    pub ordered_guesses: Vec<usize>,
 }
 
 impl ResponseMatrix {
@@ -213,6 +214,27 @@ impl ResponseMatrix {
             });
         }
 
+        let mut letter_freq = [0u32; 32];
+        for mask in &candidate_masks {
+            let mut m = *mask;
+            while m != 0 {
+                let bit_idx = (m.trailing_zeros() as usize).min(31);
+                m &= m - 1;
+                letter_freq[bit_idx] += 1;
+            }
+        }
+        let mut ordered_guesses: Vec<usize> = (0..num_guesses).collect();
+        ordered_guesses.sort_unstable_by_key(|&g| {
+            let mut m = guess_masks[g];
+            let mut score = 0u32;
+            while m != 0 {
+                let bit_idx = (m.trailing_zeros() as usize).min(31);
+                m &= m - 1;
+                score += letter_freq[bit_idx];
+            }
+            std::cmp::Reverse(score)
+        });
+
         Self {
             num_guesses,
             num_candidates,
@@ -234,6 +256,7 @@ impl ResponseMatrix {
             guess_profile_chars,
             candidate_at_masks,
             candidate_dup_masks,
+            ordered_guesses,
         }
     }
 
