@@ -100,11 +100,18 @@ pub fn set_equiv_cache_cap(entries_per_shard: usize) {
 /// Maximum number of ternary responses supported (3^7 = 2187).
 pub const MAX_RESPONSES: usize = 2187;
 
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GuessTuple {
+    pub lb: u32,
+    pub exp: u32,
+    pub g: u32,
+}
+
 pub struct SolverScratch {
     pub scratch_is_in_set: [Vec<u64>; 32],
     pub scratch_sorted_sets: [Vec<usize>; 32],
-    pub scratch_phase1_tuples: [Vec<(usize, u32, u32, usize)>; 32],
-    pub scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
+    pub scratch_phase1_tuples: [Vec<GuessTuple>; 32],
+    pub scratch_phase2_tuples: [Vec<GuessTuple>; 32],
     pub scratch_hash_table: [Vec<u64>; 32],
     pub scratch_added_indices: [Vec<usize>; 32],
     pub scratch_active_bits: [Vec<u64>; 32],
@@ -2118,7 +2125,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     min_k_needed = (local_max_k + 1).min(k_to_beat_best);
                     max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                 } else {
-                    phase1_tuples.push((g, expected_rem, lb_cost, total_non_empty));
+                    phase1_tuples.push(GuessTuple {
+                        lb: lb_cost,
+                        exp: expected_rem,
+                        g: g as u32,
+                    });
                 }
             } else {
                 min_val_found = min_val_found.min(lb_cost);
@@ -2131,9 +2142,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if phase1_tuples.len() == 2 {
                 let t0 = phase1_tuples[0];
                 let t1 = phase1_tuples[1];
-                let k0 = (t0.2, t0.1, t0.0);
-                let k1 = (t1.2, t1.1, t1.0);
-                if k0 > k1 {
+                if t0 > t1 {
                     phase1_tuples[0] = t1;
                     phase1_tuples[1] = t0;
                 }
@@ -2141,18 +2150,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut t0 = phase1_tuples[0];
                 let mut t1 = phase1_tuples[1];
                 let mut t2 = phase1_tuples[2];
-                let mut k0 = (t0.2, t0.1, t0.0);
-                let mut k1 = (t1.2, t1.1, t1.0);
-                let mut k2 = (t2.2, t2.1, t2.0);
-                if k0 > k1 {
+                if t0 > t1 {
                     std::mem::swap(&mut t0, &mut t1);
-                    std::mem::swap(&mut k0, &mut k1);
                 }
-                if k1 > k2 {
+                if t1 > t2 {
                     std::mem::swap(&mut t1, &mut t2);
-                    std::mem::swap(&mut k1, &mut k2);
                 }
-                if k0 > k1 {
+                if t0 > t1 {
                     std::mem::swap(&mut t0, &mut t1);
                 }
                 phase1_tuples[0] = t0;
@@ -2163,27 +2167,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut t1 = phase1_tuples[1];
                 let mut t2 = phase1_tuples[2];
                 let mut t3 = phase1_tuples[3];
-                let mut k0 = (t0.2, t0.1, t0.0);
-                let mut k1 = (t1.2, t1.1, t1.0);
-                let mut k2 = (t2.2, t2.1, t2.0);
-                let mut k3 = (t3.2, t3.1, t3.0);
-                if k0 > k1 {
+                if t0 > t1 {
                     std::mem::swap(&mut t0, &mut t1);
-                    std::mem::swap(&mut k0, &mut k1);
                 }
-                if k2 > k3 {
+                if t2 > t3 {
                     std::mem::swap(&mut t2, &mut t3);
-                    std::mem::swap(&mut k2, &mut k3);
                 }
-                if k0 > k2 {
+                if t0 > t2 {
                     std::mem::swap(&mut t0, &mut t2);
-                    std::mem::swap(&mut k0, &mut k2);
                 }
-                if k1 > k3 {
+                if t1 > t3 {
                     std::mem::swap(&mut t1, &mut t3);
-                    std::mem::swap(&mut k1, &mut k3);
                 }
-                if k1 > k2 {
+                if t1 > t2 {
                     std::mem::swap(&mut t1, &mut t2);
                 }
                 phase1_tuples[0] = t0;
@@ -2198,10 +2194,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut k = j;
                     while k > 0 {
                         let prev = unsafe { *p1_ptr.add(k - 1) };
-                        let prev_greater = prev.2 > key.2
-                            || (prev.2 == key.2
-                                && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
-                        if prev_greater {
+                        if prev > key {
                             unsafe {
                                 *p1_ptr.add(k) = prev;
                             }
@@ -2215,30 +2208,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
             } else if phase1_tuples.len() > 32 {
-                phase1_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
+                phase1_tuples.sort_unstable();
             }
 
-            for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
+            for (idx, &tuple) in phase1_tuples.iter().enumerate() {
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 if self.current_cost_so_far + local_lb >= current_global_beta {
                     cut_by_global = true;
                     break;
                 }
-                if self.current_cost_so_far + g_lb >= current_global_beta {
+                if self.current_cost_so_far + tuple.lb >= current_global_beta {
                     cut_by_global = true;
-                    min_val_found = min_val_found.min(g_lb);
+                    min_val_found = min_val_found.min(tuple.lb);
                     self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
                     break;
                 }
-                if g_lb >= best_val {
-                    min_val_found = min_val_found.min(g_lb);
+                if tuple.lb >= best_val {
+                    min_val_found = min_val_found.min(tuple.lb);
                     self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
                     break;
                 }
                 let val = self.min_guess_val_inner(
                     set,
                     &mut equiv_state,
-                    _g,
+                    tuple.g as usize,
                     best_val,
                     depth,
                     parent_max_k,
@@ -2532,7 +2525,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 min_k_needed = (local_max_k + 1).min(k_to_beat_best);
                                 max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                             } else {
-                                phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
+                                phase2_tuples.push(GuessTuple {
+                                    lb: lb_cost,
+                                    exp: expected_rem,
+                                    g: g as u32,
+                                });
                             }
                         } else {
                             min_val_found = min_val_found.min(lb_cost);
@@ -2588,9 +2585,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if phase2_tuples.len() == 2 {
                     let t0 = phase2_tuples[0];
                     let t1 = phase2_tuples[1];
-                    let k0 = (t0.2, t0.1, t0.0);
-                    let k1 = (t1.2, t1.1, t1.0);
-                    if k0 > k1 {
+                    if t0 > t1 {
                         phase2_tuples[0] = t1;
                         phase2_tuples[1] = t0;
                     }
@@ -2598,18 +2593,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut t0 = phase2_tuples[0];
                     let mut t1 = phase2_tuples[1];
                     let mut t2 = phase2_tuples[2];
-                    let mut k0 = (t0.2, t0.1, t0.0);
-                    let mut k1 = (t1.2, t1.1, t1.0);
-                    let mut k2 = (t2.2, t2.1, t2.0);
-                    if k0 > k1 {
+                    if t0 > t1 {
                         std::mem::swap(&mut t0, &mut t1);
-                        std::mem::swap(&mut k0, &mut k1);
                     }
-                    if k1 > k2 {
+                    if t1 > t2 {
                         std::mem::swap(&mut t1, &mut t2);
-                        std::mem::swap(&mut k1, &mut k2);
                     }
-                    if k0 > k1 {
+                    if t0 > t1 {
                         std::mem::swap(&mut t0, &mut t1);
                     }
                     phase2_tuples[0] = t0;
@@ -2620,27 +2610,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut t1 = phase2_tuples[1];
                     let mut t2 = phase2_tuples[2];
                     let mut t3 = phase2_tuples[3];
-                    let mut k0 = (t0.2, t0.1, t0.0);
-                    let mut k1 = (t1.2, t1.1, t1.0);
-                    let mut k2 = (t2.2, t2.1, t2.0);
-                    let mut k3 = (t3.2, t3.1, t3.0);
-                    if k0 > k1 {
+                    if t0 > t1 {
                         std::mem::swap(&mut t0, &mut t1);
-                        std::mem::swap(&mut k0, &mut k1);
                     }
-                    if k2 > k3 {
+                    if t2 > t3 {
                         std::mem::swap(&mut t2, &mut t3);
-                        std::mem::swap(&mut k2, &mut k3);
                     }
-                    if k0 > k2 {
+                    if t0 > t2 {
                         std::mem::swap(&mut t0, &mut t2);
-                        std::mem::swap(&mut k0, &mut k2);
                     }
-                    if k1 > k3 {
+                    if t1 > t3 {
                         std::mem::swap(&mut t1, &mut t3);
-                        std::mem::swap(&mut k1, &mut k3);
                     }
-                    if k1 > k2 {
+                    if t1 > t2 {
                         std::mem::swap(&mut t1, &mut t2);
                     }
                     phase2_tuples[0] = t0;
@@ -2655,10 +2637,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut k = j;
                         while k > 0 {
                             let prev = unsafe { *p2_ptr.add(k - 1) };
-                            let prev_greater = prev.2 > key.2
-                                || (prev.2 == key.2
-                                    && (prev.1 > key.1 || (prev.1 == key.1 && prev.0 > key.0)));
-                            if prev_greater {
+                            if prev > key {
                                 unsafe {
                                     *p2_ptr.add(k) = prev;
                                 }
@@ -2672,30 +2651,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     }
                 } else if phase2_tuples.len() > 32 {
-                    phase2_tuples.sort_unstable_by_key(|a| (a.2, a.1, a.0));
+                    phase2_tuples.sort_unstable();
                 }
 
-                for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
+                for (idx, &tuple) in phase2_tuples.iter().enumerate() {
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if self.current_cost_so_far + local_lb >= current_global_beta {
                         cut_by_global = true;
                         break;
                     }
-                    if self.current_cost_so_far + g_lb >= current_global_beta {
+                    if self.current_cost_so_far + tuple.lb >= current_global_beta {
                         cut_by_global = true;
-                        min_val_found = min_val_found.min(g_lb);
+                        min_val_found = min_val_found.min(tuple.lb);
                         self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
                         break;
                     }
-                    if g_lb >= best_val {
-                        min_val_found = min_val_found.min(g_lb);
+                    if tuple.lb >= best_val {
+                        min_val_found = min_val_found.min(tuple.lb);
                         self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
                         break;
                     }
                     let val = self.min_guess_val_inner(
                         set,
                         &mut equiv_state,
-                        _g,
+                        tuple.g as usize,
                         best_val,
                         depth,
                         local_max_k,
