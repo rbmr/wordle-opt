@@ -2072,62 +2072,109 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             continue;
                         }
 
-                        if M <= 4 && max_allowed_duplicates == 0 {
+                        let mut num_non_empty = 0;
+                        let mut duplicates = 0;
+                        if M <= 4 {
                             let mut seen = [0u64; M];
-                            let mut dup = false;
+                            let mut aborted = false;
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
                                 let word = unsafe { seen.get_unchecked_mut(r >> 6) };
                                 let bit = 1u64 << (r & 63);
                                 if (*word & bit) != 0 {
-                                    dup = true;
-                                    break;
-                                }
-                                *word |= bit;
-                            }
-                            if dup {
-                                min_val_found = min_val_found.min(best_val);
-                                continue;
-                            }
-                            let lb_cost = (2 * c_len) as u32;
-                            local_max_k = c_len;
-                            valid_phase2_k = c_len;
-                            self.local_metrics.guesses_evaluated += 1;
-                            min_val_found = min_val_found.min(lb_cost);
-                            best_val = lb_cost;
-                            break 'guess_loop;
-                        }
-
-                        let mut num_non_empty = 0;
-                        let mut duplicates = 0;
-                        let mut aborted = false;
-                        for c_idx in 0..c_len {
-                            let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                            let r = unsafe { (*c_base.add(g)).to_usize() };
-                            unsafe {
-                                let cnt_ptr = counts_ptr.add(r);
-                                let cnt = *cnt_ptr;
-                                if cnt == 0 {
-                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                    num_non_empty += 1;
-                                } else {
                                     duplicates += 1;
                                     if duplicates > max_allowed_duplicates {
-                                        for i in 0..num_non_empty {
-                                            let r_idx = *non_empty_indices_ptr.add(i) as usize;
-                                            *counts_ptr.add(r_idx) = 0;
-                                        }
                                         aborted = true;
                                         break;
                                     }
+                                } else {
+                                    *word |= bit;
                                 }
-                                *cnt_ptr = cnt + 1;
                             }
-                        }
-                        if aborted {
-                            min_val_found = min_val_found.min(best_val);
-                            continue;
+                            if aborted {
+                                min_val_found = min_val_found.min(best_val);
+                                continue;
+                            }
+                            if duplicates == 0 {
+                                let lb_cost = (2 * c_len) as u32;
+                                local_max_k = c_len;
+                                valid_phase2_k = c_len;
+                                self.local_metrics.guesses_evaluated += 1;
+                                min_val_found = min_val_found.min(lb_cost);
+                                best_val = lb_cost;
+                                break 'guess_loop;
+                            }
+                            if duplicates == 1 {
+                                num_non_empty = c_len - 1;
+                                if num_non_empty > local_max_k {
+                                    local_max_k = num_non_empty;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                                }
+                                let lb_cost = (2 * c_len + 1) as u32;
+                                if lb_cost < best_val {
+                                    if num_non_empty > valid_phase2_k {
+                                        valid_phase2_k = num_non_empty;
+                                    }
+                                    self.local_metrics.guesses_evaluated += 1;
+                                    min_val_found = min_val_found.min(lb_cost);
+                                    best_val = lb_cost;
+                                    k_to_beat_best = (3 * c_len as u32)
+                                        .saturating_sub(best_val.saturating_sub(1))
+                                        as usize;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                                } else {
+                                    min_val_found = min_val_found.min(lb_cost);
+                                }
+                                if min_k_needed > c_len {
+                                    break 'guess_loop;
+                                }
+                                continue;
+                            }
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
+                                unsafe {
+                                    let cnt_ptr = counts_ptr.add(r);
+                                    let cnt = *cnt_ptr;
+                                    if cnt == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                        num_non_empty += 1;
+                                    }
+                                    *cnt_ptr = cnt + 1;
+                                }
+                            }
+                        } else {
+                            let mut aborted = false;
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
+                                unsafe {
+                                    let cnt_ptr = counts_ptr.add(r);
+                                    let cnt = *cnt_ptr;
+                                    if cnt == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                        num_non_empty += 1;
+                                    } else {
+                                        duplicates += 1;
+                                        if duplicates > max_allowed_duplicates {
+                                            for i in 0..num_non_empty {
+                                                let r_idx = *non_empty_indices_ptr.add(i) as usize;
+                                                *counts_ptr.add(r_idx) = 0;
+                                            }
+                                            aborted = true;
+                                            break;
+                                        }
+                                    }
+                                    *cnt_ptr = cnt + 1;
+                                }
+                            }
+                            if aborted {
+                                min_val_found = min_val_found.min(best_val);
+                                continue;
+                            }
                         }
                         if num_non_empty == 1 {
                             unsafe {
