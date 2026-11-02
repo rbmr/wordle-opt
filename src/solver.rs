@@ -693,139 +693,61 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
 
-                    let limit = if best_inside_exact { 1 } else { 2 };
-                    let mut coll = 0;
-                    if ra == rb {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if re == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if re == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rf == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_ad = ra == rd;
+                    let eq_ae = ra == re;
+                    let eq_af = ra == rf;
+                    let eq_ag = ra == rg;
 
-                    if coll == 0 {
+                    let eq_bc = rb == rc;
+                    let eq_bd = rb == rd;
+                    let eq_be = rb == re;
+                    let eq_bf = rb == rf;
+                    let eq_bg = rb == rg;
+
+                    let eq_cd = rc == rd;
+                    let eq_ce = rc == re;
+                    let eq_cf = rc == rf;
+                    let eq_cg = rc == rg;
+
+                    let eq_de = rd == re;
+                    let eq_df = rd == rf;
+                    let eq_dg = rd == rg;
+
+                    let eq_ef = re == rf;
+                    let eq_eg = re == rg;
+
+                    let eq_fg = rf == rg;
+
+                    let coll_mask = (eq_ab as u32)
+                        | ((eq_ac as u32) << 1)
+                        | ((eq_ad as u32) << 2)
+                        | ((eq_ae as u32) << 3)
+                        | ((eq_af as u32) << 4)
+                        | ((eq_ag as u32) << 5)
+                        | ((eq_bc as u32) << 6)
+                        | ((eq_bd as u32) << 7)
+                        | ((eq_be as u32) << 8)
+                        | ((eq_bf as u32) << 9)
+                        | ((eq_bg as u32) << 10)
+                        | ((eq_cd as u32) << 11)
+                        | ((eq_ce as u32) << 12)
+                        | ((eq_cf as u32) << 13)
+                        | ((eq_cg as u32) << 14)
+                        | ((eq_de as u32) << 15)
+                        | ((eq_df as u32) << 16)
+                        | ((eq_dg as u32) << 17)
+                        | ((eq_ef as u32) << 18)
+                        | ((eq_eg as u32) << 19)
+                        | ((eq_fg as u32) << 20);
+
+                    if coll_mask == 0 {
                         return (15, true);
                     }
-                    best_inside_exact = true;
+                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside_exact = true;
+                    }
                 }
 
                 (16, best_inside_exact)
@@ -882,181 +804,76 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rg = unsafe { *gi_ptr.add(cg) };
                     let rh = unsafe { *gi_ptr.add(ch) };
 
-                    let limit = if best_inside_exact { 1 } else { 2 };
-                    let mut coll = 0;
-                    if ra == rb {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == re {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rd == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if re == rf {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if re == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if re == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rf == rg {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rf == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rg == rh {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_ad = ra == rd;
+                    let eq_ae = ra == re;
+                    let eq_af = ra == rf;
+                    let eq_ag = ra == rg;
+                    let eq_ah = ra == rh;
 
-                    if coll == 0 {
+                    let eq_bc = rb == rc;
+                    let eq_bd = rb == rd;
+                    let eq_be = rb == re;
+                    let eq_bf = rb == rf;
+                    let eq_bg = rb == rg;
+                    let eq_bh = rb == rh;
+
+                    let eq_cd = rc == rd;
+                    let eq_ce = rc == re;
+                    let eq_cf = rc == rf;
+                    let eq_cg = rc == rg;
+                    let eq_ch = rc == rh;
+
+                    let eq_de = rd == re;
+                    let eq_df = rd == rf;
+                    let eq_dg = rd == rg;
+                    let eq_dh = rd == rh;
+
+                    let eq_ef = re == rf;
+                    let eq_eg = re == rg;
+                    let eq_eh = re == rh;
+
+                    let eq_fg = rf == rg;
+                    let eq_fh = rf == rh;
+
+                    let eq_gh = rg == rh;
+
+                    let coll_mask = (eq_ab as u32)
+                        | ((eq_ac as u32) << 1)
+                        | ((eq_ad as u32) << 2)
+                        | ((eq_ae as u32) << 3)
+                        | ((eq_af as u32) << 4)
+                        | ((eq_ag as u32) << 5)
+                        | ((eq_ah as u32) << 6)
+                        | ((eq_bc as u32) << 7)
+                        | ((eq_bd as u32) << 8)
+                        | ((eq_be as u32) << 9)
+                        | ((eq_bf as u32) << 10)
+                        | ((eq_bg as u32) << 11)
+                        | ((eq_bh as u32) << 12)
+                        | ((eq_cd as u32) << 13)
+                        | ((eq_ce as u32) << 14)
+                        | ((eq_cf as u32) << 15)
+                        | ((eq_cg as u32) << 16)
+                        | ((eq_ch as u32) << 17)
+                        | ((eq_de as u32) << 18)
+                        | ((eq_df as u32) << 19)
+                        | ((eq_dg as u32) << 20)
+                        | ((eq_dh as u32) << 21)
+                        | ((eq_ef as u32) << 22)
+                        | ((eq_eg as u32) << 23)
+                        | ((eq_eh as u32) << 24)
+                        | ((eq_fg as u32) << 25)
+                        | ((eq_fh as u32) << 26)
+                        | ((eq_gh as u32) << 27);
+
+                    if coll_mask == 0 {
                         return (17, true);
                     }
-                    best_inside_exact = true;
+                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside_exact = true;
+                    }
                 }
 
                 (18, best_inside_exact)
