@@ -2943,26 +2943,36 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut u32;
             let mut num_eval = 0;
 
-            struct GuessCleanup {
+            let mut seen = [0u64; M];
+
+            struct GuessCleanup<const M: usize> {
                 counts_ptr: *mut u16,
                 hashes_ptr: *mut u64,
-                r_len: usize,
+                seen_ptr: *const u64,
             }
 
-            impl Drop for GuessCleanup {
+            impl<const M: usize> Drop for GuessCleanup<M> {
                 #[inline(always)]
                 fn drop(&mut self) {
                     unsafe {
-                        std::ptr::write_bytes(self.counts_ptr, 0, self.r_len);
-                        std::ptr::write_bytes(self.hashes_ptr, 0, self.r_len);
+                        for m in 0..M {
+                            let mut word = *self.seen_ptr.add(m);
+                            while word != 0 {
+                                let bit_idx = word.trailing_zeros() as usize;
+                                let r = (m << 6) | bit_idx;
+                                word &= word - 1;
+                                *self.counts_ptr.add(r) = 0;
+                                *self.hashes_ptr.add(r) = 0;
+                            }
+                        }
                     }
                 }
             }
 
-            let _cleanup = GuessCleanup {
+            let _cleanup = GuessCleanup::<M> {
                 counts_ptr,
                 hashes_ptr,
-                r_len: R,
+                seen_ptr: seen.as_ptr(),
             };
 
             let is_contiguous_root = c_len == self.matrix.num_candidates
@@ -3015,6 +3025,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let z15 = unsafe { *zobrist_ptr.add(i + 15) };
 
                     unsafe {
+                        *seen.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+                        *seen.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
+                        *seen.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
+                        *seen.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
+                        *seen.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
+                        *seen.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
+                        *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
+                        *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
+                        *seen.get_unchecked_mut(r8 >> 6) |= 1u64 << (r8 & 63);
+                        *seen.get_unchecked_mut(r9 >> 6) |= 1u64 << (r9 & 63);
+                        *seen.get_unchecked_mut(r10 >> 6) |= 1u64 << (r10 & 63);
+                        *seen.get_unchecked_mut(r11 >> 6) |= 1u64 << (r11 & 63);
+                        *seen.get_unchecked_mut(r12 >> 6) |= 1u64 << (r12 & 63);
+                        *seen.get_unchecked_mut(r13 >> 6) |= 1u64 << (r13 & 63);
+                        *seen.get_unchecked_mut(r14 >> 6) |= 1u64 << (r14 & 63);
+                        *seen.get_unchecked_mut(r15 >> 6) |= 1u64 << (r15 & 63);
+
                         *counts_ptr.add(r0) += 1;
                         *counts_ptr.add(r1) += 1;
                         *counts_ptr.add(r2) += 1;
@@ -3055,6 +3082,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r = unsafe { *g_u8_ptr.add(i) as usize };
                     let z = unsafe { *zobrist_ptr.add(i) };
                     unsafe {
+                        *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         *counts_ptr.add(r) += 1;
                         *hashes_ptr.add(r) ^= z;
                     }
@@ -3088,6 +3116,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let z7 = unsafe { *zobrist_ptr.add(c7) };
 
                     unsafe {
+                        *seen.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+                        *seen.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
+                        *seen.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
+                        *seen.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
+                        *seen.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
+                        *seen.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
+                        *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
+                        *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
+
                         *counts_ptr.add(r0) += 1;
                         *counts_ptr.add(r1) += 1;
                         *counts_ptr.add(r2) += 1;
@@ -3112,6 +3149,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
                     let z = unsafe { *zobrist_ptr.add(c) };
                     unsafe {
+                        *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         *counts_ptr.add(r) += 1;
                         *hashes_ptr.add(r) ^= z;
                     }
@@ -3119,44 +3157,46 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            let total_buckets: u32 = seen.iter().map(|w| w.count_ones()).sum();
+            if total_buckets <= 1 {
+                return beta;
+            }
+
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
 
             let mut cost = set.len() as u32;
             let mut max_p_len = 0;
-            let mut num_buckets = 0;
 
-            for r in 0..R {
-                let p_len = unsafe { *counts_ptr.add(r) as usize };
-                if p_len == 0 {
-                    continue;
-                }
-                num_buckets += 1;
-                if r == WIN {
-                    continue;
-                }
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                if lb > 0 {
-                    cost += lb;
-                    if cost >= cutoff {
-                        self.local_metrics.pruned_by_bounds += 1;
-                        return cost;
+            for m in 0..M {
+                let mut word = unsafe { *seen.get_unchecked(m) };
+                while word != 0 {
+                    let bit_idx = word.trailing_zeros() as usize;
+                    let r = (m << 6) | bit_idx;
+                    word &= word - 1;
+                    let p_len = unsafe { *counts_ptr.add(r) as usize };
+                    if r == WIN {
+                        continue;
+                    }
+                    if p_len > max_p_len {
+                        max_p_len = p_len;
+                    }
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    if lb > 0 {
+                        cost += lb;
+                        if cost >= cutoff {
+                            self.local_metrics.pruned_by_bounds += 1;
+                            return cost;
+                        }
+                    }
+                    if p_len > 2 {
+                        let entry = ((p_len as u32) << 16) | ((!r as u16) as u32);
+                        unsafe {
+                            *eval_entries_ptr.add(num_eval) = entry;
+                        }
+                        num_eval += 1;
                     }
                 }
-                if p_len > 2 {
-                    let entry = ((p_len as u32) << 16) | ((!r as u16) as u32);
-                    unsafe {
-                        *eval_entries_ptr.add(num_eval) = entry;
-                    }
-                    num_eval += 1;
-                }
-            }
-
-            if num_buckets <= 1 {
-                return beta;
             }
 
             if max_p_len <= 2 {
@@ -3317,10 +3357,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
             let mut curr = 0;
-            for r in 0..R {
-                unsafe {
-                    *current_offsets_ptr.add(r) = curr;
-                    curr += *counts_ptr.add(r);
+            for m in 0..M {
+                let mut word = unsafe { *seen.get_unchecked(m) };
+                while word != 0 {
+                    let bit_idx = word.trailing_zeros() as usize;
+                    let r = (m << 6) | bit_idx;
+                    word &= word - 1;
+                    unsafe {
+                        *current_offsets_ptr.add(r) = curr;
+                        curr += *counts_ptr.add(r);
+                    }
                 }
             }
 
