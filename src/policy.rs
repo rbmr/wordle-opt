@@ -836,6 +836,13 @@ impl CandidatesPolicy for MaxFreqPolicy<'_> {
 ///
 /// Cost model: `T*(C) = min_g [ |C| + sum_{r != WIN} T*(C_{g,r}) ]` - the
 /// integer reformulation of the expected-guess objective (see `ideas/Wordle.md`).
+#[derive(Copy, Clone)]
+struct ActiveGuess {
+    orig_idx: u32,
+    g: u32,
+    base_lb: u32,
+}
+
 pub struct OptimalPolicy<'a> {
     matrix: &'a ResponseMatrix,
     dict: &'a Dictionary,
@@ -1198,11 +1205,15 @@ impl<'a> OptimalPolicy<'a> {
             } else {
                 first_guess_cost
             };
-            let filtered_active: Vec<(usize, usize, u32)> = active[1..]
+            let filtered_active: Vec<ActiveGuess> = active[1..]
                 .iter()
                 .enumerate()
                 .filter(|&(_, &(_, _, base_lb))| base_lb < filter_bound)
-                .map(|(i, &(g, _, base_lb))| (i + 1, g, base_lb))
+                .map(|(i, &(g, _, base_lb))| ActiveGuess {
+                    orig_idx: (i + 1) as u32,
+                    g: g as u32,
+                    base_lb,
+                })
                 .collect();
 
             if !filtered_active.is_empty() {
@@ -1233,12 +1244,14 @@ impl<'a> OptimalPolicy<'a> {
                             let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
 
                             for i in start_idx..end_idx {
-                                let (orig_idx, g, base_lb) =
-                                    unsafe { *filtered_active.get_unchecked(i) };
+                                let item = unsafe { *filtered_active.get_unchecked(i) };
+                                let orig_idx = item.orig_idx;
+                                let g = item.g as usize;
+                                let base_lb = item.base_lb;
 
                                 let best_packed = global_best.load(Ordering::Relaxed);
                                 let best_val = (best_packed >> 32) as u32;
-                                let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                                let best_idx = (best_packed & 0xFFFFFFFF) as u32;
                                 if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
                                     && orig_idx >= best_idx
                                 {
@@ -1425,12 +1438,16 @@ impl<'a> OptimalPolicy<'a> {
         // cost is <= the best is always evaluated exactly (beta is always
         // best + 1 >= its cost + 1 at that point), and the packed
         // (cost, index) minimum breaks ties by heuristic rank.
-        let filtered_active: Vec<(usize, usize, u32)> = active
+        let filtered_active: Vec<ActiveGuess> = active
             .iter()
             .enumerate()
             .skip(start_active)
             .filter(|&(_, &(_, _, base_lb))| base_lb <= initial_best_val)
-            .map(|(i, &(g, _, base_lb))| (i, g, base_lb))
+            .map(|(i, &(g, _, base_lb))| ActiveGuess {
+                orig_idx: i as u32,
+                g: g as u32,
+                base_lb,
+            })
             .collect();
 
         if !filtered_active.is_empty() {
@@ -1461,12 +1478,14 @@ impl<'a> OptimalPolicy<'a> {
                         let end_idx = (start_idx + CHUNK_SIZE).min(filtered_active.len());
 
                         for i in start_idx..end_idx {
-                            let (orig_idx, g, base_lb) =
-                                unsafe { *filtered_active.get_unchecked(i) };
+                            let item = unsafe { *filtered_active.get_unchecked(i) };
+                            let orig_idx = item.orig_idx;
+                            let g = item.g as usize;
+                            let base_lb = item.base_lb;
 
                             let best_packed = global_best.load(Ordering::Relaxed);
                             let best_val = (best_packed >> 32) as u32;
-                            let best_idx = (best_packed & 0xFFFFFFFF) as usize;
+                            let best_idx = (best_packed & 0xFFFFFFFF) as u32;
                             if cached_exact.is_some_and(|opt_cost| best_val <= opt_cost)
                                 && orig_idx >= best_idx
                             {
