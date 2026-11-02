@@ -2927,8 +2927,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if cost >= cutoff {
                 return cost;
             }
-            let active_guesses_slice =
-                unsafe { &*self.get_or_compute_active_guesses(set, depth, equiv_state) };
+            let mut active_guesses_ptr: Option<*const [u64]> = None;
 
             for i in 0..num_eval {
                 if small_is_exact[i] {
@@ -2949,6 +2948,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
                 let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                 let p_hash = small_p_hash[i];
+
+                let active_ptr = match active_guesses_ptr {
+                    Some(p) => p,
+                    None => {
+                        let p = self.get_or_compute_active_guesses(set, depth, equiv_state);
+                        active_guesses_ptr = Some(p);
+                        p
+                    }
+                };
+                let active_guesses_slice = unsafe { &*active_ptr };
 
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
@@ -3603,8 +3612,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                 return cost;
             }
-            let active_guesses_slice =
-                unsafe { &*self.get_or_compute_active_guesses(set, depth, equiv_state) };
+            let mut active_guesses_ptr: Option<*const [u64]> = None;
 
             for i in 0..num_eval {
                 let word_idx = i >> 6;
@@ -3651,6 +3659,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
                 let known_quick = if i >= split_idx { actual_lb } else { 0 };
+                let active_ptr = match active_guesses_ptr {
+                    Some(p) => p,
+                    None => {
+                        let p = self.get_or_compute_active_guesses(set, depth, equiv_state);
+                        active_guesses_ptr = Some(p);
+                        p
+                    }
+                };
+                let active_guesses_slice = unsafe { &*active_ptr };
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
                     p,
