@@ -254,7 +254,7 @@ impl ResponseMatrix {
 
     #[inline(always)]
     pub fn data_ptr<Elem: crate::core::ResponseElem>(&self) -> *const Elem {
-        if self.word_len <= 5 {
+        if Elem::IS_U8 {
             self.data_u8.as_ptr() as *const Elem
         } else {
             self.data.as_ptr() as *const Elem
@@ -263,7 +263,7 @@ impl ResponseMatrix {
 
     #[inline(always)]
     pub fn data_cg_ptr<Elem: crate::core::ResponseElem>(&self) -> *const Elem {
-        if self.word_len <= 5 {
+        if Elem::IS_U8 {
             self.data_c_g_u8.as_ptr() as *const Elem
         } else {
             self.data_c_g.as_ptr() as *const Elem
@@ -272,7 +272,7 @@ impl ResponseMatrix {
 
     #[inline(always)]
     pub fn slice_cg<Elem: crate::core::ResponseElem>(&self, start: usize, end: usize) -> &[Elem] {
-        if self.word_len <= 5 {
+        if Elem::IS_U8 {
             let slice = &self.data_c_g_u8[start..end];
             unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const Elem, slice.len()) }
         } else {
