@@ -1554,7 +1554,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         self.local_metrics.states_evaluated += 1;
         if known_quick_lb != 0 {
             cached_lower_bound = cached_lower_bound.max(known_quick_lb);
-        } else if c_len <= 15 {
+        } else if cached_lower_bound == 0 && c_len <= 15 {
             let (val, is_exact) = Self::quick_bucket_eval_specialized(self.matrix, self.dict, set);
             if is_exact {
                 self.cache.insert_set(hash, set, val, true);
@@ -2744,7 +2744,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 r: 0,
                 count: 0,
                 hash: 0,
-            }; 10];
+            }; 16];
 
             for i in 0..num_non_empty {
                 let entry = unsafe { *local_counts_ptr.add(i) };
@@ -2793,12 +2793,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            let mut small_p = std::mem::MaybeUninit::<[[usize; 32]; 10]>::uninit();
+            let mut small_offsets = [0u8; 16];
+            let mut current_off = 0u8;
+            for j in 0..num_eval {
+                small_offsets[j] = current_off;
+                current_off += eval_entries[j].count as u8;
+            }
+
+            let mut small_p = std::mem::MaybeUninit::<[usize; 32]>::uninit();
             let small_p_ptr = small_p.as_mut_ptr() as *mut usize;
             let mut extracted_mask = 0u16;
 
             let extract_bucket = |i: usize, target_r: u16, target_len: usize| {
-                let pi_ptr = unsafe { small_p_ptr.add(i * 32) };
+                let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
                 let mut found = 0;
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
@@ -2815,10 +2822,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             };
 
-            let mut small_p_len = [0u8; 10];
-            let mut small_p_hash = [0u64; 10];
-            let mut small_used_val = [0u32; 10];
-            let mut small_is_exact = [false; 10];
+            let mut small_p_len = [0u8; 16];
+            let mut small_p_hash = [0u64; 16];
+            let mut small_used_val = [0u32; 16];
+            let mut small_is_exact = [false; 16];
             let mut all_exact = true;
 
             for i in 0..num_eval {
@@ -2835,7 +2842,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else {
                         extract_bucket(i, entry.r, p_len);
                         extracted_mask |= 1 << i;
-                        let pi_ptr = unsafe { small_p_ptr.add(i * 32) };
+                        let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
                         let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
@@ -2894,7 +2901,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     extract_bucket(i, eval_entries[i].r, p_len);
                     extracted_mask |= 1 << i;
                 }
-                let pi_ptr = unsafe { small_p_ptr.add(i * 32) };
+                let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
                 let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                 let p_hash = small_p_hash[i];
 
