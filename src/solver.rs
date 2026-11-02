@@ -402,6 +402,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rb = unsafe { *gi_ptr.add(cb) };
                     let rc = unsafe { *gi_ptr.add(cc) };
 
+                    if best_inside_exact {
+                        if ra == rb || ra == rc || rb == rc {
+                            continue;
+                        }
+                        return (7, true);
+                    }
+
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
                     let eq_bc = rb == rc;
@@ -411,7 +418,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if coll_mask == 0 {
                         return (7, true);
                     }
-                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -454,6 +461,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
 
+                    if best_inside_exact {
+                        if ra == rb || ra == rc || ra == rd || rb == rc || rb == rd || rc == rd {
+                            continue;
+                        }
+                        return (9, true);
+                    }
+
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
                     let eq_ad = ra == rd;
@@ -471,7 +485,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if coll_mask == 0 {
                         return (9, true);
                     }
-                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
+                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -517,6 +531,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
                     let re = unsafe { *gi_ptr.add(ce) };
+
+                    if best_inside_exact {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rc == rd
+                            || rc == re
+                            || rd == re
+                        {
+                            continue;
+                        }
+                        return (11, true);
+                    }
 
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
@@ -593,6 +624,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rd = unsafe { *gi_ptr.add(cd) };
                     let re = unsafe { *gi_ptr.add(ce) };
                     let rf = unsafe { *gi_ptr.add(cf) };
+
+                    if best_inside_exact {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || ra == rf
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rb == rf
+                            || rc == rd
+                            || rc == re
+                            || rc == rf
+                            || rd == re
+                            || rd == rf
+                            || re == rf
+                        {
+                            continue;
+                        }
+                        return (13, true);
+                    }
 
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
@@ -687,6 +740,34 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let re = unsafe { *gi_ptr.add(ce) };
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
+
+                    if best_inside_exact {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || ra == rf
+                            || ra == rg
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rb == rf
+                            || rb == rg
+                            || rc == rd
+                            || rc == re
+                            || rc == rf
+                            || rc == rg
+                            || rd == re
+                            || rd == rf
+                            || rd == rg
+                            || re == rf
+                            || re == rg
+                            || rf == rg
+                        {
+                            continue;
+                        }
+                        return (15, true);
+                    }
 
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
@@ -798,6 +879,41 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
                     let rh = unsafe { *gi_ptr.add(ch) };
+
+                    if best_inside_exact {
+                        if ra == rb
+                            || ra == rc
+                            || ra == rd
+                            || ra == re
+                            || ra == rf
+                            || ra == rg
+                            || ra == rh
+                            || rb == rc
+                            || rb == rd
+                            || rb == re
+                            || rb == rf
+                            || rb == rg
+                            || rb == rh
+                            || rc == rd
+                            || rc == re
+                            || rc == rf
+                            || rc == rg
+                            || rc == rh
+                            || rd == re
+                            || rd == rf
+                            || rd == rg
+                            || rd == rh
+                            || re == rf
+                            || re == rg
+                            || re == rh
+                            || rf == rg
+                            || rf == rh
+                            || rg == rh
+                        {
+                            continue;
+                        }
+                        return (17, true);
+                    }
 
                     let eq_ab = ra == rb;
                     let eq_ac = ra == rc;
@@ -1631,9 +1747,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut seen2 = [0u64; M];
                 let mut has_size_3_plus = false;
                 let mut aborted = false;
+                let mut r_buf = std::mem::MaybeUninit::<[u16; 64]>::uninit();
+                let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
                 for i in 0..cand_idx {
                     let c = unsafe { *set_ptr.add(i) };
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    if c_len <= 64 {
+                        unsafe {
+                            *r_buf_ptr.add(i) = r as u16;
+                        }
+                    }
                     let word_idx = r >> 6;
                     let bit = 1u64 << (r & 63);
                     let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -1657,6 +1780,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     for i in (cand_idx + 1)..c_len {
                         let c = unsafe { *set_ptr.add(i) };
                         let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        if c_len <= 64 {
+                            unsafe {
+                                *r_buf_ptr.add(i) = r as u16;
+                            }
+                        }
                         let word_idx = r >> 6;
                         let bit = 1u64 << (r & 63);
                         let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -1720,30 +1848,57 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     continue;
                 }
-                for i in 0..cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += 1;
+                if c_len <= 64 {
+                    for i in 0..cand_idx {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
-                        *cnt_ptr = cnt + 1;
                     }
-                }
-                for i in (cand_idx + 1)..c_len {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += 1;
+                    for i in (cand_idx + 1)..c_len {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
-                        *cnt_ptr = cnt + 1;
+                    }
+                } else {
+                    for i in 0..cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                    }
+                    for i in (cand_idx + 1)..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
                     }
                 }
             } else {
@@ -2083,6 +2238,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
                 let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
                 let set_ptr = set.as_ptr();
+                let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
+                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 64]>::uninit();
+                let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
+                let heap_c_ptrs = if c_len > 64 {
+                    let mut v = Vec::with_capacity(c_len);
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+
                 let mut c_mask = 0u32;
                 let mut multi_c_mask = 0u32;
                 for i in 0..c_len {
@@ -2093,31 +2262,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     c_mask |= m;
                     unsafe {
                         *is_in_set_ptr.add(g >> 6) |= 1u64 << (g & 63);
-                    }
-                }
-                let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
-                let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
-                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
-                let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
-                let heap_c_ptrs = if c_len > 256 {
-                    let mut v = Vec::with_capacity(c_len);
-                    let set_ptr = set.as_ptr();
-                    for i in 0..c_len {
-                        let c = unsafe { *set_ptr.add(i) };
-                        v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-                    }
-                    Some(v)
-                } else {
-                    None
-                };
-                let c_ptrs: &[*const Elem] = if c_len <= 256 {
-                    let set_ptr = set.as_ptr();
-                    for i in 0..c_len {
-                        let c = unsafe { *set_ptr.add(i) };
-                        unsafe {
+                        if c_len <= 64 {
                             *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                         }
                     }
+                }
+                let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
+                let c_ptrs: &[*const Elem] = if c_len <= 64 {
                     unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
                 } else {
                     heap_c_ptrs.as_ref().unwrap()
@@ -2129,6 +2280,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         continue;
                     }
                     let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
+                    if b == 0 {
+                        continue;
+                    }
                     let block_base = block_idx << 6;
                     while b != 0 {
                         let tz = b.trailing_zeros();
@@ -2148,9 +2302,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let mut seen2 = [0u64; M];
                             let mut has_size_3_plus = false;
                             let mut aborted = false;
+                            let mut r_buf = std::mem::MaybeUninit::<[u16; 64]>::uninit();
+                            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
+                                if c_len <= 64 {
+                                    unsafe {
+                                        *r_buf_ptr.add(c_idx) = r as u16;
+                                    }
+                                }
                                 let word_idx = r >> 6;
                                 let bit = 1u64 << (r & 63);
                                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -2211,17 +2372,32 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 }
                                 continue;
                             }
-                            for c_idx in 0..c_len {
-                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let r = unsafe { (*c_base.add(g)).to_usize() };
-                                unsafe {
-                                    let cnt_ptr = counts_ptr.add(r);
-                                    let cnt = *cnt_ptr;
-                                    if cnt == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                        num_non_empty += 1;
+                            if c_len <= 64 {
+                                for c_idx in 0..c_len {
+                                    let r = unsafe { *r_buf_ptr.add(c_idx) as usize };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
                                     }
-                                    *cnt_ptr = cnt + 1;
+                                }
+                            } else {
+                                for c_idx in 0..c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
+                                    }
                                 }
                             }
                         } else {
