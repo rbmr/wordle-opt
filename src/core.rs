@@ -163,6 +163,7 @@ pub trait ResponseElem:
 {
     const IS_U8: bool = false;
     fn to_usize(self) -> usize;
+    fn to_u16(self) -> u16;
     fn from_usize(val: usize) -> Self;
 }
 
@@ -171,6 +172,10 @@ impl ResponseElem for u8 {
     #[inline(always)]
     fn to_usize(self) -> usize {
         self as usize
+    }
+    #[inline(always)]
+    fn to_u16(self) -> u16 {
+        self as u16
     }
     #[inline(always)]
     fn from_usize(val: usize) -> Self {
@@ -182,6 +187,10 @@ impl ResponseElem for Response {
     #[inline(always)]
     fn to_usize(self) -> usize {
         self.0 as usize
+    }
+    #[inline(always)]
+    fn to_u16(self) -> u16 {
+        self.0
     }
     #[inline(always)]
     fn from_usize(val: usize) -> Self {

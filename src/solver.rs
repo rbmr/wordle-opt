@@ -1271,7 +1271,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 continue;
                             }
                             let c = unsafe { *bucket_ptr.add(i) };
-                            let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                            let r = unsafe { (*g_ptr.add(c)).to_u16() };
                             let mut duplicate = false;
                             for &prev in &seen[..seen_len] {
                                 if prev == r {
@@ -1711,8 +1711,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut kept_mask = 0u64;
             while b != 0 {
                 let tz = b.trailing_zeros();
+                let bit = b.isolate_lowest_one();
                 b &= b - 1;
-                let bit = 1u64 << tz;
 
                 let mut proj = unsafe { *projs_ptr.add(tz as usize) };
                 if proj == 0 {
@@ -2765,7 +2765,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let set_ptr = set.as_ptr();
             let c0 = unsafe { *set_ptr };
-            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() as u16 };
+            let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
             unsafe {
                 *local_counts_ptr = (r0, 1);
                 *c_responses_ptr = r0;
@@ -2774,7 +2774,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut prev_idx = 0usize;
             for cand_idx in 1..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
-                let r = unsafe { (*g_ptr.add(c)).to_usize() as u16 };
+                let r = unsafe { (*g_ptr.add(c)).to_u16() };
                 unsafe {
                     *c_responses_ptr.add(cand_idx) = r;
                 }
