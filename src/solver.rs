@@ -2614,15 +2614,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
         if c_len <= 16 {
-            let mut local_counts = std::mem::MaybeUninit::<[(u16, u16); 16]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut (u16, u16);
+            #[derive(Clone, Copy)]
+            struct LocalCount {
+                r: u16,
+                count: u16,
+                hash: u64,
+            }
+
+            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
             let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
             let c0 = unsafe { *set_ptr };
             let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
+            let h0 = unsafe { *zobrist_ptr.add(c0) };
             unsafe {
-                *local_counts_ptr = (r0, 1);
+                *local_counts_ptr = LocalCount {
+                    r: r0,
+                    count: 1,
+                    hash: h0,
+                };
                 *c_responses_ptr = r0;
             }
             let mut num_non_empty = 1;
@@ -2630,19 +2643,22 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             for cand_idx in 1..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                let h = unsafe { *zobrist_ptr.add(c) };
                 unsafe {
                     *c_responses_ptr.add(cand_idx) = r;
                 }
                 let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
-                if prev_entry.0 == r {
-                    prev_entry.1 += 1;
+                if prev_entry.r == r {
+                    prev_entry.count += 1;
+                    prev_entry.hash ^= h;
                     continue;
                 }
                 let mut found = false;
                 for i in 0..num_non_empty {
                     let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                    if entry.0 == r {
-                        entry.1 += 1;
+                    if entry.r == r {
+                        entry.count += 1;
+                        entry.hash ^= h;
                         prev_idx = i;
                         found = true;
                         break;
@@ -2651,7 +2667,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if !found {
                     prev_idx = num_non_empty;
                     unsafe {
-                        *local_counts_ptr.add(num_non_empty) = (r, 1);
+                        *local_counts_ptr.add(num_non_empty) = LocalCount {
+                            r,
+                            count: 1,
+                            hash: h,
+                        };
                     }
                     num_non_empty += 1;
                 }
@@ -2670,15 +2690,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut max_p_len = 0;
             let mut num_eval = 0;
-            let mut eval_entries = [(0u16, 0u16); 5];
+            let mut eval_entries = [LocalCount {
+                r: 0,
+                count: 0,
+                hash: 0,
+            }; 5];
 
             for i in 0..num_non_empty {
                 let entry = unsafe { *local_counts_ptr.add(i) };
-                let r_idx = entry.0 as usize;
+                let r_idx = entry.r as usize;
                 if r_idx == WIN {
                     continue;
                 }
-                let p_len = entry.1 as usize;
+                let p_len = entry.count as usize;
                 if p_len > max_p_len {
                     max_p_len = p_len;
                 }
@@ -2701,40 +2725,40 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             if num_eval == 2 {
-                if eval_entries[0].1 < eval_entries[1].1 {
+                if eval_entries[0].count < eval_entries[1].count {
                     eval_entries.swap(0, 1);
                 }
             } else if num_eval == 3 {
-                if eval_entries[0].1 < eval_entries[1].1 {
+                if eval_entries[0].count < eval_entries[1].count {
                     eval_entries.swap(0, 1);
                 }
-                if eval_entries[1].1 < eval_entries[2].1 {
+                if eval_entries[1].count < eval_entries[2].count {
                     eval_entries.swap(1, 2);
                 }
-                if eval_entries[0].1 < eval_entries[1].1 {
+                if eval_entries[0].count < eval_entries[1].count {
                     eval_entries.swap(0, 1);
                 }
             } else if num_eval == 4 {
-                if eval_entries[0].1 < eval_entries[1].1 {
+                if eval_entries[0].count < eval_entries[1].count {
                     eval_entries.swap(0, 1);
                 }
-                if eval_entries[2].1 < eval_entries[3].1 {
+                if eval_entries[2].count < eval_entries[3].count {
                     eval_entries.swap(2, 3);
                 }
-                if eval_entries[0].1 < eval_entries[2].1 {
+                if eval_entries[0].count < eval_entries[2].count {
                     eval_entries.swap(0, 2);
                 }
-                if eval_entries[1].1 < eval_entries[3].1 {
+                if eval_entries[1].count < eval_entries[3].count {
                     eval_entries.swap(1, 3);
                 }
-                if eval_entries[1].1 < eval_entries[2].1 {
+                if eval_entries[1].count < eval_entries[2].count {
                     eval_entries.swap(1, 2);
                 }
             } else if num_eval == 5 {
                 for j in 1..5 {
                     let key = eval_entries[j];
                     let mut k = j;
-                    while k > 0 && eval_entries[k - 1].1 < key.1 {
+                    while k > 0 && eval_entries[k - 1].count < key.count {
                         eval_entries[k] = eval_entries[k - 1];
                         k -= 1;
                     }
@@ -2742,198 +2766,27 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            let mut eval_hashes = [0u64; 5];
             let mut small_p = std::mem::MaybeUninit::<[[usize; 16]; 5]>::uninit();
             let small_p_ptr = small_p.as_mut_ptr() as *mut usize;
+            let mut extracted_mask = 0u8;
 
-            if num_eval == 1 {
-                let r0 = eval_entries[0].0;
-                let target_count = eval_entries[0].1 as usize;
-                let mut found_count = 0;
-                let p0_ptr = small_p_ptr;
+            let extract_bucket = |i: usize, target_r: u16, target_len: usize| {
+                let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                let mut found = 0;
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                    if r == r0 {
+                    if r == target_r {
                         let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
                         unsafe {
-                            *p0_ptr.add(found_count) = c;
+                            *pi_ptr.add(found) = c;
                         }
-                        found_count += 1;
-                        if found_count == target_count {
+                        found += 1;
+                        if found == target_len {
                             break;
                         }
                     }
                 }
-            } else if num_eval == 2 {
-                let r0 = eval_entries[0].0;
-                let r1 = eval_entries[1].0;
-                let target_count = (eval_entries[0].1 + eval_entries[1].1) as usize;
-                let mut found_count = 0;
-                let mut p0_len = 0;
-                let mut p1_len = 0;
-                let p0_ptr = small_p_ptr;
-                let p1_ptr = unsafe { small_p_ptr.add(16) };
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                    if r == r0 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p0_ptr.add(p0_len) = c;
-                        }
-                        p0_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    } else if r == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p1_ptr.add(p1_len) = c;
-                        }
-                        p1_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    }
-                }
-            } else if num_eval == 3 {
-                let r0 = eval_entries[0].0;
-                let r1 = eval_entries[1].0;
-                let r2 = eval_entries[2].0;
-                let target_count =
-                    (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1) as usize;
-                let mut found_count = 0;
-                let mut p0_len = 0;
-                let mut p1_len = 0;
-                let mut p2_len = 0;
-                let p0_ptr = small_p_ptr;
-                let p1_ptr = unsafe { small_p_ptr.add(16) };
-                let p2_ptr = unsafe { small_p_ptr.add(32) };
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                    if r == r0 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p0_ptr.add(p0_len) = c;
-                        }
-                        p0_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    } else if r == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p1_ptr.add(p1_len) = c;
-                        }
-                        p1_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    } else if r == r2 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p2_ptr.add(p2_len) = c;
-                        }
-                        p2_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    }
-                }
-            } else if num_eval == 4 {
-                let r0 = eval_entries[0].0;
-                let r1 = eval_entries[1].0;
-                let r2 = eval_entries[2].0;
-                let r3 = eval_entries[3].0;
-                let target_count =
-                    (eval_entries[0].1 + eval_entries[1].1 + eval_entries[2].1 + eval_entries[3].1)
-                        as usize;
-                let mut found_count = 0;
-                let mut p0_len = 0;
-                let mut p1_len = 0;
-                let mut p2_len = 0;
-                let mut p3_len = 0;
-                let p0_ptr = small_p_ptr;
-                let p1_ptr = unsafe { small_p_ptr.add(16) };
-                let p2_ptr = unsafe { small_p_ptr.add(32) };
-                let p3_ptr = unsafe { small_p_ptr.add(48) };
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                    if r == r0 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[0] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p0_ptr.add(p0_len) = c;
-                        }
-                        p0_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    } else if r == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[1] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p1_ptr.add(p1_len) = c;
-                        }
-                        p1_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    } else if r == r2 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[2] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p2_ptr.add(p2_len) = c;
-                        }
-                        p2_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    } else if r == r3 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        eval_hashes[3] ^= unsafe { *zobrist_ptr.add(c) };
-                        unsafe {
-                            *p3_ptr.add(p3_len) = c;
-                        }
-                        p3_len += 1;
-                        found_count += 1;
-                        if found_count == target_count {
-                            break;
-                        }
-                    }
-                }
-            } else {
-                let mut p_lens = [0usize; 5];
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *c_responses_ptr.add(cand_idx) };
-                    for j in 0..num_eval {
-                        if eval_entries[j].0 == r {
-                            let c = unsafe { *set_ptr.add(cand_idx) };
-                            eval_hashes[j] ^= unsafe { *zobrist_ptr.add(c) };
-                            let pj_ptr = unsafe { small_p_ptr.add(j * 16) };
-                            unsafe {
-                                *pj_ptr.add(p_lens[j]) = c;
-                            }
-                            p_lens[j] += 1;
-                            break;
-                        }
-                    }
-                }
-            }
+            };
 
             let mut small_p_len = [0u8; 5];
             let mut small_p_hash = [0u64; 5];
@@ -2943,8 +2796,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             for i in 0..num_eval {
                 let entry = eval_entries[i];
-                let p_len = entry.1 as usize;
-                let p_hash = eval_hashes[i];
+                let p_len = entry.count as usize;
+                let p_hash = entry.hash;
                 small_p_len[i] = p_len as u8;
                 small_p_hash[i] = p_hash;
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
@@ -2953,6 +2806,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         self.local_metrics.cache_hits += 1;
                         (cached_val.max(initial_lb), is_exact)
                     } else {
+                        extract_bucket(i, entry.r, p_len);
+                        extracted_mask |= 1 << i;
                         let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
                         let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                         let (quick_val, is_exact) =
@@ -3008,6 +2863,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let p_len = small_p_len[i] as usize;
+                if (extracted_mask & (1 << i)) == 0 {
+                    extract_bucket(i, eval_entries[i].r, p_len);
+                    extracted_mask |= 1 << i;
+                }
                 let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
                 let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                 let p_hash = small_p_hash[i];
