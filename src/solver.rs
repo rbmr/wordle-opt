@@ -2153,111 +2153,116 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
         }
         if best_val > local_lb && !phase1_tuples.is_empty() {
-            if phase1_tuples.len() == 2 {
-                let t0 = phase1_tuples[0];
-                let t1 = phase1_tuples[1];
-                if t0 > t1 {
-                    phase1_tuples[0] = t1;
-                    phase1_tuples[1] = t0;
-                }
-            } else if phase1_tuples.len() == 3 {
-                let mut t0 = phase1_tuples[0];
-                let mut t1 = phase1_tuples[1];
-                let mut t2 = phase1_tuples[2];
-                if t0 > t1 {
-                    std::mem::swap(&mut t0, &mut t1);
-                }
-                if t1 > t2 {
-                    std::mem::swap(&mut t1, &mut t2);
-                }
-                if t0 > t1 {
-                    std::mem::swap(&mut t0, &mut t1);
-                }
-                phase1_tuples[0] = t0;
-                phase1_tuples[1] = t1;
-                phase1_tuples[2] = t2;
-            } else if phase1_tuples.len() == 4 {
-                let mut t0 = phase1_tuples[0];
-                let mut t1 = phase1_tuples[1];
-                let mut t2 = phase1_tuples[2];
-                let mut t3 = phase1_tuples[3];
-                if t0 > t1 {
-                    std::mem::swap(&mut t0, &mut t1);
-                }
-                if t2 > t3 {
-                    std::mem::swap(&mut t2, &mut t3);
-                }
-                if t0 > t2 {
-                    std::mem::swap(&mut t0, &mut t2);
-                }
-                if t1 > t3 {
-                    std::mem::swap(&mut t1, &mut t3);
-                }
-                if t1 > t2 {
-                    std::mem::swap(&mut t1, &mut t2);
-                }
-                phase1_tuples[0] = t0;
-                phase1_tuples[1] = t1;
-                phase1_tuples[2] = t2;
-                phase1_tuples[3] = t3;
-            } else if phase1_tuples.len() > 4 && phase1_tuples.len() <= 32 {
-                let p1_ptr = phase1_tuples.as_mut_ptr();
-                let p1_len = phase1_tuples.len();
-                for j in 1..p1_len {
-                    let key = unsafe { *p1_ptr.add(j) };
-                    let mut k = j;
-                    while k > 0 {
-                        let prev = unsafe { *p1_ptr.add(k - 1) };
-                        if prev > key {
-                            unsafe {
-                                *p1_ptr.add(k) = prev;
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if self.current_cost_so_far + local_lb >= current_global_beta {
+                cut_by_global = true;
+            } else {
+                if phase1_tuples.len() == 2 {
+                    let t0 = phase1_tuples[0];
+                    let t1 = phase1_tuples[1];
+                    if t0 > t1 {
+                        phase1_tuples[0] = t1;
+                        phase1_tuples[1] = t0;
+                    }
+                } else if phase1_tuples.len() == 3 {
+                    let mut t0 = phase1_tuples[0];
+                    let mut t1 = phase1_tuples[1];
+                    let mut t2 = phase1_tuples[2];
+                    if t0 > t1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                    }
+                    if t1 > t2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                    }
+                    if t0 > t1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                    }
+                    phase1_tuples[0] = t0;
+                    phase1_tuples[1] = t1;
+                    phase1_tuples[2] = t2;
+                } else if phase1_tuples.len() == 4 {
+                    let mut t0 = phase1_tuples[0];
+                    let mut t1 = phase1_tuples[1];
+                    let mut t2 = phase1_tuples[2];
+                    let mut t3 = phase1_tuples[3];
+                    if t0 > t1 {
+                        std::mem::swap(&mut t0, &mut t1);
+                    }
+                    if t2 > t3 {
+                        std::mem::swap(&mut t2, &mut t3);
+                    }
+                    if t0 > t2 {
+                        std::mem::swap(&mut t0, &mut t2);
+                    }
+                    if t1 > t3 {
+                        std::mem::swap(&mut t1, &mut t3);
+                    }
+                    if t1 > t2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                    }
+                    phase1_tuples[0] = t0;
+                    phase1_tuples[1] = t1;
+                    phase1_tuples[2] = t2;
+                    phase1_tuples[3] = t3;
+                } else if phase1_tuples.len() > 4 && phase1_tuples.len() <= 32 {
+                    let p1_ptr = phase1_tuples.as_mut_ptr();
+                    let p1_len = phase1_tuples.len();
+                    for j in 1..p1_len {
+                        let key = unsafe { *p1_ptr.add(j) };
+                        let mut k = j;
+                        while k > 0 {
+                            let prev = unsafe { *p1_ptr.add(k - 1) };
+                            if prev > key {
+                                unsafe {
+                                    *p1_ptr.add(k) = prev;
+                                }
+                                k -= 1;
+                            } else {
+                                break;
                             }
-                            k -= 1;
-                        } else {
-                            break;
+                        }
+                        unsafe {
+                            *p1_ptr.add(k) = key;
                         }
                     }
-                    unsafe {
-                        *p1_ptr.add(k) = key;
-                    }
+                } else if phase1_tuples.len() > 32 {
+                    phase1_tuples.sort_unstable();
                 }
-            } else if phase1_tuples.len() > 32 {
-                phase1_tuples.sort_unstable();
-            }
 
-            for (idx, &tuple) in phase1_tuples.iter().enumerate() {
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + local_lb >= current_global_beta {
-                    cut_by_global = true;
-                    break;
-                }
-                if self.current_cost_so_far + tuple.lb >= current_global_beta {
-                    cut_by_global = true;
-                    min_val_found = min_val_found.min(tuple.lb);
-                    self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
-                    break;
-                }
-                if tuple.lb >= best_val {
-                    min_val_found = min_val_found.min(tuple.lb);
-                    self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
-                    break;
-                }
-                let val = self.min_guess_val_inner(
-                    set,
-                    &mut equiv_state,
-                    tuple.g as usize,
-                    best_val,
-                    depth,
-                    parent_max_k,
-                );
-                min_val_found = min_val_found.min(val);
-                if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                    cut_by_global = true;
-                }
-                if val < best_val {
-                    best_val = val;
-                    if best_val <= local_lb {
+                for (idx, &tuple) in phase1_tuples.iter().enumerate() {
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    if self.current_cost_so_far + local_lb >= current_global_beta {
+                        cut_by_global = true;
                         break;
+                    }
+                    if self.current_cost_so_far + tuple.lb >= current_global_beta {
+                        cut_by_global = true;
+                        min_val_found = min_val_found.min(tuple.lb);
+                        self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                        break;
+                    }
+                    if tuple.lb >= best_val {
+                        min_val_found = min_val_found.min(tuple.lb);
+                        self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                        break;
+                    }
+                    let val = self.min_guess_val_inner(
+                        set,
+                        &mut equiv_state,
+                        tuple.g as usize,
+                        best_val,
+                        depth,
+                        parent_max_k,
+                    );
+                    min_val_found = min_val_found.min(val);
+                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                        cut_by_global = true;
+                    }
+                    if val < best_val {
+                        best_val = val;
+                        if best_val <= local_lb {
+                            break;
+                        }
                     }
                 }
             }
@@ -2592,115 +2597,118 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if local_lb < best_val && self.current_cost_so_far + local_lb >= current_global_beta {
-                cut_by_global = true;
-            }
-            if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
-                if phase2_tuples.len() == 2 {
-                    let t0 = phase2_tuples[0];
-                    let t1 = phase2_tuples[1];
-                    if t0 > t1 {
-                        phase2_tuples[0] = t1;
-                        phase2_tuples[1] = t0;
-                    }
-                } else if phase2_tuples.len() == 3 {
-                    let mut t0 = phase2_tuples[0];
-                    let mut t1 = phase2_tuples[1];
-                    let mut t2 = phase2_tuples[2];
-                    if t0 > t1 {
-                        std::mem::swap(&mut t0, &mut t1);
-                    }
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t0 > t1 {
-                        std::mem::swap(&mut t0, &mut t1);
-                    }
-                    phase2_tuples[0] = t0;
-                    phase2_tuples[1] = t1;
-                    phase2_tuples[2] = t2;
-                } else if phase2_tuples.len() == 4 {
-                    let mut t0 = phase2_tuples[0];
-                    let mut t1 = phase2_tuples[1];
-                    let mut t2 = phase2_tuples[2];
-                    let mut t3 = phase2_tuples[3];
-                    if t0 > t1 {
-                        std::mem::swap(&mut t0, &mut t1);
-                    }
-                    if t2 > t3 {
-                        std::mem::swap(&mut t2, &mut t3);
-                    }
-                    if t0 > t2 {
-                        std::mem::swap(&mut t0, &mut t2);
-                    }
-                    if t1 > t3 {
-                        std::mem::swap(&mut t1, &mut t3);
-                    }
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    phase2_tuples[0] = t0;
-                    phase2_tuples[1] = t1;
-                    phase2_tuples[2] = t2;
-                    phase2_tuples[3] = t3;
-                } else if phase2_tuples.len() > 4 && phase2_tuples.len() <= 32 {
-                    let p2_ptr = phase2_tuples.as_mut_ptr();
-                    let p2_len = phase2_tuples.len();
-                    for j in 1..p2_len {
-                        let key = unsafe { *p2_ptr.add(j) };
-                        let mut k = j;
-                        while k > 0 {
-                            let prev = unsafe { *p2_ptr.add(k - 1) };
-                            if prev > key {
-                                unsafe {
-                                    *p2_ptr.add(k) = prev;
+            if local_lb < best_val {
+                if self.current_cost_so_far + local_lb >= current_global_beta {
+                    cut_by_global = true;
+                } else if !phase2_tuples.is_empty() {
+                    if phase2_tuples.len() == 2 {
+                        let t0 = phase2_tuples[0];
+                        let t1 = phase2_tuples[1];
+                        if t0 > t1 {
+                            phase2_tuples[0] = t1;
+                            phase2_tuples[1] = t0;
+                        }
+                    } else if phase2_tuples.len() == 3 {
+                        let mut t0 = phase2_tuples[0];
+                        let mut t1 = phase2_tuples[1];
+                        let mut t2 = phase2_tuples[2];
+                        if t0 > t1 {
+                            std::mem::swap(&mut t0, &mut t1);
+                        }
+                        if t1 > t2 {
+                            std::mem::swap(&mut t1, &mut t2);
+                        }
+                        if t0 > t1 {
+                            std::mem::swap(&mut t0, &mut t1);
+                        }
+                        phase2_tuples[0] = t0;
+                        phase2_tuples[1] = t1;
+                        phase2_tuples[2] = t2;
+                    } else if phase2_tuples.len() == 4 {
+                        let mut t0 = phase2_tuples[0];
+                        let mut t1 = phase2_tuples[1];
+                        let mut t2 = phase2_tuples[2];
+                        let mut t3 = phase2_tuples[3];
+                        if t0 > t1 {
+                            std::mem::swap(&mut t0, &mut t1);
+                        }
+                        if t2 > t3 {
+                            std::mem::swap(&mut t2, &mut t3);
+                        }
+                        if t0 > t2 {
+                            std::mem::swap(&mut t0, &mut t2);
+                        }
+                        if t1 > t3 {
+                            std::mem::swap(&mut t1, &mut t3);
+                        }
+                        if t1 > t2 {
+                            std::mem::swap(&mut t1, &mut t2);
+                        }
+                        phase2_tuples[0] = t0;
+                        phase2_tuples[1] = t1;
+                        phase2_tuples[2] = t2;
+                        phase2_tuples[3] = t3;
+                    } else if phase2_tuples.len() > 4 && phase2_tuples.len() <= 32 {
+                        let p2_ptr = phase2_tuples.as_mut_ptr();
+                        let p2_len = phase2_tuples.len();
+                        for j in 1..p2_len {
+                            let key = unsafe { *p2_ptr.add(j) };
+                            let mut k = j;
+                            while k > 0 {
+                                let prev = unsafe { *p2_ptr.add(k - 1) };
+                                if prev > key {
+                                    unsafe {
+                                        *p2_ptr.add(k) = prev;
+                                    }
+                                    k -= 1;
+                                } else {
+                                    break;
                                 }
-                                k -= 1;
-                            } else {
-                                break;
+                            }
+                            unsafe {
+                                *p2_ptr.add(k) = key;
                             }
                         }
-                        unsafe {
-                            *p2_ptr.add(k) = key;
-                        }
+                    } else if phase2_tuples.len() > 32 {
+                        phase2_tuples.sort_unstable();
                     }
-                } else if phase2_tuples.len() > 32 {
-                    phase2_tuples.sort_unstable();
-                }
 
-                for (idx, &tuple) in phase2_tuples.iter().enumerate() {
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    if self.current_cost_so_far + local_lb >= current_global_beta {
-                        cut_by_global = true;
-                        break;
-                    }
-                    if self.current_cost_so_far + tuple.lb >= current_global_beta {
-                        cut_by_global = true;
-                        min_val_found = min_val_found.min(tuple.lb);
-                        self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
-                        break;
-                    }
-                    if tuple.lb >= best_val {
-                        min_val_found = min_val_found.min(tuple.lb);
-                        self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
-                        break;
-                    }
-                    let val = self.min_guess_val_inner(
-                        set,
-                        &mut equiv_state,
-                        tuple.g as usize,
-                        best_val,
-                        depth,
-                        local_max_k,
-                    );
-                    min_val_found = min_val_found.min(val);
-                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                        cut_by_global = true;
-                    }
-                    if val < best_val {
-                        best_val = val;
-                        if best_val <= local_lb {
+                    for (idx, &tuple) in phase2_tuples.iter().enumerate() {
+                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                        if self.current_cost_so_far + local_lb >= current_global_beta {
+                            cut_by_global = true;
                             break;
+                        }
+                        if self.current_cost_so_far + tuple.lb >= current_global_beta {
+                            cut_by_global = true;
+                            min_val_found = min_val_found.min(tuple.lb);
+                            self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
+                            break;
+                        }
+                        if tuple.lb >= best_val {
+                            min_val_found = min_val_found.min(tuple.lb);
+                            self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
+                            break;
+                        }
+                        let val = self.min_guess_val_inner(
+                            set,
+                            &mut equiv_state,
+                            tuple.g as usize,
+                            best_val,
+                            depth,
+                            local_max_k,
+                        );
+                        min_val_found = min_val_found.min(val);
+                        if self.current_cost_so_far + val
+                            >= self.global_beta.load(Ordering::Relaxed)
+                        {
+                            cut_by_global = true;
+                        }
+                        if val < best_val {
+                            best_val = val;
+                            if best_val <= local_lb {
+                                break;
+                            }
                         }
                     }
                 }
