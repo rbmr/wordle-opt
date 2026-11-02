@@ -2106,9 +2106,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 hash: u64,
             }
 
-            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 32]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
 
             let mut seen = [0u64; M];
@@ -2116,63 +2113,25 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut has_size_3_plus = false;
             let mut dup = 0usize;
 
-            let c0 = unsafe { *set_ptr };
-            let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
-            let h0 = unsafe { *zobrist_ptr.add(c0) };
-            unsafe {
-                *local_counts_ptr = LocalCount {
-                    r: r0,
-                    count: 1,
-                    hash: h0,
-                };
-            }
-            let word_idx0 = (r0 as usize) >> 6;
-            let bit0 = 1u64 << (r0 & 63);
-            unsafe {
-                *seen.get_unchecked_mut(word_idx0) |= bit0;
-            }
-
-            let mut num_non_empty = 1;
-            let mut prev_idx = 0usize;
-            for cand_idx in 1..c_len {
+            for cand_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
-                let r = unsafe { (*g_ptr.add(c)).to_u16() };
-                let h = unsafe { *zobrist_ptr.add(c) };
-                let word_idx = (r as usize) >> 6;
+                let r = unsafe { (*g_ptr.add(c)).to_u16() as usize };
+                let word_idx = r >> 6;
                 let bit = 1u64 << (r & 63);
                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
                 if (*word & bit) == 0 {
                     *word |= bit;
-                    prev_idx = num_non_empty;
-                    unsafe {
-                        *local_counts_ptr.add(num_non_empty) = LocalCount {
-                            r,
-                            count: 1,
-                            hash: h,
-                        };
-                    }
-                    num_non_empty += 1;
                 } else {
                     dup += 1;
-                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                    if (*word2 & bit) != 0 {
-                        has_size_3_plus = true;
-                    } else {
-                        *word2 |= bit;
+                    if dup + 1 >= c_len {
+                        return beta;
                     }
-                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
-                    if prev_entry.r == r {
-                        prev_entry.count += 1;
-                        prev_entry.hash ^= h;
-                    } else {
-                        for i in 0..num_non_empty {
-                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                            if entry.r == r {
-                                entry.count += 1;
-                                entry.hash ^= h;
-                                prev_idx = i;
-                                break;
-                            }
+                    if !has_size_3_plus {
+                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                        if (*word2 & bit) != 0 {
+                            has_size_3_plus = true;
+                        } else {
+                            *word2 |= bit;
                         }
                     }
                 }
@@ -2201,6 +2160,52 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if cost >= cutoff {
                 self.local_metrics.pruned_by_bounds += 1;
                 return cost;
+            }
+
+            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 32]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+
+            let mut seen_pass2 = [0u64; M];
+            let mut num_non_empty = 0usize;
+            let mut prev_idx = 0usize;
+
+            for cand_idx in 0..c_len {
+                let c = unsafe { *set_ptr.add(cand_idx) };
+                let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                let word_idx = (r as usize) >> 6;
+                let bit = 1u64 << (r & 63);
+                let word = unsafe { seen_pass2.get_unchecked_mut(word_idx) };
+                if (*word & bit) == 0 {
+                    *word |= bit;
+                    prev_idx = num_non_empty;
+                    let h = unsafe { *zobrist_ptr.add(c) };
+                    unsafe {
+                        *local_counts_ptr.add(num_non_empty) = LocalCount {
+                            r,
+                            count: 1,
+                            hash: h,
+                        };
+                    }
+                    num_non_empty += 1;
+                } else {
+                    let h = unsafe { *zobrist_ptr.add(c) };
+                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
+                    if prev_entry.r == r {
+                        prev_entry.count += 1;
+                        prev_entry.hash ^= h;
+                    } else {
+                        for i in 0..num_non_empty {
+                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                            if entry.r == r {
+                                entry.count += 1;
+                                entry.hash ^= h;
+                                prev_idx = i;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
 
             let mut num_eval = 0;
