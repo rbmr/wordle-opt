@@ -407,31 +407,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rb = unsafe { *gi_ptr.add(cb) };
                     let rc = unsafe { *gi_ptr.add(cc) };
 
-                    let limit = if best_inside_exact { 1 } else { 2 };
-                    let mut coll = 0;
-                    if ra == rb {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_bc = rb == rc;
 
-                    if coll == 0 {
+                    let coll_mask = (eq_ab as u8) | ((eq_ac as u8) << 1) | ((eq_bc as u8) << 2);
+
+                    if coll_mask == 0 {
                         return (7, true);
                     }
-                    best_inside_exact = true;
+                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside_exact = true;
+                    }
                 }
 
                 (8, best_inside_exact)
@@ -472,49 +459,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
 
-                    let limit = if best_inside_exact { 1 } else { 2 };
-                    let mut coll = 0;
-                    if ra == rb {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if ra == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rc {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rb == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
-                    if rc == rd {
-                        coll += 1;
-                        if coll >= limit {
-                            continue;
-                        }
-                    }
+                    let eq_ab = ra == rb;
+                    let eq_ac = ra == rc;
+                    let eq_ad = ra == rd;
+                    let eq_bc = rb == rc;
+                    let eq_bd = rb == rd;
+                    let eq_cd = rc == rd;
 
-                    if coll == 0 {
+                    let coll_mask = (eq_ab as u8)
+                        | ((eq_ac as u8) << 1)
+                        | ((eq_ad as u8) << 2)
+                        | ((eq_bc as u8) << 3)
+                        | ((eq_bd as u8) << 4)
+                        | ((eq_cd as u8) << 5);
+
+                    if coll_mask == 0 {
                         return (9, true);
                     }
-                    best_inside_exact = true;
+                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
+                        best_inside_exact = true;
+                    }
                 }
 
                 (10, best_inside_exact)
