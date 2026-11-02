@@ -342,6 +342,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         if n > 15 {
             return (2 * n as u32, false);
         }
+
+        macro_rules! check_pair {
+            ($rx:expr, $ry:expr, $coll:ident, $limit:ident, $label:lifetime) => {
+                if $rx == $ry {
+                    $coll += 1;
+                    if $coll == $limit {
+                        break $label;
+                    }
+                }
+            };
+        }
+
         match n {
             0 => (0, true),
             1 => (1, true),
@@ -402,23 +414,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rb = unsafe { *gi_ptr.add(cb) };
                     let rc = unsafe { *gi_ptr.add(cc) };
 
-                    if best_inside_exact {
-                        if ra == rb || ra == rc || rb == rc {
-                            continue;
+                    'eval_pairs: {
+                        let mut coll = 0u8;
+                        let limit = if best_inside_exact { 1 } else { 2 };
+                        check_pair!(ra, rb, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rc, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rc, coll, limit, 'eval_pairs);
+
+                        if coll == 0 {
+                            return (7, true);
                         }
-                        return (7, true);
-                    }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_bc = rb == rc;
-
-                    let coll_mask = (eq_ab as u8) | ((eq_ac as u8) << 1) | ((eq_bc as u8) << 2);
-
-                    if coll_mask == 0 {
-                        return (7, true);
-                    }
-                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -461,31 +466,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rc = unsafe { *gi_ptr.add(cc) };
                     let rd = unsafe { *gi_ptr.add(cd) };
 
-                    if best_inside_exact {
-                        if ra == rb || ra == rc || ra == rd || rb == rc || rb == rd || rc == rd {
-                            continue;
+                    'eval_pairs: {
+                        let mut coll = 0u8;
+                        let limit = if best_inside_exact { 1 } else { 2 };
+                        check_pair!(ra, rb, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rc, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rc, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rd, coll, limit, 'eval_pairs);
+
+                        if coll == 0 {
+                            return (9, true);
                         }
-                        return (9, true);
-                    }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_cd = rc == rd;
-
-                    let coll_mask = (eq_ab as u8)
-                        | ((eq_ac as u8) << 1)
-                        | ((eq_ad as u8) << 2)
-                        | ((eq_bc as u8) << 3)
-                        | ((eq_bd as u8) << 4)
-                        | ((eq_cd as u8) << 5);
-
-                    if coll_mask == 0 {
-                        return (9, true);
-                    }
-                    if (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -532,49 +525,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rd = unsafe { *gi_ptr.add(cd) };
                     let re = unsafe { *gi_ptr.add(ce) };
 
-                    if best_inside_exact {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rc == rd
-                            || rc == re
-                            || rd == re
-                        {
-                            continue;
+                    'eval_pairs: {
+                        let mut coll = 0u8;
+                        let limit = if best_inside_exact { 1 } else { 2 };
+                        check_pair!(ra, rb, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rc, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rd, coll, limit, 'eval_pairs);
+                        check_pair!(ra, re, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rc, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rb, re, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rc, re, coll, limit, 'eval_pairs);
+                        check_pair!(rd, re, coll, limit, 'eval_pairs);
+
+                        if coll == 0 {
+                            return (11, true);
                         }
-                        return (11, true);
-                    }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_de = rd == re;
-
-                    let coll_mask = (eq_ab as u16)
-                        | ((eq_ac as u16) << 1)
-                        | ((eq_ad as u16) << 2)
-                        | ((eq_ae as u16) << 3)
-                        | ((eq_bc as u16) << 4)
-                        | ((eq_bd as u16) << 5)
-                        | ((eq_be as u16) << 6)
-                        | ((eq_cd as u16) << 7)
-                        | ((eq_ce as u16) << 8)
-                        | ((eq_de as u16) << 9);
-
-                    if coll_mask == 0 {
-                        return (11, true);
-                    }
-                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -625,68 +592,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let re = unsafe { *gi_ptr.add(ce) };
                     let rf = unsafe { *gi_ptr.add(cf) };
 
-                    if best_inside_exact {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || ra == rf
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rb == rf
-                            || rc == rd
-                            || rc == re
-                            || rc == rf
-                            || rd == re
-                            || rd == rf
-                            || re == rf
-                        {
-                            continue;
+                    'eval_pairs: {
+                        let mut coll = 0u8;
+                        let limit = if best_inside_exact { 1 } else { 2 };
+                        check_pair!(ra, rb, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rc, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rd, coll, limit, 'eval_pairs);
+                        check_pair!(ra, re, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rc, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rb, re, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rc, re, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rd, re, coll, limit, 'eval_pairs);
+                        check_pair!(rd, rf, coll, limit, 'eval_pairs);
+                        check_pair!(re, rf, coll, limit, 'eval_pairs);
+
+                        if coll == 0 {
+                            return (13, true);
                         }
-                        return (13, true);
-                    }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_af = ra == rf;
-
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_bf = rb == rf;
-
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_cf = rc == rf;
-
-                    let eq_de = rd == re;
-                    let eq_df = rd == rf;
-
-                    let eq_ef = re == rf;
-
-                    let coll_mask = (eq_ab as u16)
-                        | ((eq_ac as u16) << 1)
-                        | ((eq_ad as u16) << 2)
-                        | ((eq_ae as u16) << 3)
-                        | ((eq_af as u16) << 4)
-                        | ((eq_bc as u16) << 5)
-                        | ((eq_bd as u16) << 6)
-                        | ((eq_be as u16) << 7)
-                        | ((eq_bf as u16) << 8)
-                        | ((eq_cd as u16) << 9)
-                        | ((eq_ce as u16) << 10)
-                        | ((eq_cf as u16) << 11)
-                        | ((eq_de as u16) << 12)
-                        | ((eq_df as u16) << 13)
-                        | ((eq_ef as u16) << 14);
-
-                    if coll_mask == 0 {
-                        return (13, true);
-                    }
-                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -741,87 +668,34 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rf = unsafe { *gi_ptr.add(cf) };
                     let rg = unsafe { *gi_ptr.add(cg) };
 
-                    if best_inside_exact {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || ra == rf
-                            || ra == rg
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rb == rf
-                            || rb == rg
-                            || rc == rd
-                            || rc == re
-                            || rc == rf
-                            || rc == rg
-                            || rd == re
-                            || rd == rf
-                            || rd == rg
-                            || re == rf
-                            || re == rg
-                            || rf == rg
-                        {
-                            continue;
+                    'eval_pairs: {
+                        let mut coll = 0u8;
+                        let limit = if best_inside_exact { 1 } else { 2 };
+                        check_pair!(ra, rb, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rc, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rd, coll, limit, 'eval_pairs);
+                        check_pair!(ra, re, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rf, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rc, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rb, re, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rc, re, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rd, re, coll, limit, 'eval_pairs);
+                        check_pair!(rd, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rd, rg, coll, limit, 'eval_pairs);
+                        check_pair!(re, rf, coll, limit, 'eval_pairs);
+                        check_pair!(re, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rf, rg, coll, limit, 'eval_pairs);
+
+                        if coll == 0 {
+                            return (15, true);
                         }
-                        return (15, true);
-                    }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_af = ra == rf;
-                    let eq_ag = ra == rg;
-
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_bf = rb == rf;
-                    let eq_bg = rb == rg;
-
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_cf = rc == rf;
-                    let eq_cg = rc == rg;
-
-                    let eq_de = rd == re;
-                    let eq_df = rd == rf;
-                    let eq_dg = rd == rg;
-
-                    let eq_ef = re == rf;
-                    let eq_eg = re == rg;
-
-                    let eq_fg = rf == rg;
-
-                    let coll_mask = (eq_ab as u32)
-                        | ((eq_ac as u32) << 1)
-                        | ((eq_ad as u32) << 2)
-                        | ((eq_ae as u32) << 3)
-                        | ((eq_af as u32) << 4)
-                        | ((eq_ag as u32) << 5)
-                        | ((eq_bc as u32) << 6)
-                        | ((eq_bd as u32) << 7)
-                        | ((eq_be as u32) << 8)
-                        | ((eq_bf as u32) << 9)
-                        | ((eq_bg as u32) << 10)
-                        | ((eq_cd as u32) << 11)
-                        | ((eq_ce as u32) << 12)
-                        | ((eq_cf as u32) << 13)
-                        | ((eq_cg as u32) << 14)
-                        | ((eq_de as u32) << 15)
-                        | ((eq_df as u32) << 16)
-                        | ((eq_dg as u32) << 17)
-                        | ((eq_ef as u32) << 18)
-                        | ((eq_eg as u32) << 19)
-                        | ((eq_fg as u32) << 20);
-
-                    if coll_mask == 0 {
-                        return (15, true);
-                    }
-                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -880,109 +754,41 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let rg = unsafe { *gi_ptr.add(cg) };
                     let rh = unsafe { *gi_ptr.add(ch) };
 
-                    if best_inside_exact {
-                        if ra == rb
-                            || ra == rc
-                            || ra == rd
-                            || ra == re
-                            || ra == rf
-                            || ra == rg
-                            || ra == rh
-                            || rb == rc
-                            || rb == rd
-                            || rb == re
-                            || rb == rf
-                            || rb == rg
-                            || rb == rh
-                            || rc == rd
-                            || rc == re
-                            || rc == rf
-                            || rc == rg
-                            || rc == rh
-                            || rd == re
-                            || rd == rf
-                            || rd == rg
-                            || rd == rh
-                            || re == rf
-                            || re == rg
-                            || re == rh
-                            || rf == rg
-                            || rf == rh
-                            || rg == rh
-                        {
-                            continue;
+                    'eval_pairs: {
+                        let mut coll = 0u8;
+                        let limit = if best_inside_exact { 1 } else { 2 };
+                        check_pair!(ra, rb, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rc, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rd, coll, limit, 'eval_pairs);
+                        check_pair!(ra, re, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rf, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rg, coll, limit, 'eval_pairs);
+                        check_pair!(ra, rh, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rc, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rb, re, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rb, rh, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rd, coll, limit, 'eval_pairs);
+                        check_pair!(rc, re, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rc, rh, coll, limit, 'eval_pairs);
+                        check_pair!(rd, re, coll, limit, 'eval_pairs);
+                        check_pair!(rd, rf, coll, limit, 'eval_pairs);
+                        check_pair!(rd, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rd, rh, coll, limit, 'eval_pairs);
+                        check_pair!(re, rf, coll, limit, 'eval_pairs);
+                        check_pair!(re, rg, coll, limit, 'eval_pairs);
+                        check_pair!(re, rh, coll, limit, 'eval_pairs);
+                        check_pair!(rf, rg, coll, limit, 'eval_pairs);
+                        check_pair!(rf, rh, coll, limit, 'eval_pairs);
+                        check_pair!(rg, rh, coll, limit, 'eval_pairs);
+
+                        if coll == 0 {
+                            return (17, true);
                         }
-                        return (17, true);
-                    }
-
-                    let eq_ab = ra == rb;
-                    let eq_ac = ra == rc;
-                    let eq_ad = ra == rd;
-                    let eq_ae = ra == re;
-                    let eq_af = ra == rf;
-                    let eq_ag = ra == rg;
-                    let eq_ah = ra == rh;
-
-                    let eq_bc = rb == rc;
-                    let eq_bd = rb == rd;
-                    let eq_be = rb == re;
-                    let eq_bf = rb == rf;
-                    let eq_bg = rb == rg;
-                    let eq_bh = rb == rh;
-
-                    let eq_cd = rc == rd;
-                    let eq_ce = rc == re;
-                    let eq_cf = rc == rf;
-                    let eq_cg = rc == rg;
-                    let eq_ch = rc == rh;
-
-                    let eq_de = rd == re;
-                    let eq_df = rd == rf;
-                    let eq_dg = rd == rg;
-                    let eq_dh = rd == rh;
-
-                    let eq_ef = re == rf;
-                    let eq_eg = re == rg;
-                    let eq_eh = re == rh;
-
-                    let eq_fg = rf == rg;
-                    let eq_fh = rf == rh;
-
-                    let eq_gh = rg == rh;
-
-                    let coll_mask = (eq_ab as u32)
-                        | ((eq_ac as u32) << 1)
-                        | ((eq_ad as u32) << 2)
-                        | ((eq_ae as u32) << 3)
-                        | ((eq_af as u32) << 4)
-                        | ((eq_ag as u32) << 5)
-                        | ((eq_ah as u32) << 6)
-                        | ((eq_bc as u32) << 7)
-                        | ((eq_bd as u32) << 8)
-                        | ((eq_be as u32) << 9)
-                        | ((eq_bf as u32) << 10)
-                        | ((eq_bg as u32) << 11)
-                        | ((eq_bh as u32) << 12)
-                        | ((eq_cd as u32) << 13)
-                        | ((eq_ce as u32) << 14)
-                        | ((eq_cf as u32) << 15)
-                        | ((eq_cg as u32) << 16)
-                        | ((eq_ch as u32) << 17)
-                        | ((eq_de as u32) << 18)
-                        | ((eq_df as u32) << 19)
-                        | ((eq_dg as u32) << 20)
-                        | ((eq_dh as u32) << 21)
-                        | ((eq_ef as u32) << 22)
-                        | ((eq_eg as u32) << 23)
-                        | ((eq_eh as u32) << 24)
-                        | ((eq_fg as u32) << 25)
-                        | ((eq_fh as u32) << 26)
-                        | ((eq_gh as u32) << 27);
-
-                    if coll_mask == 0 {
-                        return (17, true);
-                    }
-                    if !best_inside_exact && (coll_mask & (coll_mask - 1)) == 0 {
                         best_inside_exact = true;
                     }
                 }
@@ -1187,25 +993,58 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         };
         let mut added_len = 0usize;
 
-        let mut c_cg_ptrs = [std::ptr::null::<Elem>(); 40];
-        let mut c_table_ptrs = [std::ptr::null::<u64>(); 40];
+        let mut stack_c_cg_ptrs = [std::ptr::null::<Elem>(); 64];
+        let mut stack_c_table_ptrs = [std::ptr::null::<u64>(); 64];
+        let mut heap_c_cg_ptrs;
+        let mut heap_c_table_ptrs;
+        let (c_cg_ptrs_ptr, c_table_ptrs_ptr): (*mut *const Elem, *mut *const u64) = if c_len <= 64
+        {
+            (
+                stack_c_cg_ptrs.as_mut_ptr(),
+                stack_c_table_ptrs.as_mut_ptr(),
+            )
+        } else {
+            heap_c_cg_ptrs = vec![std::ptr::null::<Elem>(); c_len];
+            heap_c_table_ptrs = vec![std::ptr::null::<u64>(); c_len];
+            (heap_c_cg_ptrs.as_mut_ptr(), heap_c_table_ptrs.as_mut_ptr())
+        };
         let matrix_z_tables_ptr = self.matrix.z_tables.as_ptr();
         for c_idx in 0..c_len {
             let c = unsafe { *set_ptr.add(c_idx) };
-            c_cg_ptrs[c_idx] = unsafe { data_cg_ptr.add(c * num_guesses) };
-            c_table_ptrs[c_idx] = unsafe { matrix_z_tables_ptr.add(c * R) };
+            unsafe {
+                *c_cg_ptrs_ptr.add(c_idx) = data_cg_ptr.add(c * num_guesses);
+                *c_table_ptrs_ptr.add(c_idx) = matrix_z_tables_ptr.add(c * R);
+            }
         }
 
-        let mut dummy_projs = [0u64; R];
-        for c_idx in 0..c_len {
-            let c_tab = c_table_ptrs[c_idx];
-            for r in 0..R {
-                dummy_projs[r] ^= unsafe { *c_tab.add(r) };
+        let mut dummy_projs = std::mem::MaybeUninit::<[u64; R]>::uninit();
+        let dummy_ptr = dummy_projs.as_mut_ptr() as *mut u64;
+        let c_tab0 = unsafe { *c_table_ptrs_ptr };
+        unsafe {
+            std::ptr::copy_nonoverlapping(c_tab0, dummy_ptr, R);
+        }
+        for c_idx in 1..c_len {
+            let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+            let mut r = 0;
+            while r + 3 < R {
+                unsafe {
+                    *dummy_ptr.add(r) ^= *c_tab.add(r);
+                    *dummy_ptr.add(r + 1) ^= *c_tab.add(r + 1);
+                    *dummy_ptr.add(r + 2) ^= *c_tab.add(r + 2);
+                    *dummy_ptr.add(r + 3) ^= *c_tab.add(r + 3);
+                }
+                r += 4;
+            }
+            while r < R {
+                unsafe {
+                    *dummy_ptr.add(r) ^= *c_tab.add(r);
+                }
+                r += 1;
             }
         }
 
         for r in 0..R {
-            let mut proj = dummy_projs[r];
+            let mut proj = unsafe { *dummy_ptr.add(r) };
             if proj == 0 {
                 proj = 1;
             }
@@ -1247,14 +1086,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut proj = 0u64;
                 let mut c_idx = 0usize;
                 while c_idx + 3 < c_len {
-                    let c_base0 = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
-                    let c_base1 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 1) };
-                    let c_base2 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 2) };
-                    let c_base3 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 3) };
-                    let c_tab0 = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
-                    let c_tab1 = unsafe { *c_table_ptrs.get_unchecked(c_idx + 1) };
-                    let c_tab2 = unsafe { *c_table_ptrs.get_unchecked(c_idx + 2) };
-                    let c_tab3 = unsafe { *c_table_ptrs.get_unchecked(c_idx + 3) };
+                    let c_base0 = unsafe { *c_cg_ptrs_ptr.add(c_idx) };
+                    let c_base1 = unsafe { *c_cg_ptrs_ptr.add(c_idx + 1) };
+                    let c_base2 = unsafe { *c_cg_ptrs_ptr.add(c_idx + 2) };
+                    let c_base3 = unsafe { *c_cg_ptrs_ptr.add(c_idx + 3) };
+                    let c_tab0 = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_tab1 = unsafe { *c_table_ptrs_ptr.add(c_idx + 1) };
+                    let c_tab2 = unsafe { *c_table_ptrs_ptr.add(c_idx + 2) };
+                    let c_tab3 = unsafe { *c_table_ptrs_ptr.add(c_idx + 3) };
                     let r0 = unsafe { (*c_base0.add(g_idx)).to_usize() };
                     let r1 = unsafe { (*c_base1.add(g_idx)).to_usize() };
                     let r2 = unsafe { (*c_base2.add(g_idx)).to_usize() };
@@ -1266,8 +1105,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     c_idx += 4;
                 }
                 while c_idx < c_len {
-                    let c_base = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
-                    let c_tab = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
+                    let c_base = unsafe { *c_cg_ptrs_ptr.add(c_idx) };
+                    let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
                     let r = unsafe { (*c_base.add(g_idx)).to_usize() };
                     proj ^= unsafe { *c_tab.add(r) };
                     c_idx += 1;
@@ -1317,8 +1156,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let sparse_ptr = sparse_projs.as_mut_ptr() as *mut u64;
                 let offsets_ptr = offsets_mut_ptr as *const u8;
                 {
-                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(0) };
-                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) };
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) };
                     let mut j = 0usize;
                     while j + 3 < ones {
                         let off0 = unsafe { *offsets_ptr.add(j) as usize };
@@ -1347,8 +1186,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 for c_idx in 1..c_len {
-                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
-                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) };
                     let mut j = 0usize;
                     while j + 3 < ones {
                         let off0 = unsafe { *offsets_ptr.add(j) as usize };
@@ -1412,9 +1251,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let chunk_len = (block_start + 64).min(num_guesses) - block_start;
             if Elem::IS_U8 {
                 {
-                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(0) };
-                    let c_u8_ptr =
-                        unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) as *const u8 };
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
+                    let c_u8_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) as *const u8 };
                     let mut i = 0;
                     while i + 7 < chunk_len {
                         let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
@@ -1447,9 +1285,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 for c_idx in 1..c_len {
-                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(c_idx) };
                     let c_u8_ptr =
-                        unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) as *const u8 };
+                        unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) as *const u8 };
                     let mut i = 0;
                     while i + 7 < chunk_len {
                         let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
@@ -1483,8 +1321,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             } else {
                 {
-                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(0) };
-                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) };
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) };
                     let mut i = 0;
                     while i + 7 < chunk_len {
                         let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
@@ -1516,8 +1354,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 for c_idx in 1..c_len {
-                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
-                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) };
                     let mut i = 0;
                     while i + 7 < chunk_len {
                         let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
