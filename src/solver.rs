@@ -2642,6 +2642,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
+
+            let mut seen = [0u64; M];
+            let mut seen2 = [0u64; M];
+            let mut has_size_3_plus = false;
+            let mut dup = 0usize;
+
             let c0 = unsafe { *set_ptr };
             let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
             let h0 = unsafe { *zobrist_ptr.add(c0) };
@@ -2653,6 +2659,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 };
                 *c_responses_ptr = r0;
             }
+            let word_idx0 = (r0 as usize) >> 6;
+            let bit0 = 1u64 << (r0 & 63);
+            unsafe {
+                *seen.get_unchecked_mut(word_idx0) |= bit0;
+            }
+
             let mut num_non_empty = 1;
             let mut prev_idx = 0usize;
             for cand_idx in 1..c_len {
@@ -2662,24 +2674,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 unsafe {
                     *c_responses_ptr.add(cand_idx) = r;
                 }
-                let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
-                if prev_entry.r == r {
-                    prev_entry.count += 1;
-                    prev_entry.hash ^= h;
-                    continue;
-                }
-                let mut found = false;
-                for i in 0..num_non_empty {
-                    let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                    if entry.r == r {
-                        entry.count += 1;
-                        entry.hash ^= h;
-                        prev_idx = i;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
+                let word_idx = (r as usize) >> 6;
+                let bit = 1u64 << (r & 63);
+                let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                if (*word & bit) == 0 {
+                    *word |= bit;
                     prev_idx = num_non_empty;
                     unsafe {
                         *local_counts_ptr.add(num_non_empty) = LocalCount {
@@ -2689,21 +2688,57 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         };
                     }
                     num_non_empty += 1;
+                } else {
+                    dup += 1;
+                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                    if (*word2 & bit) != 0 {
+                        has_size_3_plus = true;
+                    } else {
+                        *word2 |= bit;
+                    }
+                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
+                    if prev_entry.r == r {
+                        prev_entry.count += 1;
+                        prev_entry.hash ^= h;
+                    } else {
+                        for i in 0..num_non_empty {
+                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                            if entry.r == r {
+                                entry.count += 1;
+                                entry.hash ^= h;
+                                prev_idx = i;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
 
-            if num_non_empty == 1 {
+            if c_len - dup <= 1 {
                 return beta;
             }
 
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+
+            if !has_size_3_plus {
+                let has_win = (seen[WIN >> 6] & (1u64 << (WIN & 63))) != 0;
+                let cost = if has_win {
+                    (2 * c_len - 1 + dup) as u32
+                } else {
+                    (2 * c_len + dup) as u32
+                };
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                }
+                return cost;
+            }
+
             let mut cost = c_len as u32;
             if cost >= cutoff {
                 self.local_metrics.pruned_by_bounds += 1;
                 return cost;
             }
 
-            let mut max_p_len = 0;
             let mut num_eval = 0;
             let mut eval_entries = [LocalCount {
                 r: 0,
@@ -2718,9 +2753,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     continue;
                 }
                 let p_len = entry.count as usize;
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 if lb > 0 {
                     cost += lb;
@@ -2733,10 +2765,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     eval_entries[num_eval] = entry;
                     num_eval += 1;
                 }
-            }
-
-            if max_p_len <= 2 {
-                return cost;
             }
 
             if num_eval == 2 {
