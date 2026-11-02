@@ -1450,11 +1450,31 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let g_idx = block_start + tz;
                 let mut proj = 0u64;
                 let mut c_table_ptr = z_tables_ptr as *const u64;
-                for c_idx in 0..c_len {
+                let mut c_idx = 0usize;
+                while c_idx + 3 < c_len {
+                    let c_base0 = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
+                    let c_base1 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 1) };
+                    let c_base2 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 2) };
+                    let c_base3 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 3) };
+                    let r0 = unsafe { (*c_base0.add(g_idx)).to_usize() };
+                    let r1 = unsafe { (*c_base1.add(g_idx)).to_usize() };
+                    let r2 = unsafe { (*c_base2.add(g_idx)).to_usize() };
+                    let r3 = unsafe { (*c_base3.add(g_idx)).to_usize() };
+                    unsafe {
+                        proj ^= *c_table_ptr.add(r0)
+                            ^ *c_table_ptr.add(R + r1)
+                            ^ *c_table_ptr.add(2 * R + r2)
+                            ^ *c_table_ptr.add(3 * R + r3);
+                        c_table_ptr = c_table_ptr.add(4 * R);
+                    }
+                    c_idx += 4;
+                }
+                while c_idx < c_len {
                     let c_base = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
                     let r = unsafe { (*c_base.add(g_idx)).to_usize() };
                     proj ^= unsafe { *c_table_ptr.add(r) };
                     c_table_ptr = unsafe { c_table_ptr.add(R) };
+                    c_idx += 1;
                 }
                 if proj == 0 {
                     proj = 1;
@@ -1668,11 +1688,41 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     c_table_ptr = unsafe { c_table_ptr.add(R) };
                 }
             } else {
-                unsafe {
-                    std::ptr::write_bytes(projs_ptr, 0, chunk_len);
+                {
+                    let c_table_ptr = z_tables_ptr as *const u64;
+                    let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(i + 4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(i + 5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(i + 6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(i + 7)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) = *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) = *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) = *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) = *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) = *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) = *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) = *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
                 }
-                let mut c_table_ptr = z_tables_ptr as *const u64;
-                for c_idx in 0..c_len {
+                let mut c_table_ptr = unsafe { (z_tables_ptr as *const u64).add(R) };
+                for c_idx in 1..c_len {
                     let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
                     let mut i = 0;
                     while i + 7 < chunk_len {
