@@ -2628,7 +2628,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_offset = guess * self.matrix.num_candidates;
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
-        if c_len <= 16 {
+        if c_len <= 32 {
             #[derive(Clone, Copy)]
             struct LocalCount {
                 r: u16,
@@ -2636,9 +2636,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 hash: u64,
             }
 
-            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 16]>::uninit();
+            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 32]>::uninit();
             let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
-            let mut c_responses = std::mem::MaybeUninit::<[u16; 16]>::uninit();
+            let mut c_responses = std::mem::MaybeUninit::<[u16; 32]>::uninit();
             let c_responses_ptr = c_responses.as_mut_ptr() as *mut u16;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
@@ -2744,7 +2744,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 r: 0,
                 count: 0,
                 hash: 0,
-            }; 5];
+            }; 10];
 
             for i in 0..num_non_empty {
                 let entry = unsafe { *local_counts_ptr.add(i) };
@@ -2781,24 +2781,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if eval_entries[0].count < eval_entries[1].count {
                     eval_entries.swap(0, 1);
                 }
-            } else if num_eval == 4 {
-                if eval_entries[0].count < eval_entries[1].count {
-                    eval_entries.swap(0, 1);
-                }
-                if eval_entries[2].count < eval_entries[3].count {
-                    eval_entries.swap(2, 3);
-                }
-                if eval_entries[0].count < eval_entries[2].count {
-                    eval_entries.swap(0, 2);
-                }
-                if eval_entries[1].count < eval_entries[3].count {
-                    eval_entries.swap(1, 3);
-                }
-                if eval_entries[1].count < eval_entries[2].count {
-                    eval_entries.swap(1, 2);
-                }
-            } else if num_eval == 5 {
-                for j in 1..5 {
+            } else if num_eval >= 4 {
+                for j in 1..num_eval {
                     let key = eval_entries[j];
                     let mut k = j;
                     while k > 0 && eval_entries[k - 1].count < key.count {
@@ -2809,12 +2793,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            let mut small_p = std::mem::MaybeUninit::<[[usize; 16]; 5]>::uninit();
+            let mut small_p = std::mem::MaybeUninit::<[[usize; 32]; 10]>::uninit();
             let small_p_ptr = small_p.as_mut_ptr() as *mut usize;
-            let mut extracted_mask = 0u8;
+            let mut extracted_mask = 0u16;
 
             let extract_bucket = |i: usize, target_r: u16, target_len: usize| {
-                let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                let pi_ptr = unsafe { small_p_ptr.add(i * 32) };
                 let mut found = 0;
                 for cand_idx in 0..c_len {
                     let r = unsafe { *c_responses_ptr.add(cand_idx) };
@@ -2831,10 +2815,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             };
 
-            let mut small_p_len = [0u8; 5];
-            let mut small_p_hash = [0u64; 5];
-            let mut small_used_val = [0u32; 5];
-            let mut small_is_exact = [false; 5];
+            let mut small_p_len = [0u8; 10];
+            let mut small_p_hash = [0u64; 10];
+            let mut small_used_val = [0u32; 10];
+            let mut small_is_exact = [false; 10];
             let mut all_exact = true;
 
             for i in 0..num_eval {
@@ -2851,7 +2835,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     } else {
                         extract_bucket(i, entry.r, p_len);
                         extracted_mask |= 1 << i;
-                        let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                        let pi_ptr = unsafe { small_p_ptr.add(i * 32) };
                         let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                         let (quick_val, is_exact) =
                             Self::quick_bucket_eval_specialized(self.matrix, self.dict, p_slice);
@@ -2910,7 +2894,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     extract_bucket(i, eval_entries[i].r, p_len);
                     extracted_mask |= 1 << i;
                 }
-                let pi_ptr = unsafe { small_p_ptr.add(i * 16) };
+                let pi_ptr = unsafe { small_p_ptr.add(i * 32) };
                 let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
                 let p_hash = small_p_hash[i];
 
