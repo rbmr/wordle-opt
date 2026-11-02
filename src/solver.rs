@@ -119,7 +119,6 @@ pub struct SolverScratch {
     pub scratch_guess_hashes: [Vec<u64>; 32],
     pub scratch_guess_p_lbs: [Vec<u32>; 32],
     pub scratch_guess_child_max_ks: [Vec<u16>; 32],
-    pub scratch_z_tables: [Vec<u64>; 32],
     pub scratch_state_counts: Vec<u16>,
 }
 
@@ -137,7 +136,6 @@ impl SolverScratch {
             scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
             scratch_guess_p_lbs: std::array::from_fn(|_| Vec::new()),
             scratch_guess_child_max_ks: std::array::from_fn(|_| Vec::new()),
-            scratch_z_tables: std::array::from_fn(|_| Vec::new()),
             scratch_state_counts: Vec::new(),
         };
         s.fit_dictionary(num_guesses, num_responses);
@@ -183,9 +181,6 @@ impl SolverScratch {
             }
             if self.scratch_guess_child_max_ks[d].len() < num_responses {
                 self.scratch_guess_child_max_ks[d].resize(num_responses, 0);
-            }
-            if self.scratch_z_tables[d].len() < 40 * num_responses {
-                self.scratch_z_tables[d].resize(40 * num_responses, 0);
             }
         }
         if self.scratch_state_counts.len() < num_responses {
@@ -1060,10 +1055,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
         let num_guesses = self.dict.guesses.len();
         let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
-        let zobrist_ptr = self.matrix.zobrist.as_ptr();
         let set_ptr = set.as_ptr();
 
-        let (table_ptr, mask, shift, added_ptr, z_tables_ptr) = {
+        let (table_ptr, mask, shift, added_ptr) = {
             let scratch_ref = self.scratch.as_mut().unwrap();
             let table = &mut scratch_ref.scratch_hash_table[depth];
             let m = table.len() - 1;
@@ -1073,25 +1067,24 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 m,
                 s,
                 scratch_ref.scratch_added_indices[depth].as_mut_ptr(),
-                scratch_ref.scratch_z_tables[depth].as_mut_ptr(),
             )
         };
         let mut added_len = 0usize;
 
         let mut c_cg_ptrs = [std::ptr::null::<Elem>(); 40];
-        let mut dummy_projs = [0u64; R];
+        let mut c_table_ptrs = [std::ptr::null::<u64>(); 40];
+        let matrix_z_tables_ptr = self.matrix.z_tables.as_ptr();
         for c_idx in 0..c_len {
             let c = unsafe { *set_ptr.add(c_idx) };
             c_cg_ptrs[c_idx] = unsafe { data_cg_ptr.add(c * num_guesses) };
-            let z = unsafe { *zobrist_ptr.add(c) };
-            let c_table_ptr = unsafe { z_tables_ptr.add(c_idx * R) };
-            let mut val = z;
+            c_table_ptrs[c_idx] = unsafe { matrix_z_tables_ptr.add(c * R) };
+        }
+
+        let mut dummy_projs = [0u64; R];
+        for c_idx in 0..c_len {
+            let c_tab = c_table_ptrs[c_idx];
             for r in 0..R {
-                unsafe {
-                    *c_table_ptr.add(r) = val;
-                }
-                dummy_projs[r] ^= val;
-                val = val.wrapping_add(z);
+                dummy_projs[r] ^= unsafe { *c_tab.add(r) };
             }
         }
 
@@ -1136,31 +1129,31 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let tz = block.trailing_zeros() as usize;
                 let g_idx = block_start + tz;
                 let mut proj = 0u64;
-                let mut c_table_ptr = z_tables_ptr as *const u64;
                 let mut c_idx = 0usize;
                 while c_idx + 3 < c_len {
                     let c_base0 = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
                     let c_base1 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 1) };
                     let c_base2 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 2) };
                     let c_base3 = unsafe { *c_cg_ptrs.get_unchecked(c_idx + 3) };
+                    let c_tab0 = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
+                    let c_tab1 = unsafe { *c_table_ptrs.get_unchecked(c_idx + 1) };
+                    let c_tab2 = unsafe { *c_table_ptrs.get_unchecked(c_idx + 2) };
+                    let c_tab3 = unsafe { *c_table_ptrs.get_unchecked(c_idx + 3) };
                     let r0 = unsafe { (*c_base0.add(g_idx)).to_usize() };
                     let r1 = unsafe { (*c_base1.add(g_idx)).to_usize() };
                     let r2 = unsafe { (*c_base2.add(g_idx)).to_usize() };
                     let r3 = unsafe { (*c_base3.add(g_idx)).to_usize() };
                     unsafe {
-                        proj ^= *c_table_ptr.add(r0)
-                            ^ *c_table_ptr.add(R + r1)
-                            ^ *c_table_ptr.add(2 * R + r2)
-                            ^ *c_table_ptr.add(3 * R + r3);
-                        c_table_ptr = c_table_ptr.add(4 * R);
+                        proj ^=
+                            *c_tab0.add(r0) ^ *c_tab1.add(r1) ^ *c_tab2.add(r2) ^ *c_tab3.add(r3);
                     }
                     c_idx += 4;
                 }
                 while c_idx < c_len {
                     let c_base = unsafe { *c_cg_ptrs.get_unchecked(c_idx) };
+                    let c_tab = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
                     let r = unsafe { (*c_base.add(g_idx)).to_usize() };
-                    proj ^= unsafe { *c_table_ptr.add(r) };
-                    c_table_ptr = unsafe { c_table_ptr.add(R) };
+                    proj ^= unsafe { *c_tab.add(r) };
                     c_idx += 1;
                 }
                 if proj == 0 {
@@ -1208,7 +1201,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let sparse_ptr = sparse_projs.as_mut_ptr() as *mut u64;
                 let offsets_ptr = offsets_mut_ptr as *const u8;
                 {
-                    let c_table_ptr = z_tables_ptr as *const u64;
+                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(0) };
                     let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) };
                     let mut j = 0usize;
                     while j + 3 < ones {
@@ -1237,8 +1230,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         j += 1;
                     }
                 }
-                let mut c_table_ptr = unsafe { (z_tables_ptr as *const u64).add(R) };
                 for c_idx in 1..c_len {
+                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
                     let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
                     let mut j = 0usize;
                     while j + 3 < ones {
@@ -1266,7 +1259,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         j += 1;
                     }
-                    c_table_ptr = unsafe { c_table_ptr.add(R) };
                 }
                 let mut kept_mask = 0u64;
                 for j in 0..ones {
@@ -1304,7 +1296,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let chunk_len = (block_start + 64).min(num_guesses) - block_start;
             if Elem::IS_U8 {
                 {
-                    let c_table_ptr = z_tables_ptr as *const u64;
+                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(0) };
                     let c_u8_ptr =
                         unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) as *const u8 };
                     let mut i = 0;
@@ -1338,8 +1330,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         i += 1;
                     }
                 }
-                let mut c_table_ptr = unsafe { (z_tables_ptr as *const u64).add(R) };
                 for c_idx in 1..c_len {
+                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
                     let c_u8_ptr =
                         unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) as *const u8 };
                     let mut i = 0;
@@ -1372,11 +1364,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         i += 1;
                     }
-                    c_table_ptr = unsafe { c_table_ptr.add(R) };
                 }
             } else {
                 {
-                    let c_table_ptr = z_tables_ptr as *const u64;
+                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(0) };
                     let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(0)).add(block_start) };
                     let mut i = 0;
                     while i + 7 < chunk_len {
@@ -1408,8 +1399,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         i += 1;
                     }
                 }
-                let mut c_table_ptr = unsafe { (z_tables_ptr as *const u64).add(R) };
                 for c_idx in 1..c_len {
+                    let c_table_ptr = unsafe { *c_table_ptrs.get_unchecked(c_idx) };
                     let c_ptr = unsafe { (*c_cg_ptrs.get_unchecked(c_idx)).add(block_start) };
                     let mut i = 0;
                     while i + 7 < chunk_len {
@@ -1440,7 +1431,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         i += 1;
                     }
-                    c_table_ptr = unsafe { c_table_ptr.add(R) };
                 }
             }
 

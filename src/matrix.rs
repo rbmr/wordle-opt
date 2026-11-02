@@ -35,6 +35,7 @@ pub struct ResponseMatrix {
     pub candidate_masks: Vec<u32>,
     pub candidate_profiles: Vec<CandidateProfile>,
     pub zobrist: Vec<u64>,
+    pub z_tables: Vec<u64>,
     pub data: Vec<Response>,
     /// Transposed matrix: `data_c_g[candidate * num_guesses + guess]`.
     ///
@@ -64,6 +65,15 @@ impl ResponseMatrix {
         let mut rng = fastrand::Rng::with_seed(42);
         for _ in 0..num_candidates {
             zobrist.push(rng.u64(..));
+        }
+
+        let mut z_tables = Vec::with_capacity(num_candidates * num_responses);
+        for &z in &zobrist {
+            let mut val = z;
+            for _ in 0..num_responses {
+                z_tables.push(val);
+                val = val.wrapping_add(z);
+            }
         }
 
         // Letter masks use the dictionary's injective letter index. Past 31
@@ -214,6 +224,7 @@ impl ResponseMatrix {
             candidate_masks,
             candidate_profiles,
             zobrist,
+            z_tables,
             data,
             data_c_g,
             data_u8,
