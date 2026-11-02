@@ -1638,17 +1638,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut duplicates = 0;
             if M <= 4 {
                 let mut seen = [0u64; M];
+                let mut seen2 = [0u64; M];
+                let mut has_size_3_plus = false;
                 let mut aborted = false;
                 for i in 0..cand_idx {
                     let c = unsafe { *set_ptr.add(i) };
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                    let word_idx = r >> 6;
                     let bit = 1u64 << (r & 63);
+                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
                     if (*word & bit) != 0 {
                         duplicates += 1;
                         if duplicates > max_allowed_duplicates {
                             aborted = true;
                             break;
+                        }
+                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                        if (*word2 & bit) != 0 {
+                            has_size_3_plus = true;
+                        } else {
+                            *word2 |= bit;
                         }
                     } else {
                         *word |= bit;
@@ -1658,13 +1667,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     for i in (cand_idx + 1)..c_len {
                         let c = unsafe { *set_ptr.add(i) };
                         let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                        let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                        let word_idx = r >> 6;
                         let bit = 1u64 << (r & 63);
+                        let word = unsafe { seen.get_unchecked_mut(word_idx) };
                         if (*word & bit) != 0 {
                             duplicates += 1;
                             if duplicates > max_allowed_duplicates {
                                 aborted = true;
                                 break;
+                            }
+                            let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                            if (*word2 & bit) != 0 {
+                                has_size_3_plus = true;
+                            } else {
+                                *word2 |= bit;
                             }
                         } else {
                             *word |= bit;
@@ -1688,14 +1704,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     break;
                 }
-                if duplicates == 1 {
-                    let total_non_empty = c_len - 1;
+                if !has_size_3_plus {
+                    let total_non_empty = c_len - duplicates;
                     if total_non_empty > local_max_k {
                         local_max_k = total_non_empty;
                         min_k_needed = (local_max_k + 1).min(k_to_beat_best);
                         max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                     }
-                    let lb_cost = (2 * c_len) as u32;
+                    let lb_cost = (2 * c_len - 1 + duplicates) as u32;
                     if lb_cost < best_val {
                         if total_non_empty > valid_phase1_k {
                             valid_phase1_k = total_non_empty;
@@ -2139,17 +2155,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut duplicates = 0;
                         if M <= 4 {
                             let mut seen = [0u64; M];
+                            let mut seen2 = [0u64; M];
+                            let mut has_size_3_plus = false;
                             let mut aborted = false;
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
-                                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                                let word_idx = r >> 6;
                                 let bit = 1u64 << (r & 63);
+                                let word = unsafe { seen.get_unchecked_mut(word_idx) };
                                 if (*word & bit) != 0 {
                                     duplicates += 1;
                                     if duplicates > max_allowed_duplicates {
                                         aborted = true;
                                         break;
+                                    }
+                                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                    if (*word2 & bit) != 0 {
+                                        has_size_3_plus = true;
+                                    } else {
+                                        *word2 |= bit;
                                     }
                                 } else {
                                     *word |= bit;
@@ -2168,14 +2193,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 best_val = lb_cost;
                                 break 'guess_loop;
                             }
-                            if duplicates == 1 {
-                                num_non_empty = c_len - 1;
+                            if !has_size_3_plus {
+                                num_non_empty = c_len - duplicates;
                                 if num_non_empty > local_max_k {
                                     local_max_k = num_non_empty;
                                     min_k_needed = (local_max_k + 1).min(k_to_beat_best);
                                     max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                                 }
-                                let lb_cost = (2 * c_len + 1) as u32;
+                                let lb_cost = (2 * c_len + duplicates) as u32;
                                 if lb_cost < best_val {
                                     if num_non_empty > valid_phase2_k {
                                         valid_phase2_k = num_non_empty;
