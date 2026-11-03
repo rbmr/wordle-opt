@@ -1292,6 +1292,247 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 (22, has_one_collision)
             }
+            12 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let c8 = unsafe { *bucket_ptr.add(8) };
+                let c9 = unsafe { *bucket_ptr.add(9) };
+                let c10 = unsafe { *bucket_ptr.add(10) };
+                let c11 = unsafe { *bucket_ptr.add(11) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand12 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident, $cg:ident, $ch:ident, $cj:ident, $ck:ident, $cl:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+                        let rc = unsafe { *gi_ptr.add($cc) };
+                        let rd = unsafe { *gi_ptr.add($cd) };
+                        let re = unsafe { *gi_ptr.add($ce) };
+                        let rf = unsafe { *gi_ptr.add($cf) };
+                        let rg = unsafe { *gi_ptr.add($cg) };
+                        let rh = unsafe { *gi_ptr.add($ch) };
+                        let rj = unsafe { *gi_ptr.add($cj) };
+                        let rk = unsafe { *gi_ptr.add($ck) };
+                        let rl = unsafe { *gi_ptr.add($cl) };
+
+                        let eq_ab = ra == rb;
+                        let eq_ac = ra == rc;
+                        let eq_ad = ra == rd;
+                        let eq_ae = ra == re;
+                        let eq_af = ra == rf;
+                        let eq_ag = ra == rg;
+                        let eq_ah = ra == rh;
+                        let eq_aj = ra == rj;
+                        let eq_ak = ra == rk;
+                        let eq_al = ra == rl;
+
+                        let eq_bc = rb == rc;
+                        let eq_bd = rb == rd;
+                        let eq_be = rb == re;
+                        let eq_bf = rb == rf;
+                        let eq_bg = rb == rg;
+                        let eq_bh = rb == rh;
+                        let eq_bj = rb == rj;
+                        let eq_bk = rb == rk;
+                        let eq_bl = rb == rl;
+
+                        let eq_cd = rc == rd;
+                        let eq_ce = rc == re;
+                        let eq_cf = rc == rf;
+                        let eq_cg = rc == rg;
+                        let eq_ch = rc == rh;
+                        let eq_cj = rc == rj;
+                        let eq_ck = rc == rk;
+                        let eq_cl = rc == rl;
+
+                        let eq_de = rd == re;
+                        let eq_df = rd == rf;
+                        let eq_dg = rd == rg;
+                        let eq_dh = rd == rh;
+                        let eq_dj = rd == rj;
+                        let eq_dk = rd == rk;
+                        let eq_dl = rd == rl;
+
+                        let eq_ef = re == rf;
+                        let eq_eg = re == rg;
+                        let eq_eh = re == rh;
+                        let eq_ej = re == rj;
+                        let eq_ek = re == rk;
+                        let eq_el = re == rl;
+
+                        let eq_fg = rf == rg;
+                        let eq_fh = rf == rh;
+                        let eq_fj = rf == rj;
+                        let eq_fk = rf == rk;
+                        let eq_fl = rf == rl;
+
+                        let eq_gh = rg == rh;
+                        let eq_gj = rg == rj;
+                        let eq_gk = rg == rk;
+                        let eq_gl = rg == rl;
+
+                        let eq_hj = rh == rj;
+                        let eq_hk = rh == rk;
+                        let eq_hl = rh == rl;
+
+                        let eq_jk = rj == rk;
+                        let eq_jl = rj == rl;
+
+                        let eq_kl = rk == rl;
+
+                        if has_one_collision {
+                            if !eq_ab
+                                && !eq_ac
+                                && !eq_ad
+                                && !eq_ae
+                                && !eq_af
+                                && !eq_ag
+                                && !eq_ah
+                                && !eq_aj
+                                && !eq_ak
+                                && !eq_al
+                                && !eq_bc
+                                && !eq_bd
+                                && !eq_be
+                                && !eq_bf
+                                && !eq_bg
+                                && !eq_bh
+                                && !eq_bj
+                                && !eq_bk
+                                && !eq_bl
+                                && !eq_cd
+                                && !eq_ce
+                                && !eq_cf
+                                && !eq_cg
+                                && !eq_ch
+                                && !eq_cj
+                                && !eq_ck
+                                && !eq_cl
+                                && !eq_de
+                                && !eq_df
+                                && !eq_dg
+                                && !eq_dh
+                                && !eq_dj
+                                && !eq_dk
+                                && !eq_dl
+                                && !eq_ef
+                                && !eq_eg
+                                && !eq_eh
+                                && !eq_ej
+                                && !eq_ek
+                                && !eq_el
+                                && !eq_fg
+                                && !eq_fh
+                                && !eq_fj
+                                && !eq_fk
+                                && !eq_fl
+                                && !eq_gh
+                                && !eq_gj
+                                && !eq_gk
+                                && !eq_gl
+                                && !eq_hj
+                                && !eq_hk
+                                && !eq_hl
+                                && !eq_jk
+                                && !eq_jl
+                                && !eq_kl
+                            {
+                                return (23, true);
+                            }
+                        } else {
+                            let sum = (eq_ab as u8)
+                                + (eq_ac as u8)
+                                + (eq_ad as u8)
+                                + (eq_ae as u8)
+                                + (eq_af as u8)
+                                + (eq_ag as u8)
+                                + (eq_ah as u8)
+                                + (eq_aj as u8)
+                                + (eq_ak as u8)
+                                + (eq_al as u8)
+                                + (eq_bc as u8)
+                                + (eq_bd as u8)
+                                + (eq_be as u8)
+                                + (eq_bf as u8)
+                                + (eq_bg as u8)
+                                + (eq_bh as u8)
+                                + (eq_bj as u8)
+                                + (eq_bk as u8)
+                                + (eq_bl as u8)
+                                + (eq_cd as u8)
+                                + (eq_ce as u8)
+                                + (eq_cf as u8)
+                                + (eq_cg as u8)
+                                + (eq_ch as u8)
+                                + (eq_cj as u8)
+                                + (eq_ck as u8)
+                                + (eq_cl as u8)
+                                + (eq_de as u8)
+                                + (eq_df as u8)
+                                + (eq_dg as u8)
+                                + (eq_dh as u8)
+                                + (eq_dj as u8)
+                                + (eq_dk as u8)
+                                + (eq_dl as u8)
+                                + (eq_ef as u8)
+                                + (eq_eg as u8)
+                                + (eq_eh as u8)
+                                + (eq_ej as u8)
+                                + (eq_ek as u8)
+                                + (eq_el as u8)
+                                + (eq_fg as u8)
+                                + (eq_fh as u8)
+                                + (eq_fj as u8)
+                                + (eq_fk as u8)
+                                + (eq_fl as u8)
+                                + (eq_gh as u8)
+                                + (eq_gj as u8)
+                                + (eq_gk as u8)
+                                + (eq_gl as u8)
+                                + (eq_hj as u8)
+                                + (eq_hk as u8)
+                                + (eq_hl as u8)
+                                + (eq_jk as u8)
+                                + (eq_jl as u8)
+                                + (eq_kl as u8);
+                            if sum == 0 {
+                                return (23, true);
+                            }
+                            if sum == 1 {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand12!(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
+                eval_cand12!(c1, c0, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
+                eval_cand12!(c2, c0, c1, c3, c4, c5, c6, c7, c8, c9, c10, c11);
+                eval_cand12!(c3, c0, c1, c2, c4, c5, c6, c7, c8, c9, c10, c11);
+                eval_cand12!(c4, c0, c1, c2, c3, c5, c6, c7, c8, c9, c10, c11);
+                eval_cand12!(c5, c0, c1, c2, c3, c4, c6, c7, c8, c9, c10, c11);
+                eval_cand12!(c6, c0, c1, c2, c3, c4, c5, c7, c8, c9, c10, c11);
+                eval_cand12!(c7, c0, c1, c2, c3, c4, c5, c6, c8, c9, c10, c11);
+                eval_cand12!(c8, c0, c1, c2, c3, c4, c5, c6, c7, c9, c10, c11);
+                eval_cand12!(c9, c0, c1, c2, c3, c4, c5, c6, c7, c8, c10, c11);
+                eval_cand12!(c10, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c11);
+                eval_cand12!(c11, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10);
+
+                (24, has_one_collision)
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -2868,6 +3109,71 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         + unsafe { *parent_cap_bounds_ptr.add(count7 as usize) }
                         + unsafe { *parent_cap_bounds_ptr.add(count8 as usize) },
                 )
+            } else if num_non_empty == 10 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                let count3 = unsafe { *counts_ptr.add(r3) } as u32;
+                let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                let count4 = unsafe { *counts_ptr.add(r4) } as u32;
+                let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                let count5 = unsafe { *counts_ptr.add(r5) } as u32;
+                let r6 = unsafe { *non_empty_indices_ptr.add(6) as usize };
+                let count6 = unsafe { *counts_ptr.add(r6) } as u32;
+                let r7 = unsafe { *non_empty_indices_ptr.add(7) as usize };
+                let count7 = unsafe { *counts_ptr.add(r7) } as u32;
+                let r8 = unsafe { *non_empty_indices_ptr.add(8) as usize };
+                let count8 = unsafe { *counts_ptr.add(r8) } as u32;
+                let r9 = unsafe { *non_empty_indices_ptr.add(9) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    *counts_ptr.add(r4) = 0;
+                    *counts_ptr.add(r5) = 0;
+                    *counts_ptr.add(r6) = 0;
+                    *counts_ptr.add(r7) = 0;
+                    *counts_ptr.add(r8) = 0;
+                    *counts_ptr.add(r9) = 0;
+                }
+                let count9 = (c_len as u32 - 1)
+                    - count0
+                    - count1
+                    - count2
+                    - count3
+                    - count4
+                    - count5
+                    - count6
+                    - count7
+                    - count8;
+                (
+                    1 + count0 * count0
+                        + count1 * count1
+                        + count2 * count2
+                        + count3 * count3
+                        + count4 * count4
+                        + count5 * count5
+                        + count6 * count6
+                        + count7 * count7
+                        + count8 * count8
+                        + count9 * count9,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count5 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count6 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count7 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count8 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count9 as usize) },
+                )
             } else {
                 let mut exp = 1u32;
                 let mut lb = c_len as u32;
@@ -3551,6 +3857,71 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     + unsafe { *parent_cap_bounds_ptr.add(c6 as usize) }
                                     + unsafe { *parent_cap_bounds_ptr.add(c7 as usize) }
                                     + unsafe { *parent_cap_bounds_ptr.add(c8 as usize) },
+                            )
+                        } else if num_non_empty == 10 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            let count3 = unsafe { *counts_ptr.add(r3) };
+                            let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                            let count4 = unsafe { *counts_ptr.add(r4) };
+                            let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                            let count5 = unsafe { *counts_ptr.add(r5) };
+                            let r6 = unsafe { *non_empty_indices_ptr.add(6) as usize };
+                            let count6 = unsafe { *counts_ptr.add(r6) };
+                            let r7 = unsafe { *non_empty_indices_ptr.add(7) as usize };
+                            let count7 = unsafe { *counts_ptr.add(r7) };
+                            let r8 = unsafe { *non_empty_indices_ptr.add(8) as usize };
+                            let count8 = unsafe { *counts_ptr.add(r8) };
+                            let r9 = unsafe { *non_empty_indices_ptr.add(9) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                                *counts_ptr.add(r4) = 0;
+                                *counts_ptr.add(r5) = 0;
+                                *counts_ptr.add(r6) = 0;
+                                *counts_ptr.add(r7) = 0;
+                                *counts_ptr.add(r8) = 0;
+                                *counts_ptr.add(r9) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = count3 as u32;
+                            let c4 = count4 as u32;
+                            let c5 = count5 as u32;
+                            let c6 = count6 as u32;
+                            let c7 = count7 as u32;
+                            let c8 = count8 as u32;
+                            let c9 = (c_len as u32) - c0 - c1 - c2 - c3 - c4 - c5 - c6 - c7 - c8;
+                            (
+                                c0 * c0
+                                    + c1 * c1
+                                    + c2 * c2
+                                    + c3 * c3
+                                    + c4 * c4
+                                    + c5 * c5
+                                    + c6 * c6
+                                    + c7 * c7
+                                    + c8 * c8
+                                    + c9 * c9,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c5 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c6 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c7 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c8 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c9 as usize) },
                             )
                         } else {
                             let mut exp = 0u32;
@@ -6395,9 +6766,9 @@ mod solver_cache_tests {
         let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
-        // Test multiple small subsets of candidates (sizes 2..=12)
+        // Test multiple small subsets of candidates (sizes 2..=13)
         for offset in (0..30).step_by(5) {
-            for size in 2..=12 {
+            for size in 2..=13 {
                 let bucket: Vec<usize> = (offset..offset + size).collect();
                 let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
                 let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);
