@@ -356,8 +356,12 @@ pub(crate) fn active_guesses_with_bound(
                             }
                         }
 
-                        let mut num_non_empty = 0;
-                        let mut expected_rem = 0u32;
+                        let win_v = unsafe { *counts_ptr.add(win_response) as usize };
+                        unsafe {
+                            *counts_ptr.add(win_response) = 0;
+                        }
+                        let mut num_non_empty = (win_v > 0) as usize;
+                        let mut expected_rem = (win_v as u32) * (win_v as u32);
                         let mut base_lb = c_len as u32;
 
                         for r in 0..matrix.num_responses {
@@ -367,9 +371,7 @@ pub(crate) fn active_guesses_with_bound(
                             }
                             num_non_empty += 1;
                             expected_rem += (v as u32) * (v as u32);
-                            if r != win_response {
-                                base_lb += unsafe { *cap_bounds_ptr.add(v) };
-                            }
+                            base_lb += unsafe { *cap_bounds_ptr.add(v) };
                             unsafe {
                                 *counts_ptr.add(r) = 0;
                             }
@@ -560,16 +562,18 @@ pub(crate) fn active_guesses_with_bound(
                     }
                 }
 
-                let mut expected_rem = 0u32;
+                let win_v = unsafe { *counts_ptr.add(win_response) as u32 };
+                unsafe {
+                    *counts_ptr.add(win_response) = 0;
+                }
+                let mut expected_rem = win_v * win_v;
                 let mut base_lb = c_len as u32;
                 for i in 0..c_len {
                     let r = unsafe { *r_buf_ptr.add(i) as usize };
                     let v = unsafe { *counts_ptr.add(r) as usize };
                     if v > 0 {
                         expected_rem += (v as u32) * (v as u32);
-                        if r != win_response {
-                            base_lb += unsafe { *cap_bounds_ptr.add(v) };
-                        }
+                        base_lb += unsafe { *cap_bounds_ptr.add(v) };
                         unsafe {
                             *counts_ptr.add(r) = 0;
                         }
@@ -1689,26 +1693,149 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 return None;
             }
-            for &g in &cand_guesses[0..n] {
-                let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
-
-                let mut seen_mask = [0u64; 4];
-                let mut has_collision = false;
-
-                for &c in candidates {
-                    let r = unsafe { *g_ptr.add(c) as usize };
-                    let word_idx = r >> 6;
-                    let bit = 1u64 << (r & 63);
-                    if (seen_mask[word_idx] & bit) != 0 {
-                        has_collision = true;
-                        break;
+            if n == 15 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                let c6 = candidates[6];
+                let c7 = candidates[7];
+                let c8 = candidates[8];
+                let c9 = candidates[9];
+                let c10 = candidates[10];
+                let c11 = candidates[11];
+                let c12 = candidates[12];
+                let c13 = candidates[13];
+                let c14 = candidates[14];
+                for &g in &cand_guesses[0..15] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    let r3 = unsafe { *g_ptr.add(c3) };
+                    let r4 = unsafe { *g_ptr.add(c4) };
+                    let r5 = unsafe { *g_ptr.add(c5) };
+                    let r6 = unsafe { *g_ptr.add(c6) };
+                    let r7 = unsafe { *g_ptr.add(c7) };
+                    let r8 = unsafe { *g_ptr.add(c8) };
+                    let r9 = unsafe { *g_ptr.add(c9) };
+                    let r10 = unsafe { *g_ptr.add(c10) };
+                    let r11 = unsafe { *g_ptr.add(c11) };
+                    let r12 = unsafe { *g_ptr.add(c12) };
+                    let r13 = unsafe { *g_ptr.add(c13) };
+                    let r14 = unsafe { *g_ptr.add(c14) };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r0 != r6
+                        && r0 != r7
+                        && r0 != r8
+                        && r0 != r9
+                        && r0 != r10
+                        && r0 != r11
+                        && r0 != r12
+                        && r0 != r13
+                        && r0 != r14
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r1 != r6
+                        && r1 != r7
+                        && r1 != r8
+                        && r1 != r9
+                        && r1 != r10
+                        && r1 != r11
+                        && r1 != r12
+                        && r1 != r13
+                        && r1 != r14
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r2 != r6
+                        && r2 != r7
+                        && r2 != r8
+                        && r2 != r9
+                        && r2 != r10
+                        && r2 != r11
+                        && r2 != r12
+                        && r2 != r13
+                        && r2 != r14
+                        && r3 != r4
+                        && r3 != r5
+                        && r3 != r6
+                        && r3 != r7
+                        && r3 != r8
+                        && r3 != r9
+                        && r3 != r10
+                        && r3 != r11
+                        && r3 != r12
+                        && r3 != r13
+                        && r3 != r14
+                        && r4 != r5
+                        && r4 != r6
+                        && r4 != r7
+                        && r4 != r8
+                        && r4 != r9
+                        && r4 != r10
+                        && r4 != r11
+                        && r4 != r12
+                        && r4 != r13
+                        && r4 != r14
+                        && r5 != r6
+                        && r5 != r7
+                        && r5 != r8
+                        && r5 != r9
+                        && r5 != r10
+                        && r5 != r11
+                        && r5 != r12
+                        && r5 != r13
+                        && r5 != r14
+                        && r6 != r7
+                        && r6 != r8
+                        && r6 != r9
+                        && r6 != r10
+                        && r6 != r11
+                        && r6 != r12
+                        && r6 != r13
+                        && r6 != r14
+                        && r7 != r8
+                        && r7 != r9
+                        && r7 != r10
+                        && r7 != r11
+                        && r7 != r12
+                        && r7 != r13
+                        && r7 != r14
+                        && r8 != r9
+                        && r8 != r10
+                        && r8 != r11
+                        && r8 != r12
+                        && r8 != r13
+                        && r8 != r14
+                        && r9 != r10
+                        && r9 != r11
+                        && r9 != r12
+                        && r9 != r13
+                        && r9 != r14
+                        && r10 != r11
+                        && r10 != r12
+                        && r10 != r13
+                        && r10 != r14
+                        && r11 != r12
+                        && r11 != r13
+                        && r11 != r14
+                        && r12 != r13
+                        && r12 != r14
+                        && r13 != r14
+                    {
+                        return Some((g, 29));
                     }
-                    seen_mask[word_idx] |= bit;
                 }
-
-                if !has_collision {
-                    return Some((g, (2 * n - 1) as u32));
-                }
+                return None;
             }
         } else {
             let matrix_data_ptr = self.matrix.data.as_ptr();
@@ -2470,29 +2597,149 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 return None;
             }
-            for &g in &cand_guesses[0..n] {
-                let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
-
-                let mut seen = [0u16; 16];
-                let mut has_collision = false;
-
-                for (seen_len, &c) in candidates.iter().enumerate() {
-                    let r = unsafe { (*g_ptr.add(c)).0 };
-                    for &prev in &seen[..seen_len] {
-                        if prev == r {
-                            has_collision = true;
-                            break;
-                        }
+            if n == 15 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                let c6 = candidates[6];
+                let c7 = candidates[7];
+                let c8 = candidates[8];
+                let c9 = candidates[9];
+                let c10 = candidates[10];
+                let c11 = candidates[11];
+                let c12 = candidates[12];
+                let c13 = candidates[13];
+                let c14 = candidates[14];
+                for &g in &cand_guesses[0..15] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    let r3 = unsafe { (*g_ptr.add(c3)).0 };
+                    let r4 = unsafe { (*g_ptr.add(c4)).0 };
+                    let r5 = unsafe { (*g_ptr.add(c5)).0 };
+                    let r6 = unsafe { (*g_ptr.add(c6)).0 };
+                    let r7 = unsafe { (*g_ptr.add(c7)).0 };
+                    let r8 = unsafe { (*g_ptr.add(c8)).0 };
+                    let r9 = unsafe { (*g_ptr.add(c9)).0 };
+                    let r10 = unsafe { (*g_ptr.add(c10)).0 };
+                    let r11 = unsafe { (*g_ptr.add(c11)).0 };
+                    let r12 = unsafe { (*g_ptr.add(c12)).0 };
+                    let r13 = unsafe { (*g_ptr.add(c13)).0 };
+                    let r14 = unsafe { (*g_ptr.add(c14)).0 };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r0 != r6
+                        && r0 != r7
+                        && r0 != r8
+                        && r0 != r9
+                        && r0 != r10
+                        && r0 != r11
+                        && r0 != r12
+                        && r0 != r13
+                        && r0 != r14
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r1 != r6
+                        && r1 != r7
+                        && r1 != r8
+                        && r1 != r9
+                        && r1 != r10
+                        && r1 != r11
+                        && r1 != r12
+                        && r1 != r13
+                        && r1 != r14
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r2 != r6
+                        && r2 != r7
+                        && r2 != r8
+                        && r2 != r9
+                        && r2 != r10
+                        && r2 != r11
+                        && r2 != r12
+                        && r2 != r13
+                        && r2 != r14
+                        && r3 != r4
+                        && r3 != r5
+                        && r3 != r6
+                        && r3 != r7
+                        && r3 != r8
+                        && r3 != r9
+                        && r3 != r10
+                        && r3 != r11
+                        && r3 != r12
+                        && r3 != r13
+                        && r3 != r14
+                        && r4 != r5
+                        && r4 != r6
+                        && r4 != r7
+                        && r4 != r8
+                        && r4 != r9
+                        && r4 != r10
+                        && r4 != r11
+                        && r4 != r12
+                        && r4 != r13
+                        && r4 != r14
+                        && r5 != r6
+                        && r5 != r7
+                        && r5 != r8
+                        && r5 != r9
+                        && r5 != r10
+                        && r5 != r11
+                        && r5 != r12
+                        && r5 != r13
+                        && r5 != r14
+                        && r6 != r7
+                        && r6 != r8
+                        && r6 != r9
+                        && r6 != r10
+                        && r6 != r11
+                        && r6 != r12
+                        && r6 != r13
+                        && r6 != r14
+                        && r7 != r8
+                        && r7 != r9
+                        && r7 != r10
+                        && r7 != r11
+                        && r7 != r12
+                        && r7 != r13
+                        && r7 != r14
+                        && r8 != r9
+                        && r8 != r10
+                        && r8 != r11
+                        && r8 != r12
+                        && r8 != r13
+                        && r8 != r14
+                        && r9 != r10
+                        && r9 != r11
+                        && r9 != r12
+                        && r9 != r13
+                        && r9 != r14
+                        && r10 != r11
+                        && r10 != r12
+                        && r10 != r13
+                        && r10 != r14
+                        && r11 != r12
+                        && r11 != r13
+                        && r11 != r14
+                        && r12 != r13
+                        && r12 != r14
+                        && r13 != r14
+                    {
+                        return Some((g, 29));
                     }
-                    if has_collision {
-                        break;
-                    }
-                    seen[seen_len] = r;
                 }
-
-                if !has_collision {
-                    return Some((g, (2 * n - 1) as u32));
-                }
+                return None;
             }
         }
 
