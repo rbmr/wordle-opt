@@ -1273,6 +1273,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             .as_mut_ptr();
         let mut non_empty_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
         let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+        let mut r_buf = std::mem::MaybeUninit::<[u16; 128]>::uninit();
+        let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
 
         let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
         let matrix_data_ptr = self.matrix.data_ptr::<Elem>();
@@ -1309,30 +1311,61 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut seen2 = [0u64; M];
                 let mut has_size_3_plus = false;
                 let mut aborted = false;
-                for i in 0..cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    let word_idx = r >> 6;
-                    let bit = 1u64 << (r & 63);
-                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
-                    if (*word & bit) != 0 {
-                        duplicates += 1;
-                        if duplicates > max_allowed_duplicates {
-                            aborted = true;
-                            break;
+                if c_len <= 128 {
+                    for i in 0..cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r as u16;
                         }
-                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                        if (*word2 & bit) != 0 {
-                            has_size_3_plus = true;
+                        let word_idx = r >> 6;
+                        let bit = 1u64 << (r & 63);
+                        let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                        if (*word & bit) != 0 {
+                            duplicates += 1;
+                            if duplicates > max_allowed_duplicates {
+                                aborted = true;
+                                break;
+                            }
+                            let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                            if (*word2 & bit) != 0 {
+                                has_size_3_plus = true;
+                            } else {
+                                *word2 |= bit;
+                            }
                         } else {
-                            *word2 |= bit;
+                            *word |= bit;
                         }
-                    } else {
-                        *word |= bit;
                     }
-                }
-                if !aborted {
-                    for i in (cand_idx + 1)..c_len {
+                    if !aborted {
+                        for i in (cand_idx + 1)..c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            unsafe {
+                                *r_buf_ptr.add(i) = r as u16;
+                            }
+                            let word_idx = r >> 6;
+                            let bit = 1u64 << (r & 63);
+                            let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                            if (*word & bit) != 0 {
+                                duplicates += 1;
+                                if duplicates > max_allowed_duplicates {
+                                    aborted = true;
+                                    break;
+                                }
+                                let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                if (*word2 & bit) != 0 {
+                                    has_size_3_plus = true;
+                                } else {
+                                    *word2 |= bit;
+                                }
+                            } else {
+                                *word |= bit;
+                            }
+                        }
+                    }
+                } else {
+                    for i in 0..cand_idx {
                         let c = unsafe { *set_ptr.add(i) };
                         let r = unsafe { (*g_ptr.add(c)).to_usize() };
                         let word_idx = r >> 6;
@@ -1352,6 +1385,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                         } else {
                             *word |= bit;
+                        }
+                    }
+                    if !aborted {
+                        for i in (cand_idx + 1)..c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            let word_idx = r >> 6;
+                            let bit = 1u64 << (r & 63);
+                            let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                            if (*word & bit) != 0 {
+                                duplicates += 1;
+                                if duplicates > max_allowed_duplicates {
+                                    aborted = true;
+                                    break;
+                                }
+                                let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                if (*word2 & bit) != 0 {
+                                    has_size_3_plus = true;
+                                } else {
+                                    *word2 |= bit;
+                                }
+                            } else {
+                                *word |= bit;
+                            }
                         }
                     }
                 }
@@ -1398,30 +1455,57 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     continue;
                 }
-                for i in 0..cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += 1;
+                if c_len <= 128 {
+                    for i in 0..cand_idx {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
-                        *cnt_ptr = cnt + 1;
                     }
-                }
-                for i in (cand_idx + 1)..c_len {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += 1;
+                    for i in (cand_idx + 1)..c_len {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
-                        *cnt_ptr = cnt + 1;
+                    }
+                } else {
+                    for i in 0..cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                    }
+                    for i in (cand_idx + 1)..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
                     }
                 }
             } else {
@@ -1825,26 +1909,54 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let mut seen2 = [0u64; M];
                             let mut has_size_3_plus = false;
                             let mut aborted = false;
-                            for c_idx in 0..c_len {
-                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let r = unsafe { (*c_base.add(g)).to_usize() };
-                                let word_idx = r >> 6;
-                                let bit = 1u64 << (r & 63);
-                                let word = unsafe { seen.get_unchecked_mut(word_idx) };
-                                if (*word & bit) != 0 {
-                                    duplicates += 1;
-                                    if duplicates > max_allowed_duplicates {
-                                        aborted = true;
-                                        break;
+                            if c_len <= 128 {
+                                for c_idx in 0..c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        *r_buf_ptr.add(c_idx) = r as u16;
                                     }
-                                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                                    if (*word2 & bit) != 0 {
-                                        has_size_3_plus = true;
+                                    let word_idx = r >> 6;
+                                    let bit = 1u64 << (r & 63);
+                                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                                    if (*word & bit) != 0 {
+                                        duplicates += 1;
+                                        if duplicates > max_allowed_duplicates {
+                                            aborted = true;
+                                            break;
+                                        }
+                                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                        if (*word2 & bit) != 0 {
+                                            has_size_3_plus = true;
+                                        } else {
+                                            *word2 |= bit;
+                                        }
                                     } else {
-                                        *word2 |= bit;
+                                        *word |= bit;
                                     }
-                                } else {
-                                    *word |= bit;
+                                }
+                            } else {
+                                for c_idx in 0..c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    let word_idx = r >> 6;
+                                    let bit = 1u64 << (r & 63);
+                                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                                    if (*word & bit) != 0 {
+                                        duplicates += 1;
+                                        if duplicates > max_allowed_duplicates {
+                                            aborted = true;
+                                            break;
+                                        }
+                                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                        if (*word2 & bit) != 0 {
+                                            has_size_3_plus = true;
+                                        } else {
+                                            *word2 |= bit;
+                                        }
+                                    } else {
+                                        *word |= bit;
+                                    }
                                 }
                             }
                             if aborted {
@@ -1888,17 +2000,32 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 }
                                 continue;
                             }
-                            for c_idx in 0..c_len {
-                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let r = unsafe { (*c_base.add(g)).to_usize() };
-                                unsafe {
-                                    let cnt_ptr = counts_ptr.add(r);
-                                    let cnt = *cnt_ptr;
-                                    if cnt == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                        num_non_empty += 1;
+                            if c_len <= 128 {
+                                for c_idx in 0..c_len {
+                                    let r = unsafe { *r_buf_ptr.add(c_idx) as usize };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
                                     }
-                                    *cnt_ptr = cnt + 1;
+                                }
+                            } else {
+                                for c_idx in 0..c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
+                                    }
                                 }
                             }
                         } else {
@@ -2977,7 +3104,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            let total_buckets: u32 = seen.iter().map(|w| w.count_ones()).sum();
+            let mut total_buckets = 0u32;
+            for m in 0..M {
+                total_buckets += unsafe { *seen.get_unchecked(m) }.count_ones();
+            }
             if total_buckets <= 1 {
                 return beta;
             }
