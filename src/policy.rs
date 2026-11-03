@@ -1263,6 +1263,92 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 return None;
             }
+            if n == 11 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                let c6 = candidates[6];
+                let c7 = candidates[7];
+                let c8 = candidates[8];
+                let c9 = candidates[9];
+                let c10 = candidates[10];
+                for &g in &cand_guesses[0..11] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    let r3 = unsafe { *g_ptr.add(c3) };
+                    let r4 = unsafe { *g_ptr.add(c4) };
+                    let r5 = unsafe { *g_ptr.add(c5) };
+                    let r6 = unsafe { *g_ptr.add(c6) };
+                    let r7 = unsafe { *g_ptr.add(c7) };
+                    let r8 = unsafe { *g_ptr.add(c8) };
+                    let r9 = unsafe { *g_ptr.add(c9) };
+                    let r10 = unsafe { *g_ptr.add(c10) };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r0 != r6
+                        && r0 != r7
+                        && r0 != r8
+                        && r0 != r9
+                        && r0 != r10
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r1 != r6
+                        && r1 != r7
+                        && r1 != r8
+                        && r1 != r9
+                        && r1 != r10
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r2 != r6
+                        && r2 != r7
+                        && r2 != r8
+                        && r2 != r9
+                        && r2 != r10
+                        && r3 != r4
+                        && r3 != r5
+                        && r3 != r6
+                        && r3 != r7
+                        && r3 != r8
+                        && r3 != r9
+                        && r3 != r10
+                        && r4 != r5
+                        && r4 != r6
+                        && r4 != r7
+                        && r4 != r8
+                        && r4 != r9
+                        && r4 != r10
+                        && r5 != r6
+                        && r5 != r7
+                        && r5 != r8
+                        && r5 != r9
+                        && r5 != r10
+                        && r6 != r7
+                        && r6 != r8
+                        && r6 != r9
+                        && r6 != r10
+                        && r7 != r8
+                        && r7 != r9
+                        && r7 != r10
+                        && r8 != r9
+                        && r8 != r10
+                        && r9 != r10
+                    {
+                        return Some((g, 21));
+                    }
+                }
+                return None;
+            }
             for &g in &cand_guesses[0..n] {
                 let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
 
@@ -1614,6 +1700,92 @@ impl<'a> OptimalPolicy<'a> {
                         && r8 != r9
                     {
                         return Some((g, 19));
+                    }
+                }
+                return None;
+            }
+            if n == 11 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                let c6 = candidates[6];
+                let c7 = candidates[7];
+                let c8 = candidates[8];
+                let c9 = candidates[9];
+                let c10 = candidates[10];
+                for &g in &cand_guesses[0..11] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    let r3 = unsafe { (*g_ptr.add(c3)).0 };
+                    let r4 = unsafe { (*g_ptr.add(c4)).0 };
+                    let r5 = unsafe { (*g_ptr.add(c5)).0 };
+                    let r6 = unsafe { (*g_ptr.add(c6)).0 };
+                    let r7 = unsafe { (*g_ptr.add(c7)).0 };
+                    let r8 = unsafe { (*g_ptr.add(c8)).0 };
+                    let r9 = unsafe { (*g_ptr.add(c9)).0 };
+                    let r10 = unsafe { (*g_ptr.add(c10)).0 };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r0 != r6
+                        && r0 != r7
+                        && r0 != r8
+                        && r0 != r9
+                        && r0 != r10
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r1 != r6
+                        && r1 != r7
+                        && r1 != r8
+                        && r1 != r9
+                        && r1 != r10
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r2 != r6
+                        && r2 != r7
+                        && r2 != r8
+                        && r2 != r9
+                        && r2 != r10
+                        && r3 != r4
+                        && r3 != r5
+                        && r3 != r6
+                        && r3 != r7
+                        && r3 != r8
+                        && r3 != r9
+                        && r3 != r10
+                        && r4 != r5
+                        && r4 != r6
+                        && r4 != r7
+                        && r4 != r8
+                        && r4 != r9
+                        && r4 != r10
+                        && r5 != r6
+                        && r5 != r7
+                        && r5 != r8
+                        && r5 != r9
+                        && r5 != r10
+                        && r6 != r7
+                        && r6 != r8
+                        && r6 != r9
+                        && r6 != r10
+                        && r7 != r8
+                        && r7 != r9
+                        && r7 != r10
+                        && r8 != r9
+                        && r8 != r10
+                        && r9 != r10
+                    {
+                        return Some((g, 21));
                     }
                 }
                 return None;
