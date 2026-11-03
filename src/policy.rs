@@ -439,8 +439,6 @@ pub(crate) fn active_guesses_with_bound(
 
             let mut counts = [0u16; 256];
             let counts_ptr = counts.as_mut_ptr();
-            let mut r_buf = [0u8; 48];
-            let r_buf_ptr = r_buf.as_mut_ptr();
             let c_len = candidates.len();
             let win_response = matrix.win_response.0 as usize;
             let max_allowed_duplicates = if max_base_lb < (3 * c_len).saturating_sub(1) as u32 {
@@ -482,28 +480,27 @@ pub(crate) fn active_guesses_with_bound(
                 let mut dup = 0usize;
                 for i in 0..c_len {
                     let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
-                    unsafe {
-                        *r_buf_ptr.add(i) = r;
-                    }
                     let word_idx = (r as usize) >> 6;
                     let bit = 1u64 << (r & 63);
                     let word = unsafe { seen.get_unchecked_mut(word_idx) };
                     if (*word & bit) != 0 {
                         dup += 1;
-                        if dup > max_allowed_duplicates {
+                        if dup > max_allowed_duplicates || dup + 1 >= c_len {
                             break;
                         }
-                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                        if (*word2 & bit) != 0 {
-                            has_size_3_plus = true;
-                        } else {
-                            *word2 |= bit;
+                        if !has_size_3_plus {
+                            let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                            if (*word2 & bit) != 0 {
+                                has_size_3_plus = true;
+                            } else {
+                                *word2 |= bit;
+                            }
                         }
                     } else {
                         *word |= bit;
                     }
                 }
-                if dup > max_allowed_duplicates || c_len - dup <= 1 {
+                if dup > max_allowed_duplicates || c_len.saturating_sub(dup) <= 1 {
                     continue;
                 }
                 if !has_size_3_plus {
@@ -516,7 +513,7 @@ pub(crate) fn active_guesses_with_bound(
                     continue;
                 }
                 for i in 0..c_len {
-                    let r = unsafe { *r_buf_ptr.add(i) as usize };
+                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
                     unsafe {
                         *counts_ptr.add(r) += 1;
                     }
@@ -526,7 +523,7 @@ pub(crate) fn active_guesses_with_bound(
                 let mut base_lb = c_len as u32;
                 let mut num_non_empty = 0;
                 for i in 0..c_len {
-                    let r = unsafe { *r_buf_ptr.add(i) as usize };
+                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
                     let v = unsafe { *counts_ptr.add(r) as usize };
                     if v > 0 {
                         num_non_empty += 1;
