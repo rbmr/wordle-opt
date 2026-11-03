@@ -905,8 +905,41 @@ impl<'a> OptimalPolicy<'a> {
 
         if self.matrix.num_responses <= 256 {
             let matrix_data_ptr = self.matrix.data_u8.as_ptr();
+            let num_cand = self.matrix.num_candidates;
+            if n == 3 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                for &g in &cand_guesses[0..3] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    if r0 != r1 && r0 != r2 && r1 != r2 {
+                        return Some((g, 5));
+                    }
+                }
+                return None;
+            }
+            if n == 4 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                for &g in &cand_guesses[0..4] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    let r3 = unsafe { *g_ptr.add(c3) };
+                    if r0 != r1 && r0 != r2 && r0 != r3 && r1 != r2 && r1 != r3 && r2 != r3 {
+                        return Some((g, 7));
+                    }
+                }
+                return None;
+            }
             for &g in &cand_guesses[0..n] {
-                let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
+                let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
 
                 let mut seen_mask = [0u64; 4];
                 let mut has_collision = false;

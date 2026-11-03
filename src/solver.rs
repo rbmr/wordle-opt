@@ -656,6 +656,124 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 (14, has_one_collision)
             }
+            8 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand8 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident, $cg:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+                        let rc = unsafe { *gi_ptr.add($cc) };
+                        let rd = unsafe { *gi_ptr.add($cd) };
+                        let re = unsafe { *gi_ptr.add($ce) };
+                        let rf = unsafe { *gi_ptr.add($cf) };
+                        let rg = unsafe { *gi_ptr.add($cg) };
+
+                        let eq_ab = ra == rb;
+                        let eq_ac = ra == rc;
+                        let eq_ad = ra == rd;
+                        let eq_ae = ra == re;
+                        let eq_af = ra == rf;
+                        let eq_ag = ra == rg;
+                        let eq_bc = rb == rc;
+                        let eq_bd = rb == rd;
+                        let eq_be = rb == re;
+                        let eq_bf = rb == rf;
+                        let eq_bg = rb == rg;
+                        let eq_cd = rc == rd;
+                        let eq_ce = rc == re;
+                        let eq_cf = rc == rf;
+                        let eq_cg = rc == rg;
+                        let eq_de = rd == re;
+                        let eq_df = rd == rf;
+                        let eq_dg = rd == rg;
+                        let eq_ef = re == rf;
+                        let eq_eg = re == rg;
+                        let eq_fg = rf == rg;
+
+                        if has_one_collision {
+                            if !eq_ab
+                                && !eq_ac
+                                && !eq_ad
+                                && !eq_ae
+                                && !eq_af
+                                && !eq_ag
+                                && !eq_bc
+                                && !eq_bd
+                                && !eq_be
+                                && !eq_bf
+                                && !eq_bg
+                                && !eq_cd
+                                && !eq_ce
+                                && !eq_cf
+                                && !eq_cg
+                                && !eq_de
+                                && !eq_df
+                                && !eq_dg
+                                && !eq_ef
+                                && !eq_eg
+                                && !eq_fg
+                            {
+                                return (15, true);
+                            }
+                        } else {
+                            let sum = (eq_ab as u8)
+                                + (eq_ac as u8)
+                                + (eq_ad as u8)
+                                + (eq_ae as u8)
+                                + (eq_af as u8)
+                                + (eq_ag as u8)
+                                + (eq_bc as u8)
+                                + (eq_bd as u8)
+                                + (eq_be as u8)
+                                + (eq_bf as u8)
+                                + (eq_bg as u8)
+                                + (eq_cd as u8)
+                                + (eq_ce as u8)
+                                + (eq_cf as u8)
+                                + (eq_cg as u8)
+                                + (eq_de as u8)
+                                + (eq_df as u8)
+                                + (eq_dg as u8)
+                                + (eq_ef as u8)
+                                + (eq_eg as u8)
+                                + (eq_fg as u8);
+                            if sum == 0 {
+                                return (15, true);
+                            }
+                            if sum == 1 {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand8!(c0, c1, c2, c3, c4, c5, c6, c7);
+                eval_cand8!(c1, c0, c2, c3, c4, c5, c6, c7);
+                eval_cand8!(c2, c0, c1, c3, c4, c5, c6, c7);
+                eval_cand8!(c3, c0, c1, c2, c4, c5, c6, c7);
+                eval_cand8!(c4, c0, c1, c2, c3, c5, c6, c7);
+                eval_cand8!(c5, c0, c1, c2, c3, c4, c6, c7);
+                eval_cand8!(c6, c0, c1, c2, c3, c4, c5, c7);
+                eval_cand8!(c7, c0, c1, c2, c3, c4, c5, c6);
+
+                (16, has_one_collision)
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -3733,6 +3851,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 } else {
                     0
                 }
+            } else if num_eval <= 16 {
+                for j in 1..num_eval {
+                    let key = unsafe { *eval_entries_ptr.add(j) };
+                    let mut k = j;
+                    while k > 0 {
+                        let prev = unsafe { *eval_entries_ptr.add(k - 1) };
+                        if prev < key {
+                            unsafe {
+                                *eval_entries_ptr.add(k) = prev;
+                            }
+                            k -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(k) = key;
+                    }
+                }
+                let mut split = 0;
+                while split < num_eval && (unsafe { *eval_entries_ptr.add(split) } >> 16) > 15 {
+                    split += 1;
+                }
+                split
             } else {
                 let eval_slice =
                     unsafe { std::slice::from_raw_parts_mut(eval_entries_ptr, num_eval) };
