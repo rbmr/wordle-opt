@@ -598,7 +598,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         }
 
         let num_guesses = self.dict.guesses.len();
+        let num_candidates = self.matrix.num_candidates;
         let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
+        let matrix_data_ptr = self.matrix.data_ptr::<Elem>();
         let set_ptr = set.as_ptr();
 
         let (table_ptr, mask, shift, added_ptr) = {
@@ -615,28 +617,47 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         };
         let mut added_len = 0usize;
 
-        let mut stack_c_cg_ptrs = [std::ptr::null::<Elem>(); 64];
-        let mut stack_c_table_ptrs = [std::ptr::null::<u64>(); 64];
+        let mut stack_c_cg_ptrs = std::mem::MaybeUninit::<[*const Elem; 64]>::uninit();
+        let mut stack_c_table_ptrs = std::mem::MaybeUninit::<[*const u64; 64]>::uninit();
         let mut heap_c_cg_ptrs;
         let mut heap_c_table_ptrs;
         let (c_cg_ptrs_ptr, c_table_ptrs_ptr): (*mut *const Elem, *mut *const u64) = if c_len <= 64
         {
             (
-                stack_c_cg_ptrs.as_mut_ptr(),
-                stack_c_table_ptrs.as_mut_ptr(),
+                stack_c_cg_ptrs.as_mut_ptr() as *mut *const Elem,
+                stack_c_table_ptrs.as_mut_ptr() as *mut *const u64,
             )
         } else {
-            heap_c_cg_ptrs = vec![std::ptr::null::<Elem>(); c_len];
-            heap_c_table_ptrs = vec![std::ptr::null::<u64>(); c_len];
+            heap_c_cg_ptrs = Vec::with_capacity(c_len);
+            heap_c_table_ptrs = Vec::with_capacity(c_len);
             (heap_c_cg_ptrs.as_mut_ptr(), heap_c_table_ptrs.as_mut_ptr())
         };
         let matrix_z_tables_ptr = self.matrix.z_tables.as_ptr();
-        for c_idx in 0..c_len {
-            let c = unsafe { *set_ptr.add(c_idx) };
+        let mut c_idx = 0usize;
+        while c_idx + 3 < c_len {
             unsafe {
+                let c0 = *set_ptr.add(c_idx);
+                let c1 = *set_ptr.add(c_idx + 1);
+                let c2 = *set_ptr.add(c_idx + 2);
+                let c3 = *set_ptr.add(c_idx + 3);
+                *c_cg_ptrs_ptr.add(c_idx) = data_cg_ptr.add(c0 * num_guesses);
+                *c_cg_ptrs_ptr.add(c_idx + 1) = data_cg_ptr.add(c1 * num_guesses);
+                *c_cg_ptrs_ptr.add(c_idx + 2) = data_cg_ptr.add(c2 * num_guesses);
+                *c_cg_ptrs_ptr.add(c_idx + 3) = data_cg_ptr.add(c3 * num_guesses);
+                *c_table_ptrs_ptr.add(c_idx) = matrix_z_tables_ptr.add(c0 * R);
+                *c_table_ptrs_ptr.add(c_idx + 1) = matrix_z_tables_ptr.add(c1 * R);
+                *c_table_ptrs_ptr.add(c_idx + 2) = matrix_z_tables_ptr.add(c2 * R);
+                *c_table_ptrs_ptr.add(c_idx + 3) = matrix_z_tables_ptr.add(c3 * R);
+            }
+            c_idx += 4;
+        }
+        while c_idx < c_len {
+            unsafe {
+                let c = *set_ptr.add(c_idx);
                 *c_cg_ptrs_ptr.add(c_idx) = data_cg_ptr.add(c * num_guesses);
                 *c_table_ptrs_ptr.add(c_idx) = matrix_z_tables_ptr.add(c * R);
             }
+            c_idx += 1;
         }
 
         let mut dummy_projs = std::mem::MaybeUninit::<[u64; R]>::uninit();
@@ -648,14 +669,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         for c_idx in 1..c_len {
             let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
             let mut r = 0;
-            while r + 3 < R {
+            while r + 15 < R {
                 unsafe {
                     *dummy_ptr.add(r) ^= *c_tab.add(r);
                     *dummy_ptr.add(r + 1) ^= *c_tab.add(r + 1);
                     *dummy_ptr.add(r + 2) ^= *c_tab.add(r + 2);
                     *dummy_ptr.add(r + 3) ^= *c_tab.add(r + 3);
+                    *dummy_ptr.add(r + 4) ^= *c_tab.add(r + 4);
+                    *dummy_ptr.add(r + 5) ^= *c_tab.add(r + 5);
+                    *dummy_ptr.add(r + 6) ^= *c_tab.add(r + 6);
+                    *dummy_ptr.add(r + 7) ^= *c_tab.add(r + 7);
+                    *dummy_ptr.add(r + 8) ^= *c_tab.add(r + 8);
+                    *dummy_ptr.add(r + 9) ^= *c_tab.add(r + 9);
+                    *dummy_ptr.add(r + 10) ^= *c_tab.add(r + 10);
+                    *dummy_ptr.add(r + 11) ^= *c_tab.add(r + 11);
+                    *dummy_ptr.add(r + 12) ^= *c_tab.add(r + 12);
+                    *dummy_ptr.add(r + 13) ^= *c_tab.add(r + 13);
+                    *dummy_ptr.add(r + 14) ^= *c_tab.add(r + 14);
+                    *dummy_ptr.add(r + 15) ^= *c_tab.add(r + 15);
                 }
-                r += 4;
+                r += 16;
             }
             while r < R {
                 unsafe {
@@ -705,31 +738,65 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if (block & (block - 1)) == 0 {
                 let tz = block.trailing_zeros() as usize;
                 let g_idx = block_start + tz;
+                let g_ptr = unsafe { matrix_data_ptr.add(g_idx * num_candidates) };
                 let mut proj = 0u64;
                 let mut c_idx = 0usize;
-                while c_idx + 3 < c_len {
-                    let c_base0 = unsafe { *c_cg_ptrs_ptr.add(c_idx) };
-                    let c_base1 = unsafe { *c_cg_ptrs_ptr.add(c_idx + 1) };
-                    let c_base2 = unsafe { *c_cg_ptrs_ptr.add(c_idx + 2) };
-                    let c_base3 = unsafe { *c_cg_ptrs_ptr.add(c_idx + 3) };
+                while c_idx + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(c_idx) };
+                    let c1 = unsafe { *set_ptr.add(c_idx + 1) };
+                    let c2 = unsafe { *set_ptr.add(c_idx + 2) };
+                    let c3 = unsafe { *set_ptr.add(c_idx + 3) };
+                    let c4 = unsafe { *set_ptr.add(c_idx + 4) };
+                    let c5 = unsafe { *set_ptr.add(c_idx + 5) };
+                    let c6 = unsafe { *set_ptr.add(c_idx + 6) };
+                    let c7 = unsafe { *set_ptr.add(c_idx + 7) };
                     let c_tab0 = unsafe { *c_table_ptrs_ptr.add(c_idx) };
                     let c_tab1 = unsafe { *c_table_ptrs_ptr.add(c_idx + 1) };
                     let c_tab2 = unsafe { *c_table_ptrs_ptr.add(c_idx + 2) };
                     let c_tab3 = unsafe { *c_table_ptrs_ptr.add(c_idx + 3) };
-                    let r0 = unsafe { (*c_base0.add(g_idx)).to_usize() };
-                    let r1 = unsafe { (*c_base1.add(g_idx)).to_usize() };
-                    let r2 = unsafe { (*c_base2.add(g_idx)).to_usize() };
-                    let r3 = unsafe { (*c_base3.add(g_idx)).to_usize() };
+                    let c_tab4 = unsafe { *c_table_ptrs_ptr.add(c_idx + 4) };
+                    let c_tab5 = unsafe { *c_table_ptrs_ptr.add(c_idx + 5) };
+                    let c_tab6 = unsafe { *c_table_ptrs_ptr.add(c_idx + 6) };
+                    let c_tab7 = unsafe { *c_table_ptrs_ptr.add(c_idx + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
                     unsafe {
-                        proj ^=
-                            *c_tab0.add(r0) ^ *c_tab1.add(r1) ^ *c_tab2.add(r2) ^ *c_tab3.add(r3);
+                        proj ^= (*c_tab0.add(r0) ^ *c_tab1.add(r1))
+                            ^ (*c_tab2.add(r2) ^ *c_tab3.add(r3))
+                            ^ (*c_tab4.add(r4) ^ *c_tab5.add(r5))
+                            ^ (*c_tab6.add(r6) ^ *c_tab7.add(r7));
+                    }
+                    c_idx += 8;
+                }
+                while c_idx + 3 < c_len {
+                    let c0 = unsafe { *set_ptr.add(c_idx) };
+                    let c1 = unsafe { *set_ptr.add(c_idx + 1) };
+                    let c2 = unsafe { *set_ptr.add(c_idx + 2) };
+                    let c3 = unsafe { *set_ptr.add(c_idx + 3) };
+                    let c_tab0 = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_tab1 = unsafe { *c_table_ptrs_ptr.add(c_idx + 1) };
+                    let c_tab2 = unsafe { *c_table_ptrs_ptr.add(c_idx + 2) };
+                    let c_tab3 = unsafe { *c_table_ptrs_ptr.add(c_idx + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    unsafe {
+                        proj ^= (*c_tab0.add(r0) ^ *c_tab1.add(r1))
+                            ^ (*c_tab2.add(r2) ^ *c_tab3.add(r3));
                     }
                     c_idx += 4;
                 }
                 while c_idx < c_len {
-                    let c_base = unsafe { *c_cg_ptrs_ptr.add(c_idx) };
+                    let c = unsafe { *set_ptr.add(c_idx) };
                     let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
-                    let r = unsafe { (*c_base.add(g_idx)).to_usize() };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
                     proj ^= unsafe { *c_tab.add(r) };
                     c_idx += 1;
                 }
@@ -798,13 +865,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         j += 4;
                     }
-                    while j < ones {
+                    while j + 1 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) = *c_table_ptr.add(r1);
+                        }
+                        j += 2;
+                    }
+                    if j < ones {
                         let off = unsafe { *offsets_ptr.add(j) as usize };
                         let r = unsafe { (*c_ptr.add(off)).to_usize() };
                         unsafe {
                             *sparse_ptr.add(j) = *c_table_ptr.add(r);
                         }
-                        j += 1;
                     }
                 }
                 for c_idx in 1..c_len {
@@ -828,13 +905,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         j += 4;
                     }
-                    while j < ones {
+                    while j + 1 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
+                        }
+                        j += 2;
+                    }
+                    if j < ones {
                         let off = unsafe { *offsets_ptr.add(j) as usize };
                         let r = unsafe { (*c_ptr.add(off)).to_usize() };
                         unsafe {
                             *sparse_ptr.add(j) ^= *c_table_ptr.add(r);
                         }
-                        j += 1;
                     }
                 }
                 let mut kept_mask = 0u64;
@@ -1045,11 +1132,26 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             kept_count += kept_mask.count_ones() as usize;
         }
 
-        for i in 0..added_len {
+        let mut i = 0usize;
+        while i + 3 < added_len {
+            unsafe {
+                let idx0 = *added_ptr.add(i);
+                let idx1 = *added_ptr.add(i + 1);
+                let idx2 = *added_ptr.add(i + 2);
+                let idx3 = *added_ptr.add(i + 3);
+                *table_ptr.add(idx0) = 0;
+                *table_ptr.add(idx1) = 0;
+                *table_ptr.add(idx2) = 0;
+                *table_ptr.add(idx3) = 0;
+            }
+            i += 4;
+        }
+        while i < added_len {
             unsafe {
                 let idx = *added_ptr.add(i);
                 *table_ptr.add(idx) = 0;
             }
+            i += 1;
         }
 
         if should_cache_equiv {
