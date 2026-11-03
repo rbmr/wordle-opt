@@ -388,71 +388,98 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 let mut has_one_collision = false;
 
-                // Candidate 0
-                let g0 = unsafe { *cand_to_guess_ptr.add(c0) };
-                let g0_ptr = unsafe { data_ptr.add(g0 * num_cand) };
-                let r1 = unsafe { *g0_ptr.add(c1) };
-                let r2 = unsafe { *g0_ptr.add(c2) };
-                let r3 = unsafe { *g0_ptr.add(c3) };
-                let eq12 = r1 == r2;
-                let eq13 = r1 == r3;
-                let eq23 = r2 == r3;
-                if !eq12 && !eq13 && !eq23 {
-                    return (7, true);
-                }
-                if (eq12 as u8) + (eq13 as u8) + (eq23 as u8) == 1 {
-                    has_one_collision = true;
+                macro_rules! eval_cand4 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+                        let rc = unsafe { *gi_ptr.add($cc) };
+
+                        let eq_ab = ra == rb;
+                        let eq_ac = ra == rc;
+                        let eq_bc = rb == rc;
+
+                        if has_one_collision {
+                            if !eq_ab && !eq_ac && !eq_bc {
+                                return (7, true);
+                            }
+                        } else {
+                            let sum = (eq_ab as u8) + (eq_ac as u8) + (eq_bc as u8);
+                            if sum == 0 {
+                                return (7, true);
+                            }
+                            if sum == 1 {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
                 }
 
-                // Candidate 1
-                let g1 = unsafe { *cand_to_guess_ptr.add(c1) };
-                let g1_ptr = unsafe { data_ptr.add(g1 * num_cand) };
-                let r0 = unsafe { *g1_ptr.add(c0) };
-                let r2 = unsafe { *g1_ptr.add(c2) };
-                let r3 = unsafe { *g1_ptr.add(c3) };
-                let eq02 = r0 == r2;
-                let eq03 = r0 == r3;
-                let eq23 = r2 == r3;
-                if !eq02 && !eq03 && !eq23 {
-                    return (7, true);
-                }
-                if !has_one_collision && (eq02 as u8) + (eq03 as u8) + (eq23 as u8) == 1 {
-                    has_one_collision = true;
-                }
-
-                // Candidate 2
-                let g2 = unsafe { *cand_to_guess_ptr.add(c2) };
-                let g2_ptr = unsafe { data_ptr.add(g2 * num_cand) };
-                let r0 = unsafe { *g2_ptr.add(c0) };
-                let r1 = unsafe { *g2_ptr.add(c1) };
-                let r3 = unsafe { *g2_ptr.add(c3) };
-                let eq01 = r0 == r1;
-                let eq03 = r0 == r3;
-                let eq13 = r1 == r3;
-                if !eq01 && !eq03 && !eq13 {
-                    return (7, true);
-                }
-                if !has_one_collision && (eq01 as u8) + (eq03 as u8) + (eq13 as u8) == 1 {
-                    has_one_collision = true;
-                }
-
-                // Candidate 3
-                let g3 = unsafe { *cand_to_guess_ptr.add(c3) };
-                let g3_ptr = unsafe { data_ptr.add(g3 * num_cand) };
-                let r0 = unsafe { *g3_ptr.add(c0) };
-                let r1 = unsafe { *g3_ptr.add(c1) };
-                let r2 = unsafe { *g3_ptr.add(c2) };
-                let eq01 = r0 == r1;
-                let eq02 = r0 == r2;
-                let eq12 = r1 == r2;
-                if !eq01 && !eq02 && !eq12 {
-                    return (7, true);
-                }
-                if !has_one_collision && (eq01 as u8) + (eq02 as u8) + (eq12 as u8) == 1 {
-                    has_one_collision = true;
-                }
+                eval_cand4!(c0, c1, c2, c3);
+                eval_cand4!(c1, c0, c2, c3);
+                eval_cand4!(c2, c0, c1, c3);
+                eval_cand4!(c3, c0, c1, c2);
 
                 (8, has_one_collision)
+            }
+            5 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand5 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+                        let rc = unsafe { *gi_ptr.add($cc) };
+                        let rd = unsafe { *gi_ptr.add($cd) };
+
+                        let eq_ab = ra == rb;
+                        let eq_ac = ra == rc;
+                        let eq_bc = rb == rc;
+                        let eq_ad = ra == rd;
+                        let eq_bd = rb == rd;
+                        let eq_cd = rc == rd;
+
+                        if has_one_collision {
+                            if !eq_ab && !eq_ac && !eq_bc && !eq_ad && !eq_bd && !eq_cd {
+                                return (9, true);
+                            }
+                        } else {
+                            let sum = (eq_ab as u8)
+                                + (eq_ac as u8)
+                                + (eq_bc as u8)
+                                + (eq_ad as u8)
+                                + (eq_bd as u8)
+                                + (eq_cd as u8);
+                            if sum == 0 {
+                                return (9, true);
+                            }
+                            if sum == 1 {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand5!(c0, c1, c2, c3, c4);
+                eval_cand5!(c1, c0, c2, c3, c4);
+                eval_cand5!(c2, c0, c1, c3, c4);
+                eval_cand5!(c3, c0, c1, c2, c4);
+                eval_cand5!(c4, c0, c1, c2, c3);
+
+                (10, has_one_collision)
             }
             _ => {
                 let mut best_inside = u32::MAX;
