@@ -1561,6 +1561,134 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 return None;
             }
+            if n == 14 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                let c6 = candidates[6];
+                let c7 = candidates[7];
+                let c8 = candidates[8];
+                let c9 = candidates[9];
+                let c10 = candidates[10];
+                let c11 = candidates[11];
+                let c12 = candidates[12];
+                let c13 = candidates[13];
+                for &g in &cand_guesses[0..14] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    let r3 = unsafe { *g_ptr.add(c3) };
+                    let r4 = unsafe { *g_ptr.add(c4) };
+                    let r5 = unsafe { *g_ptr.add(c5) };
+                    let r6 = unsafe { *g_ptr.add(c6) };
+                    let r7 = unsafe { *g_ptr.add(c7) };
+                    let r8 = unsafe { *g_ptr.add(c8) };
+                    let r9 = unsafe { *g_ptr.add(c9) };
+                    let r10 = unsafe { *g_ptr.add(c10) };
+                    let r11 = unsafe { *g_ptr.add(c11) };
+                    let r12 = unsafe { *g_ptr.add(c12) };
+                    let r13 = unsafe { *g_ptr.add(c13) };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r0 != r6
+                        && r0 != r7
+                        && r0 != r8
+                        && r0 != r9
+                        && r0 != r10
+                        && r0 != r11
+                        && r0 != r12
+                        && r0 != r13
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r1 != r6
+                        && r1 != r7
+                        && r1 != r8
+                        && r1 != r9
+                        && r1 != r10
+                        && r1 != r11
+                        && r1 != r12
+                        && r1 != r13
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r2 != r6
+                        && r2 != r7
+                        && r2 != r8
+                        && r2 != r9
+                        && r2 != r10
+                        && r2 != r11
+                        && r2 != r12
+                        && r2 != r13
+                        && r3 != r4
+                        && r3 != r5
+                        && r3 != r6
+                        && r3 != r7
+                        && r3 != r8
+                        && r3 != r9
+                        && r3 != r10
+                        && r3 != r11
+                        && r3 != r12
+                        && r3 != r13
+                        && r4 != r5
+                        && r4 != r6
+                        && r4 != r7
+                        && r4 != r8
+                        && r4 != r9
+                        && r4 != r10
+                        && r4 != r11
+                        && r4 != r12
+                        && r4 != r13
+                        && r5 != r6
+                        && r5 != r7
+                        && r5 != r8
+                        && r5 != r9
+                        && r5 != r10
+                        && r5 != r11
+                        && r5 != r12
+                        && r5 != r13
+                        && r6 != r7
+                        && r6 != r8
+                        && r6 != r9
+                        && r6 != r10
+                        && r6 != r11
+                        && r6 != r12
+                        && r6 != r13
+                        && r7 != r8
+                        && r7 != r9
+                        && r7 != r10
+                        && r7 != r11
+                        && r7 != r12
+                        && r7 != r13
+                        && r8 != r9
+                        && r8 != r10
+                        && r8 != r11
+                        && r8 != r12
+                        && r8 != r13
+                        && r9 != r10
+                        && r9 != r11
+                        && r9 != r12
+                        && r9 != r13
+                        && r10 != r11
+                        && r10 != r12
+                        && r10 != r13
+                        && r11 != r12
+                        && r11 != r13
+                        && r12 != r13
+                    {
+                        return Some((g, 27));
+                    }
+                }
+                return None;
+            }
             for &g in &cand_guesses[0..n] {
                 let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
 
@@ -2214,6 +2342,134 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 return None;
             }
+            if n == 14 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                let c6 = candidates[6];
+                let c7 = candidates[7];
+                let c8 = candidates[8];
+                let c9 = candidates[9];
+                let c10 = candidates[10];
+                let c11 = candidates[11];
+                let c12 = candidates[12];
+                let c13 = candidates[13];
+                for &g in &cand_guesses[0..14] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    let r3 = unsafe { (*g_ptr.add(c3)).0 };
+                    let r4 = unsafe { (*g_ptr.add(c4)).0 };
+                    let r5 = unsafe { (*g_ptr.add(c5)).0 };
+                    let r6 = unsafe { (*g_ptr.add(c6)).0 };
+                    let r7 = unsafe { (*g_ptr.add(c7)).0 };
+                    let r8 = unsafe { (*g_ptr.add(c8)).0 };
+                    let r9 = unsafe { (*g_ptr.add(c9)).0 };
+                    let r10 = unsafe { (*g_ptr.add(c10)).0 };
+                    let r11 = unsafe { (*g_ptr.add(c11)).0 };
+                    let r12 = unsafe { (*g_ptr.add(c12)).0 };
+                    let r13 = unsafe { (*g_ptr.add(c13)).0 };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r0 != r6
+                        && r0 != r7
+                        && r0 != r8
+                        && r0 != r9
+                        && r0 != r10
+                        && r0 != r11
+                        && r0 != r12
+                        && r0 != r13
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r1 != r6
+                        && r1 != r7
+                        && r1 != r8
+                        && r1 != r9
+                        && r1 != r10
+                        && r1 != r11
+                        && r1 != r12
+                        && r1 != r13
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r2 != r6
+                        && r2 != r7
+                        && r2 != r8
+                        && r2 != r9
+                        && r2 != r10
+                        && r2 != r11
+                        && r2 != r12
+                        && r2 != r13
+                        && r3 != r4
+                        && r3 != r5
+                        && r3 != r6
+                        && r3 != r7
+                        && r3 != r8
+                        && r3 != r9
+                        && r3 != r10
+                        && r3 != r11
+                        && r3 != r12
+                        && r3 != r13
+                        && r4 != r5
+                        && r4 != r6
+                        && r4 != r7
+                        && r4 != r8
+                        && r4 != r9
+                        && r4 != r10
+                        && r4 != r11
+                        && r4 != r12
+                        && r4 != r13
+                        && r5 != r6
+                        && r5 != r7
+                        && r5 != r8
+                        && r5 != r9
+                        && r5 != r10
+                        && r5 != r11
+                        && r5 != r12
+                        && r5 != r13
+                        && r6 != r7
+                        && r6 != r8
+                        && r6 != r9
+                        && r6 != r10
+                        && r6 != r11
+                        && r6 != r12
+                        && r6 != r13
+                        && r7 != r8
+                        && r7 != r9
+                        && r7 != r10
+                        && r7 != r11
+                        && r7 != r12
+                        && r7 != r13
+                        && r8 != r9
+                        && r8 != r10
+                        && r8 != r11
+                        && r8 != r12
+                        && r8 != r13
+                        && r9 != r10
+                        && r9 != r11
+                        && r9 != r12
+                        && r9 != r13
+                        && r10 != r11
+                        && r10 != r12
+                        && r10 != r13
+                        && r11 != r12
+                        && r11 != r13
+                        && r12 != r13
+                    {
+                        return Some((g, 27));
+                    }
+                }
+                return None;
+            }
             for &g in &cand_guesses[0..n] {
                 let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
 
@@ -2314,10 +2570,10 @@ impl<'a> OptimalPolicy<'a> {
             let cap_bounds = &self.capacity_bounds_2d[self.max_k];
             let first_g = active[0].0;
 
-            let num_resp = self.matrix.num_responses;
-            let mut counts = vec![0u16; num_resp];
-            let mut bucket_hashes = vec![0u64; num_resp];
-            let mut non_empty_indices = vec![0u16; num_resp];
+            let mut counts = [0u16; 2187];
+            let mut bucket_hashes = [0u64; 2187];
+            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
+            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
             let mut num_non_empty = 0;
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
@@ -2351,7 +2607,7 @@ impl<'a> OptimalPolicy<'a> {
                 unsafe {
                     let cnt = *counts.get_unchecked(r_idx);
                     if cnt == 0 {
-                        *non_empty_indices.get_unchecked_mut(num_non_empty) = r_idx as u16;
+                        *non_empty_indices_ptr.add(num_non_empty) = r_idx as u16;
                         num_non_empty += 1;
                     }
                     *counts.get_unchecked_mut(r_idx) = cnt + 1;
@@ -2359,32 +2615,38 @@ impl<'a> OptimalPolicy<'a> {
                 }
             }
 
-            let mut offsets = vec![0usize; num_resp + 1];
-            for r_idx in 0..num_resp {
+            let mut offsets = std::mem::MaybeUninit::<[usize; 2187]>::uninit();
+            let offsets_ptr = offsets.as_mut_ptr() as *mut usize;
+            let mut current_offsets = std::mem::MaybeUninit::<[usize; 2187]>::uninit();
+            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut usize;
+            let mut acc = 0usize;
+            for i in 0..num_non_empty {
+                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
                 unsafe {
-                    *offsets.get_unchecked_mut(r_idx + 1) =
-                        *offsets.get_unchecked(r_idx) + *counts.get_unchecked(r_idx) as usize;
+                    *offsets_ptr.add(r_idx) = acc;
+                    *current_offsets_ptr.add(r_idx) = acc;
                 }
+                acc += p_len;
             }
             let mut sorted_set = vec![0usize; candidates.len()];
-            let mut current_offsets = offsets.clone();
             for &c in candidates {
                 let r_idx = if !first_g_u8_ptr.is_null() {
                     unsafe { *first_g_u8_ptr.add(c) as usize }
                 } else {
                     unsafe { (*first_g_u16_ptr.add(c)).0 as usize }
                 };
-                let pos = unsafe { *current_offsets.get_unchecked(r_idx) };
+                let pos = unsafe { *current_offsets_ptr.add(r_idx) };
                 unsafe {
                     *sorted_set.get_unchecked_mut(pos) = c;
-                    *current_offsets.get_unchecked_mut(r_idx) += 1;
+                    *current_offsets_ptr.add(r_idx) = pos + 1;
                 }
             }
 
-            let mut bucket_tasks = Vec::new();
+            let mut bucket_tasks = Vec::with_capacity(num_non_empty);
             let mut base_cost = candidates.len() as u32;
             for i in 0..num_non_empty {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
+                let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
                 if r_idx == self.matrix.win_response.0 as usize {
                     continue;
@@ -2398,7 +2660,7 @@ impl<'a> OptimalPolicy<'a> {
                     base_cost += cached_val;
                     continue;
                 }
-                let start = unsafe { *offsets.get_unchecked(r_idx) };
+                let start = unsafe { *offsets_ptr.add(r_idx) };
                 let end = start + p_len;
                 let p = &sorted_set[start..end];
                 bucket_tasks.push((p, hash));

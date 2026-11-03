@@ -4172,6 +4172,95 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         + unsafe { *parent_cap_bounds_ptr.add(count11 as usize) }
                         + unsafe { *parent_cap_bounds_ptr.add(count12 as usize) },
                 )
+            } else if num_non_empty == 14 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                let r6 = unsafe { *non_empty_indices_ptr.add(6) as usize };
+                let r7 = unsafe { *non_empty_indices_ptr.add(7) as usize };
+                let r8 = unsafe { *non_empty_indices_ptr.add(8) as usize };
+                let r9 = unsafe { *non_empty_indices_ptr.add(9) as usize };
+                let r10 = unsafe { *non_empty_indices_ptr.add(10) as usize };
+                let r11 = unsafe { *non_empty_indices_ptr.add(11) as usize };
+                let r12 = unsafe { *non_empty_indices_ptr.add(12) as usize };
+                let r13 = unsafe { *non_empty_indices_ptr.add(13) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let count3 = unsafe { *counts_ptr.add(r3) } as u32;
+                let count4 = unsafe { *counts_ptr.add(r4) } as u32;
+                let count5 = unsafe { *counts_ptr.add(r5) } as u32;
+                let count6 = unsafe { *counts_ptr.add(r6) } as u32;
+                let count7 = unsafe { *counts_ptr.add(r7) } as u32;
+                let count8 = unsafe { *counts_ptr.add(r8) } as u32;
+                let count9 = unsafe { *counts_ptr.add(r9) } as u32;
+                let count10 = unsafe { *counts_ptr.add(r10) } as u32;
+                let count11 = unsafe { *counts_ptr.add(r11) } as u32;
+                let count12 = unsafe { *counts_ptr.add(r12) } as u32;
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    *counts_ptr.add(r4) = 0;
+                    *counts_ptr.add(r5) = 0;
+                    *counts_ptr.add(r6) = 0;
+                    *counts_ptr.add(r7) = 0;
+                    *counts_ptr.add(r8) = 0;
+                    *counts_ptr.add(r9) = 0;
+                    *counts_ptr.add(r10) = 0;
+                    *counts_ptr.add(r11) = 0;
+                    *counts_ptr.add(r12) = 0;
+                    *counts_ptr.add(r13) = 0;
+                }
+                let count13 = (c_len as u32 - 1)
+                    - count0
+                    - count1
+                    - count2
+                    - count3
+                    - count4
+                    - count5
+                    - count6
+                    - count7
+                    - count8
+                    - count9
+                    - count10
+                    - count11
+                    - count12;
+                (
+                    1 + count0 * count0
+                        + count1 * count1
+                        + count2 * count2
+                        + count3 * count3
+                        + count4 * count4
+                        + count5 * count5
+                        + count6 * count6
+                        + count7 * count7
+                        + count8 * count8
+                        + count9 * count9
+                        + count10 * count10
+                        + count11 * count11
+                        + count12 * count12
+                        + count13 * count13,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count5 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count6 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count7 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count8 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count9 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count10 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count11 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count12 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count13 as usize) },
+                )
             } else {
                 let mut exp = 1u32;
                 let mut lb = c_len as u32;
@@ -5175,6 +5264,108 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     + unsafe { *parent_cap_bounds_ptr.add(c10 as usize) }
                                     + unsafe { *parent_cap_bounds_ptr.add(c11 as usize) }
                                     + unsafe { *parent_cap_bounds_ptr.add(c12 as usize) },
+                            )
+                        } else if num_non_empty == 14 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                            let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                            let r6 = unsafe { *non_empty_indices_ptr.add(6) as usize };
+                            let r7 = unsafe { *non_empty_indices_ptr.add(7) as usize };
+                            let r8 = unsafe { *non_empty_indices_ptr.add(8) as usize };
+                            let r9 = unsafe { *non_empty_indices_ptr.add(9) as usize };
+                            let r10 = unsafe { *non_empty_indices_ptr.add(10) as usize };
+                            let r11 = unsafe { *non_empty_indices_ptr.add(11) as usize };
+                            let r12 = unsafe { *non_empty_indices_ptr.add(12) as usize };
+                            let r13 = unsafe { *non_empty_indices_ptr.add(13) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let count3 = unsafe { *counts_ptr.add(r3) };
+                            let count4 = unsafe { *counts_ptr.add(r4) };
+                            let count5 = unsafe { *counts_ptr.add(r5) };
+                            let count6 = unsafe { *counts_ptr.add(r6) };
+                            let count7 = unsafe { *counts_ptr.add(r7) };
+                            let count8 = unsafe { *counts_ptr.add(r8) };
+                            let count9 = unsafe { *counts_ptr.add(r9) };
+                            let count10 = unsafe { *counts_ptr.add(r10) };
+                            let count11 = unsafe { *counts_ptr.add(r11) };
+                            let count12 = unsafe { *counts_ptr.add(r12) };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                                *counts_ptr.add(r4) = 0;
+                                *counts_ptr.add(r5) = 0;
+                                *counts_ptr.add(r6) = 0;
+                                *counts_ptr.add(r7) = 0;
+                                *counts_ptr.add(r8) = 0;
+                                *counts_ptr.add(r9) = 0;
+                                *counts_ptr.add(r10) = 0;
+                                *counts_ptr.add(r11) = 0;
+                                *counts_ptr.add(r12) = 0;
+                                *counts_ptr.add(r13) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = count3 as u32;
+                            let c4 = count4 as u32;
+                            let c5 = count5 as u32;
+                            let c6 = count6 as u32;
+                            let c7 = count7 as u32;
+                            let c8 = count8 as u32;
+                            let c9 = count9 as u32;
+                            let c10 = count10 as u32;
+                            let c11 = count11 as u32;
+                            let c12 = count12 as u32;
+                            let c13 = (c_len as u32)
+                                - c0
+                                - c1
+                                - c2
+                                - c3
+                                - c4
+                                - c5
+                                - c6
+                                - c7
+                                - c8
+                                - c9
+                                - c10
+                                - c11
+                                - c12;
+                            (
+                                c0 * c0
+                                    + c1 * c1
+                                    + c2 * c2
+                                    + c3 * c3
+                                    + c4 * c4
+                                    + c5 * c5
+                                    + c6 * c6
+                                    + c7 * c7
+                                    + c8 * c8
+                                    + c9 * c9
+                                    + c10 * c10
+                                    + c11 * c11
+                                    + c12 * c12
+                                    + c13 * c13,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c5 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c6 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c7 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c8 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c9 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c10 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c11 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c12 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c13 as usize) },
                             )
                         } else {
                             let mut exp = 0u32;
@@ -6930,6 +7121,504 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 } else {
                     0
                 }
+            } else if num_eval == 5 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k3 {
+                    std::mem::swap(&mut k0, &mut k3);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k4 {
+                    std::mem::swap(&mut k1, &mut k4);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                }
+                (((k0 >> 16) > 15) as usize)
+                    + (((k1 >> 16) > 15) as usize)
+                    + (((k2 >> 16) > 15) as usize)
+                    + (((k3 >> 16) > 15) as usize)
+                    + (((k4 >> 16) > 15) as usize)
+            } else if num_eval == 6 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k0 < k3 {
+                    std::mem::swap(&mut k0, &mut k3);
+                }
+                if k1 < k4 {
+                    std::mem::swap(&mut k1, &mut k4);
+                }
+                if k2 < k5 {
+                    std::mem::swap(&mut k2, &mut k5);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                }
+                (((k0 >> 16) > 15) as usize)
+                    + (((k1 >> 16) > 15) as usize)
+                    + (((k2 >> 16) > 15) as usize)
+                    + (((k3 >> 16) > 15) as usize)
+                    + (((k4 >> 16) > 15) as usize)
+                    + (((k5 >> 16) > 15) as usize)
+            } else if num_eval == 7 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut k6 = unsafe { *eval_entries_ptr.add(6) };
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+                if k4 < k6 {
+                    std::mem::swap(&mut k4, &mut k6);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+                if k0 < k3 {
+                    std::mem::swap(&mut k0, &mut k3);
+                }
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k2 < k6 {
+                    std::mem::swap(&mut k2, &mut k6);
+                }
+                if k2 < k5 {
+                    std::mem::swap(&mut k2, &mut k5);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                    *eval_entries_ptr.add(6) = k6;
+                }
+                (((k0 >> 16) > 15) as usize)
+                    + (((k1 >> 16) > 15) as usize)
+                    + (((k2 >> 16) > 15) as usize)
+                    + (((k3 >> 16) > 15) as usize)
+                    + (((k4 >> 16) > 15) as usize)
+                    + (((k5 >> 16) > 15) as usize)
+                    + (((k6 >> 16) > 15) as usize)
+            } else if num_eval == 8 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut k6 = unsafe { *eval_entries_ptr.add(6) };
+                let mut k7 = unsafe { *eval_entries_ptr.add(7) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+                if k6 < k7 {
+                    std::mem::swap(&mut k6, &mut k7);
+                }
+                if k4 < k6 {
+                    std::mem::swap(&mut k4, &mut k6);
+                }
+                if k5 < k7 {
+                    std::mem::swap(&mut k5, &mut k7);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k1 < k4 {
+                    std::mem::swap(&mut k1, &mut k4);
+                }
+                if k2 < k6 {
+                    std::mem::swap(&mut k2, &mut k6);
+                }
+                if k3 < k7 {
+                    std::mem::swap(&mut k3, &mut k7);
+                }
+                if k3 < k6 {
+                    std::mem::swap(&mut k3, &mut k6);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                    *eval_entries_ptr.add(6) = k6;
+                    *eval_entries_ptr.add(7) = k7;
+                }
+                (((k0 >> 16) > 15) as usize)
+                    + (((k1 >> 16) > 15) as usize)
+                    + (((k2 >> 16) > 15) as usize)
+                    + (((k3 >> 16) > 15) as usize)
+                    + (((k4 >> 16) > 15) as usize)
+                    + (((k5 >> 16) > 15) as usize)
+                    + (((k6 >> 16) > 15) as usize)
+                    + (((k7 >> 16) > 15) as usize)
+            } else if num_eval == 9 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut k6 = unsafe { *eval_entries_ptr.add(6) };
+                let mut k7 = unsafe { *eval_entries_ptr.add(7) };
+                let mut k8 = unsafe { *eval_entries_ptr.add(8) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+                if k6 < k7 {
+                    std::mem::swap(&mut k6, &mut k7);
+                }
+                if k4 < k6 {
+                    std::mem::swap(&mut k4, &mut k6);
+                }
+                if k5 < k7 {
+                    std::mem::swap(&mut k5, &mut k7);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+                if k2 < k6 {
+                    std::mem::swap(&mut k2, &mut k6);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k3 < k7 {
+                    std::mem::swap(&mut k3, &mut k7);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k0 < k8 {
+                    std::mem::swap(&mut k0, &mut k8);
+                }
+                if k4 < k8 {
+                    std::mem::swap(&mut k4, &mut k8);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k6 < k8 {
+                    std::mem::swap(&mut k6, &mut k8);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k7 < k8 {
+                    std::mem::swap(&mut k7, &mut k8);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                    *eval_entries_ptr.add(6) = k6;
+                    *eval_entries_ptr.add(7) = k7;
+                    *eval_entries_ptr.add(8) = k8;
+                }
+                (((k0 >> 16) > 15) as usize)
+                    + (((k1 >> 16) > 15) as usize)
+                    + (((k2 >> 16) > 15) as usize)
+                    + (((k3 >> 16) > 15) as usize)
+                    + (((k4 >> 16) > 15) as usize)
+                    + (((k5 >> 16) > 15) as usize)
+                    + (((k6 >> 16) > 15) as usize)
+                    + (((k7 >> 16) > 15) as usize)
+                    + (((k8 >> 16) > 15) as usize)
+            } else if num_eval == 10 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut k6 = unsafe { *eval_entries_ptr.add(6) };
+                let mut k7 = unsafe { *eval_entries_ptr.add(7) };
+                let mut k8 = unsafe { *eval_entries_ptr.add(8) };
+                let mut k9 = unsafe { *eval_entries_ptr.add(9) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+                if k6 < k7 {
+                    std::mem::swap(&mut k6, &mut k7);
+                }
+                if k4 < k6 {
+                    std::mem::swap(&mut k4, &mut k6);
+                }
+                if k5 < k7 {
+                    std::mem::swap(&mut k5, &mut k7);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+                if k2 < k6 {
+                    std::mem::swap(&mut k2, &mut k6);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k3 < k7 {
+                    std::mem::swap(&mut k3, &mut k7);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k8 < k9 {
+                    std::mem::swap(&mut k8, &mut k9);
+                }
+                if k0 < k8 {
+                    std::mem::swap(&mut k0, &mut k8);
+                }
+                if k4 < k8 {
+                    std::mem::swap(&mut k4, &mut k8);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k6 < k8 {
+                    std::mem::swap(&mut k6, &mut k8);
+                }
+                if k1 < k9 {
+                    std::mem::swap(&mut k1, &mut k9);
+                }
+                if k5 < k9 {
+                    std::mem::swap(&mut k5, &mut k9);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+                if k7 < k9 {
+                    std::mem::swap(&mut k7, &mut k9);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+                if k7 < k8 {
+                    std::mem::swap(&mut k7, &mut k8);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                    *eval_entries_ptr.add(6) = k6;
+                    *eval_entries_ptr.add(7) = k7;
+                    *eval_entries_ptr.add(8) = k8;
+                    *eval_entries_ptr.add(9) = k9;
+                }
+                (((k0 >> 16) > 15) as usize)
+                    + (((k1 >> 16) > 15) as usize)
+                    + (((k2 >> 16) > 15) as usize)
+                    + (((k3 >> 16) > 15) as usize)
+                    + (((k4 >> 16) > 15) as usize)
+                    + (((k5 >> 16) > 15) as usize)
+                    + (((k6 >> 16) > 15) as usize)
+                    + (((k7 >> 16) > 15) as usize)
+                    + (((k8 >> 16) > 15) as usize)
+                    + (((k9 >> 16) > 15) as usize)
             } else if num_eval <= 16 {
                 for j in 1..num_eval {
                     let key = unsafe { *eval_entries_ptr.add(j) };
