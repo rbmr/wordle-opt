@@ -211,10 +211,21 @@ pub(crate) fn active_guesses_with_bound(
                     idx = (idx + 1) & mask;
                 }
             }
-            for i in 0..added_len {
+            let mut i = 0;
+            while i + 3 < added_len {
+                unsafe {
+                    *table_ptr.add(*added_ptr.add(i)) = 0;
+                    *table_ptr.add(*added_ptr.add(i + 1)) = 0;
+                    *table_ptr.add(*added_ptr.add(i + 2)) = 0;
+                    *table_ptr.add(*added_ptr.add(i + 3)) = 0;
+                }
+                i += 4;
+            }
+            while i < added_len {
                 unsafe {
                     *table_ptr.add(*added_ptr.add(i)) = 0;
                 }
+                i += 1;
             }
             THREAD_ACTIVE_SCRATCH.with(|ts| *ts.borrow_mut() = Some(scratch));
             surviving
@@ -458,6 +469,9 @@ pub(crate) fn active_guesses_with_bound(
             let word_len = dict.word_len;
             let c_mask_u64 = c_mask as u64;
 
+            let mut r_buf = std::mem::MaybeUninit::<[u8; 48]>::uninit();
+            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u8;
+
             for g in 0..num_guesses {
                 if !skip_projections {
                     if (unsafe { *guess_masks_ptr.add(g) } & c_mask) == 0 {
@@ -491,6 +505,9 @@ pub(crate) fn active_guesses_with_bound(
                 let mut dup = 0usize;
                 for i in 0..c_len {
                     let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) };
+                    unsafe {
+                        *r_buf_ptr.add(i) = r;
+                    }
                     let word_idx = (r as usize) >> 6;
                     let bit = 1u64 << (r & 63);
                     let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -524,7 +541,7 @@ pub(crate) fn active_guesses_with_bound(
                     continue;
                 }
                 for i in 0..c_len {
-                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
+                    let r = unsafe { *r_buf_ptr.add(i) as usize };
                     unsafe {
                         *counts_ptr.add(r) += 1;
                     }
@@ -533,7 +550,7 @@ pub(crate) fn active_guesses_with_bound(
                 let mut expected_rem = 0u32;
                 let mut base_lb = c_len as u32;
                 for i in 0..c_len {
-                    let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
+                    let r = unsafe { *r_buf_ptr.add(i) as usize };
                     let v = unsafe { *counts_ptr.add(r) as usize };
                     if v > 0 {
                         expected_rem += (v as u32) * (v as u32);
@@ -638,10 +655,21 @@ pub(crate) fn active_guesses_with_bound(
             }
         }
 
-        for i in 0..added_len {
+        let mut i = 0;
+        while i + 3 < added_len {
+            unsafe {
+                *table_ptr.add(*added_ptr.add(i)) = 0;
+                *table_ptr.add(*added_ptr.add(i + 1)) = 0;
+                *table_ptr.add(*added_ptr.add(i + 2)) = 0;
+                *table_ptr.add(*added_ptr.add(i + 3)) = 0;
+            }
+            i += 4;
+        }
+        while i < added_len {
             unsafe {
                 *table_ptr.add(*added_ptr.add(i)) = 0;
             }
+            i += 1;
         }
         THREAD_ACTIVE_SCRATCH.with(|ts| *ts.borrow_mut() = Some(scratch));
         out

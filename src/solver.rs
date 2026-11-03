@@ -2320,11 +2320,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut has_size_3_plus = false;
             let mut dup = 0usize;
 
+            let mut r_buf = std::mem::MaybeUninit::<[u16; 32]>::uninit();
+            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+
             for cand_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
-                let r = unsafe { (*g_ptr.add(c)).to_u16() as usize };
-                let word_idx = r >> 6;
-                let bit = 1u64 << (r & 63);
+                let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                unsafe {
+                    *r_buf_ptr.add(cand_idx) = r;
+                }
+                let r_usize = r as usize;
+                let word_idx = r_usize >> 6;
+                let bit = 1u64 << (r_usize & 63);
                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
                 if (*word & bit) == 0 {
                     *word |= bit;
@@ -2379,7 +2386,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             for cand_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
-                let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                let r = unsafe { *r_buf_ptr.add(cand_idx) };
                 let word_idx = (r as usize) >> 6;
                 let bit = 1u64 << (r & 63);
                 let word = unsafe { seen_pass2.get_unchecked_mut(word_idx) };
@@ -2484,9 +2491,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
                 let mut found = 0;
                 for cand_idx in 0..c_len {
-                    let c = unsafe { *set_ptr.add(cand_idx) };
-                    let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
                     if r == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
                         unsafe {
                             *pi_ptr.add(found) = c;
                         }
