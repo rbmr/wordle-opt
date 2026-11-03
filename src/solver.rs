@@ -559,6 +559,103 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 (12, has_one_collision)
             }
+            7 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand7 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+                        let rc = unsafe { *gi_ptr.add($cc) };
+                        let rd = unsafe { *gi_ptr.add($cd) };
+                        let re = unsafe { *gi_ptr.add($ce) };
+                        let rf = unsafe { *gi_ptr.add($cf) };
+
+                        let eq_ab = ra == rb;
+                        let eq_ac = ra == rc;
+                        let eq_ad = ra == rd;
+                        let eq_ae = ra == re;
+                        let eq_af = ra == rf;
+                        let eq_bc = rb == rc;
+                        let eq_bd = rb == rd;
+                        let eq_be = rb == re;
+                        let eq_bf = rb == rf;
+                        let eq_cd = rc == rd;
+                        let eq_ce = rc == re;
+                        let eq_cf = rc == rf;
+                        let eq_de = rd == re;
+                        let eq_df = rd == rf;
+                        let eq_ef = re == rf;
+
+                        if has_one_collision {
+                            if !eq_ab
+                                && !eq_ac
+                                && !eq_ad
+                                && !eq_ae
+                                && !eq_af
+                                && !eq_bc
+                                && !eq_bd
+                                && !eq_be
+                                && !eq_bf
+                                && !eq_cd
+                                && !eq_ce
+                                && !eq_cf
+                                && !eq_de
+                                && !eq_df
+                                && !eq_ef
+                            {
+                                return (13, true);
+                            }
+                        } else {
+                            let sum = (eq_ab as u8)
+                                + (eq_ac as u8)
+                                + (eq_ad as u8)
+                                + (eq_ae as u8)
+                                + (eq_af as u8)
+                                + (eq_bc as u8)
+                                + (eq_bd as u8)
+                                + (eq_be as u8)
+                                + (eq_bf as u8)
+                                + (eq_cd as u8)
+                                + (eq_ce as u8)
+                                + (eq_cf as u8)
+                                + (eq_de as u8)
+                                + (eq_df as u8)
+                                + (eq_ef as u8);
+                            if sum == 0 {
+                                return (13, true);
+                            }
+                            if sum == 1 {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand7!(c0, c1, c2, c3, c4, c5, c6);
+                eval_cand7!(c1, c0, c2, c3, c4, c5, c6);
+                eval_cand7!(c2, c0, c1, c3, c4, c5, c6);
+                eval_cand7!(c3, c0, c1, c2, c4, c5, c6);
+                eval_cand7!(c4, c0, c1, c2, c3, c5, c6);
+                eval_cand7!(c5, c0, c1, c2, c3, c4, c6);
+                eval_cand7!(c6, c0, c1, c2, c3, c4, c5);
+
+                (14, has_one_collision)
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -566,48 +663,89 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let data_ptr = matrix.data_ptr::<Elem>();
                 let bucket_ptr = bucket.as_ptr();
                 let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
-                let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
-                let seen_ptr = seen.as_mut_ptr() as *mut Elem;
 
-                for idx in 0..n {
-                    let ci = unsafe { *bucket_ptr.add(idx) };
-                    let gi = unsafe { *cand_to_guess_ptr.add(ci) };
-                    let g_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                if M <= 4 {
+                    for idx in 0..n {
+                        let ci = unsafe { *bucket_ptr.add(idx) };
+                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
+                        let g_ptr = unsafe { data_ptr.add(gi * num_cand) };
 
-                    let mut seen_len = 0;
-                    let mut collisions = 0;
-                    let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+                        let mut seen = [0u64; M];
+                        let mut collisions = 0;
+                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
 
-                    'scan: for i in 0..n {
-                        if i == idx {
-                            continue;
-                        }
-                        let c = unsafe { *bucket_ptr.add(i) };
-                        let r = unsafe { *g_ptr.add(c) };
-                        for j in 0..seen_len {
-                            if unsafe { *seen_ptr.add(j) } == r {
+                        'scan_bm: for i in 0..n {
+                            if i == idx {
+                                continue;
+                            }
+                            let c = unsafe { *bucket_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            let word_idx = r >> 6;
+                            let bit = 1u64 << (r & 63);
+                            let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                            if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions == max_collisions {
-                                    break 'scan;
+                                    break 'scan_bm;
                                 }
-                                continue 'scan;
+                            } else {
+                                *word |= bit;
                             }
                         }
-                        unsafe {
-                            *seen_ptr.add(seen_len) = r;
+
+                        if collisions == 0 {
+                            return ((2 * n - 1) as u32, true);
                         }
-                        seen_len += 1;
+                        if collisions == 1 && max_collisions == 2 {
+                            best_inside = target_exact;
+                        }
                     }
 
-                    if collisions == 0 {
-                        return ((2 * n - 1) as u32, true);
+                    (target_exact, best_inside == target_exact)
+                } else {
+                    let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
+                    let seen_ptr = seen.as_mut_ptr() as *mut Elem;
+
+                    for idx in 0..n {
+                        let ci = unsafe { *bucket_ptr.add(idx) };
+                        let gi = unsafe { *cand_to_guess_ptr.add(ci) };
+                        let g_ptr = unsafe { data_ptr.add(gi * num_cand) };
+
+                        let mut seen_len = 0;
+                        let mut collisions = 0;
+                        let max_collisions = if best_inside == target_exact { 1 } else { 2 };
+
+                        'scan: for i in 0..n {
+                            if i == idx {
+                                continue;
+                            }
+                            let c = unsafe { *bucket_ptr.add(i) };
+                            let r = unsafe { *g_ptr.add(c) };
+                            for j in 0..seen_len {
+                                if unsafe { *seen_ptr.add(j) } == r {
+                                    collisions += 1;
+                                    if collisions == max_collisions {
+                                        break 'scan;
+                                    }
+                                    continue 'scan;
+                                }
+                            }
+                            unsafe {
+                                *seen_ptr.add(seen_len) = r;
+                            }
+                            seen_len += 1;
+                        }
+
+                        if collisions == 0 {
+                            return ((2 * n - 1) as u32, true);
+                        }
+                        if collisions == 1 && max_collisions == 2 {
+                            best_inside = target_exact;
+                        }
                     }
-                    if collisions == 1 && max_collisions == 2 {
-                        best_inside = target_exact;
-                    }
+
+                    (target_exact, best_inside == target_exact)
                 }
-
-                (target_exact, best_inside == target_exact)
             }
         }
     }
@@ -695,11 +833,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         };
         let mut added_len = 0usize;
 
-        let mut stack_c_cg_ptrs = std::mem::MaybeUninit::<[*const Elem; 64]>::uninit();
-        let mut stack_c_table_ptrs = std::mem::MaybeUninit::<[*const u64; 64]>::uninit();
+        let mut stack_c_cg_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
+        let mut stack_c_table_ptrs = std::mem::MaybeUninit::<[*const u64; 256]>::uninit();
         let mut heap_c_cg_ptrs;
         let mut heap_c_table_ptrs;
-        let (c_cg_ptrs_ptr, c_table_ptrs_ptr): (*mut *const Elem, *mut *const u64) = if c_len <= 64
+        let (c_cg_ptrs_ptr, c_table_ptrs_ptr): (*mut *const Elem, *mut *const u64) = if c_len <= 256
         {
             (
                 stack_c_cg_ptrs.as_mut_ptr() as *mut *const Elem,
@@ -2004,9 +2142,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
                 let set_ptr = set.as_ptr();
                 let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
-                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 64]>::uninit();
+                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
                 let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
-                let heap_c_ptrs = if c_len > 64 {
+                let heap_c_ptrs = if c_len > 256 {
                     let mut v = Vec::with_capacity(c_len);
                     for i in 0..c_len {
                         let c = unsafe { *set_ptr.add(i) };
@@ -2027,13 +2165,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     c_mask |= m;
                     unsafe {
                         *is_in_set_ptr.add(g >> 6) |= 1u64 << (g & 63);
-                        if c_len <= 64 {
+                        if c_len <= 256 {
                             *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                         }
                     }
                 }
                 let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
-                let c_ptrs: &[*const Elem] = if c_len <= 64 {
+                let c_ptrs: &[*const Elem] = if c_len <= 256 {
                     unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
                 } else {
                     heap_c_ptrs.as_ref().unwrap()
