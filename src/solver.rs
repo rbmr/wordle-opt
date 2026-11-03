@@ -13,8 +13,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 /// The hash key represents the `set_hash` (a 64-bit Zobrist hash of the exact candidate set).
 /// The mapped value is the exact deduplicated projection of all valid guesses,
 /// deduplicated by a Zobrist hash of the responses they produce.
-pub type EquivCache =
-    [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<[u64]>>>; 1024];
+pub type EquivCache = [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<[u64]>>>; 1024];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -965,7 +964,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut i = 0;
                     while i + 15 < chunk_len {
                         let r_u64_0 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
-                        let r_u64_1 = unsafe { (c_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (c_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
                         let r0 = (r_u64_0 & 0xFF) as usize;
                         let r1 = ((r_u64_0 >> 8) & 0xFF) as usize;
                         let r2 = ((r_u64_0 >> 16) & 0xFF) as usize;
@@ -1039,7 +1039,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut i = 0;
                     while i + 15 < chunk_len {
                         let r_u64_0 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
-                        let r_u64_1 = unsafe { (c_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (c_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
                         let r0 = (r_u64_0 & 0xFF) as usize;
                         let r1 = ((r_u64_0 >> 8) & 0xFF) as usize;
                         let r2 = ((r_u64_0 >> 16) & 0xFF) as usize;
