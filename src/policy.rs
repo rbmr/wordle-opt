@@ -3017,7 +3017,7 @@ impl<'a> OptimalPolicy<'a> {
                 .collect();
 
             if !filtered_active.is_empty() {
-                const CHUNK_SIZE: usize = 8;
+                const CHUNK_SIZE: usize = 4;
                 let next = AtomicUsize::new(0);
                 let num_workers =
                     rayon::current_num_threads().min(filtered_active.len().div_ceil(CHUNK_SIZE));
@@ -3260,7 +3260,7 @@ impl<'a> OptimalPolicy<'a> {
             .collect();
 
         if !filtered_active.is_empty() {
-            const CHUNK_SIZE: usize = 8;
+            const CHUNK_SIZE: usize = 4;
             let next = AtomicUsize::new(0);
             let num_workers =
                 rayon::current_num_threads().min(filtered_active.len().div_ceil(CHUNK_SIZE));
