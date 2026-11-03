@@ -2422,12 +2422,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            #[derive(Clone, Copy)]
+            struct EvalEntry {
+                hash: u64,
+                used_val: u32,
+                r: u16,
+                count: u16,
+                is_exact: bool,
+            }
+
             let mut num_eval = 0;
-            let mut eval_entries = [LocalCount {
-                r: 0,
-                count: 0,
-                hash: 0,
-            }; 16];
+            let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 16]>::uninit();
+            let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
 
             for i in 0..num_non_empty {
                 let entry = unsafe { *local_counts_ptr.add(i) };
@@ -2445,34 +2451,59 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 if p_len > 2 {
-                    eval_entries[num_eval] = entry;
+                    unsafe {
+                        *eval_entries_ptr.add(num_eval) = EvalEntry {
+                            hash: entry.hash,
+                            used_val: 0,
+                            r: entry.r,
+                            count: entry.count,
+                            is_exact: false,
+                        };
+                    }
                     num_eval += 1;
                 }
             }
 
             if num_eval == 2 {
-                if eval_entries[0].count < eval_entries[1].count {
-                    eval_entries.swap(0, 1);
+                let e0 = unsafe { *eval_entries_ptr.add(0) };
+                let e1 = unsafe { *eval_entries_ptr.add(1) };
+                if e0.count < e1.count {
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e1;
+                        *eval_entries_ptr.add(1) = e0;
+                    }
                 }
             } else if num_eval == 3 {
-                if eval_entries[0].count < eval_entries[1].count {
-                    eval_entries.swap(0, 1);
+                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
                 }
-                if eval_entries[1].count < eval_entries[2].count {
-                    eval_entries.swap(1, 2);
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
                 }
-                if eval_entries[0].count < eval_entries[1].count {
-                    eval_entries.swap(0, 1);
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
                 }
             } else if num_eval >= 4 {
                 for j in 1..num_eval {
-                    let key = eval_entries[j];
+                    let key = unsafe { *eval_entries_ptr.add(j) };
                     let mut k = j;
-                    while k > 0 && eval_entries[k - 1].count < key.count {
-                        eval_entries[k] = eval_entries[k - 1];
+                    while k > 0 && unsafe { (*eval_entries_ptr.add(k - 1)).count } < key.count {
+                        unsafe {
+                            *eval_entries_ptr.add(k) = *eval_entries_ptr.add(k - 1);
+                        }
                         k -= 1;
                     }
-                    eval_entries[k] = key;
+                    unsafe {
+                        *eval_entries_ptr.add(k) = key;
+                    }
                 }
             }
 
@@ -2480,7 +2511,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut current_off = 0u8;
             for j in 0..num_eval {
                 small_offsets[j] = current_off;
-                current_off += eval_entries[j].count as u8;
+                current_off += unsafe { (*eval_entries_ptr.add(j)).count } as u8;
             }
 
             let mut small_p = std::mem::MaybeUninit::<[usize; 32]>::uninit();
@@ -2505,18 +2536,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             };
 
-            let mut small_p_len = [0u8; 16];
-            let mut small_p_hash = [0u64; 16];
-            let mut small_used_val = [0u32; 16];
-            let mut small_is_exact = [false; 16];
             let mut all_exact = true;
 
             for i in 0..num_eval {
-                let entry = eval_entries[i];
+                let entry = unsafe { &mut *eval_entries_ptr.add(i) };
                 let p_len = entry.count as usize;
                 let p_hash = entry.hash;
-                small_p_len[i] = p_len as u8;
-                small_p_hash[i] = p_hash;
                 let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                 let (used_val, is_exact) =
                     if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
@@ -2535,8 +2560,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         (used_val, is_exact)
                     };
 
-                small_used_val[i] = used_val;
-                small_is_exact[i] = is_exact;
+                entry.used_val = used_val;
+                entry.is_exact = is_exact;
                 if !is_exact {
                     all_exact = false;
                 }
@@ -2565,10 +2590,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut active_guesses_ptr: Option<*const [u64]> = None;
 
             for i in 0..num_eval {
-                if small_is_exact[i] {
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                if entry.is_exact {
                     continue;
                 }
-                let used_val = small_used_val[i];
+                let used_val = entry.used_val;
                 let b = cost - used_val;
                 let new_beta = beta.saturating_sub(b);
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
@@ -2579,14 +2605,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     return cost;
                 }
 
-                let p_len = small_p_len[i] as usize;
+                let p_len = entry.count as usize;
                 if (extracted_mask & (1 << i)) == 0 {
-                    extract_bucket(i, eval_entries[i].r, p_len);
+                    extract_bucket(i, entry.r, p_len);
                     extracted_mask |= 1 << i;
                 }
                 let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
                 let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
-                let p_hash = small_p_hash[i];
+                let p_hash = entry.hash;
 
                 let active_ptr = match active_guesses_ptr {
                     Some(p) => p,
