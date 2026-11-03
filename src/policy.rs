@@ -938,6 +938,71 @@ impl<'a> OptimalPolicy<'a> {
                 }
                 return None;
             }
+            if n == 5 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                for &g in &cand_guesses[0..5] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    let r3 = unsafe { *g_ptr.add(c3) };
+                    let r4 = unsafe { *g_ptr.add(c4) };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r2 != r3
+                        && r2 != r4
+                        && r3 != r4
+                    {
+                        return Some((g, 9));
+                    }
+                }
+                return None;
+            }
+            if n == 6 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                for &g in &cand_guesses[0..6] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { *g_ptr.add(c0) };
+                    let r1 = unsafe { *g_ptr.add(c1) };
+                    let r2 = unsafe { *g_ptr.add(c2) };
+                    let r3 = unsafe { *g_ptr.add(c3) };
+                    let r4 = unsafe { *g_ptr.add(c4) };
+                    let r5 = unsafe { *g_ptr.add(c5) };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r3 != r4
+                        && r3 != r5
+                        && r4 != r5
+                    {
+                        return Some((g, 11));
+                    }
+                }
+                return None;
+            }
             for &g in &cand_guesses[0..n] {
                 let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
 
@@ -961,6 +1026,104 @@ impl<'a> OptimalPolicy<'a> {
             }
         } else {
             let matrix_data_ptr = self.matrix.data.as_ptr();
+            let num_cand = self.matrix.num_candidates;
+            if n == 3 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                for &g in &cand_guesses[0..3] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    if r0 != r1 && r0 != r2 && r1 != r2 {
+                        return Some((g, 5));
+                    }
+                }
+                return None;
+            }
+            if n == 4 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                for &g in &cand_guesses[0..4] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    let r3 = unsafe { (*g_ptr.add(c3)).0 };
+                    if r0 != r1 && r0 != r2 && r0 != r3 && r1 != r2 && r1 != r3 && r2 != r3 {
+                        return Some((g, 7));
+                    }
+                }
+                return None;
+            }
+            if n == 5 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                for &g in &cand_guesses[0..5] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    let r3 = unsafe { (*g_ptr.add(c3)).0 };
+                    let r4 = unsafe { (*g_ptr.add(c4)).0 };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r2 != r3
+                        && r2 != r4
+                        && r3 != r4
+                    {
+                        return Some((g, 9));
+                    }
+                }
+                return None;
+            }
+            if n == 6 {
+                let c0 = candidates[0];
+                let c1 = candidates[1];
+                let c2 = candidates[2];
+                let c3 = candidates[3];
+                let c4 = candidates[4];
+                let c5 = candidates[5];
+                for &g in &cand_guesses[0..6] {
+                    let g_ptr = unsafe { matrix_data_ptr.add(g * num_cand) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).0 };
+                    let r1 = unsafe { (*g_ptr.add(c1)).0 };
+                    let r2 = unsafe { (*g_ptr.add(c2)).0 };
+                    let r3 = unsafe { (*g_ptr.add(c3)).0 };
+                    let r4 = unsafe { (*g_ptr.add(c4)).0 };
+                    let r5 = unsafe { (*g_ptr.add(c5)).0 };
+                    if r0 != r1
+                        && r0 != r2
+                        && r0 != r3
+                        && r0 != r4
+                        && r0 != r5
+                        && r1 != r2
+                        && r1 != r3
+                        && r1 != r4
+                        && r1 != r5
+                        && r2 != r3
+                        && r2 != r4
+                        && r2 != r5
+                        && r3 != r4
+                        && r3 != r5
+                        && r4 != r5
+                    {
+                        return Some((g, 11));
+                    }
+                }
+                return None;
+            }
             for &g in &cand_guesses[0..n] {
                 let g_ptr = unsafe { matrix_data_ptr.add(g * self.matrix.num_candidates) };
 

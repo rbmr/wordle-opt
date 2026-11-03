@@ -2081,6 +2081,42 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
                         + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) },
                 )
+            } else if num_non_empty == 6 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                let count3 = unsafe { *counts_ptr.add(r3) } as u32;
+                let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                let count4 = unsafe { *counts_ptr.add(r4) } as u32;
+                let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    *counts_ptr.add(r4) = 0;
+                    *counts_ptr.add(r5) = 0;
+                }
+                let count5 = (c_len as u32 - 1) - count0 - count1 - count2 - count3 - count4;
+                (
+                    1 + count0 * count0
+                        + count1 * count1
+                        + count2 * count2
+                        + count3 * count3
+                        + count4 * count4
+                        + count5 * count5,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count5 as usize) },
+                )
             } else {
                 let mut exp = 1u32;
                 let mut lb = c_len as u32;
@@ -2576,6 +2612,42 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
                                     + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) },
                             )
+                        } else if num_non_empty == 6 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            let count3 = unsafe { *counts_ptr.add(r3) };
+                            let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                            let count4 = unsafe { *counts_ptr.add(r4) };
+                            let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                                *counts_ptr.add(r4) = 0;
+                                *counts_ptr.add(r5) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = count3 as u32;
+                            let c4 = count4 as u32;
+                            let c5 = (c_len as u32) - c0 - c1 - c2 - c3 - c4;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3 + c4 * c4 + c5 * c5,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c5 as usize) },
+                            )
                         } else {
                             let mut exp = 0u32;
                             let mut lb = c_len as u32;
@@ -3032,7 +3104,33 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *eval_entries_ptr.add(1) = e1;
                     *eval_entries_ptr.add(2) = e2;
                 }
-            } else if num_eval >= 4 {
+            } else if num_eval == 4 {
+                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e2.count < e3.count {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.count < e2.count {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.count < e3.count {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
+                }
+            } else if num_eval >= 5 {
                 for j in 1..num_eval {
                     let key = unsafe { *eval_entries_ptr.add(j) };
                     let mut k = j;
