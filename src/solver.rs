@@ -1797,6 +1797,228 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                 (26, has_one_collision)
             }
+            14 => {
+                let c0 = unsafe { *bucket.get_unchecked(0) };
+                let c1 = unsafe { *bucket.get_unchecked(1) };
+                let c2 = unsafe { *bucket.get_unchecked(2) };
+                let c3 = unsafe { *bucket.get_unchecked(3) };
+                let c4 = unsafe { *bucket.get_unchecked(4) };
+                let c5 = unsafe { *bucket.get_unchecked(5) };
+                let c6 = unsafe { *bucket.get_unchecked(6) };
+                let c7 = unsafe { *bucket.get_unchecked(7) };
+                let c8 = unsafe { *bucket.get_unchecked(8) };
+                let c9 = unsafe { *bucket.get_unchecked(9) };
+                let c10 = unsafe { *bucket.get_unchecked(10) };
+                let c11 = unsafe { *bucket.get_unchecked(11) };
+                let c12 = unsafe { *bucket.get_unchecked(12) };
+                let c13 = unsafe { *bucket.get_unchecked(13) };
+
+                let mut has_one_collision = false;
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                macro_rules! eval_cand14 {
+                    ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $j:ident, $k:ident, $l:ident, $m:ident, $p:ident, $q:ident) => {
+                        let g = unsafe { *cand_to_guess_ptr.add($a) };
+                        let g_ptr = unsafe { data_ptr.add(g * num_cand) };
+                        let r_b = unsafe { *g_ptr.add($b) };
+                        let r_c = unsafe { *g_ptr.add($c) };
+                        let r_d = unsafe { *g_ptr.add($d) };
+                        let r_e = unsafe { *g_ptr.add($e) };
+                        let r_f = unsafe { *g_ptr.add($f) };
+                        let r_g = unsafe { *g_ptr.add($g) };
+                        let r_h = unsafe { *g_ptr.add($h) };
+                        let r_j = unsafe { *g_ptr.add($j) };
+                        let r_k = unsafe { *g_ptr.add($k) };
+                        let r_l = unsafe { *g_ptr.add($l) };
+                        let r_m = unsafe { *g_ptr.add($m) };
+                        let r_p = unsafe { *g_ptr.add($p) };
+                        let r_q = unsafe { *g_ptr.add($q) };
+                        let eq_bc = r_b == r_c;
+                        let eq_bd = r_b == r_d;
+                        let eq_be = r_b == r_e;
+                        let eq_bf = r_b == r_f;
+                        let eq_bg = r_b == r_g;
+                        let eq_bh = r_b == r_h;
+                        let eq_bj = r_b == r_j;
+                        let eq_bk = r_b == r_k;
+                        let eq_bl = r_b == r_l;
+                        let eq_bm = r_b == r_m;
+                        let eq_bp = r_b == r_p;
+                        let eq_bq = r_b == r_q;
+                        let eq_cd = r_c == r_d;
+                        let eq_ce = r_c == r_e;
+                        let eq_cf = r_c == r_f;
+                        let eq_cg = r_c == r_g;
+                        let eq_ch = r_c == r_h;
+                        let eq_cj = r_c == r_j;
+                        let eq_ck = r_c == r_k;
+                        let eq_cl = r_c == r_l;
+                        let eq_cm = r_c == r_m;
+                        let eq_cp = r_c == r_p;
+                        let eq_cq = r_c == r_q;
+                        let eq_de = r_d == r_e;
+                        let eq_df = r_d == r_f;
+                        let eq_dg = r_d == r_g;
+                        let eq_dh = r_d == r_h;
+                        let eq_dj = r_d == r_j;
+                        let eq_dk = r_d == r_k;
+                        let eq_dl = r_d == r_l;
+                        let eq_dm = r_d == r_m;
+                        let eq_dp = r_d == r_p;
+                        let eq_dq = r_d == r_q;
+                        let eq_ef = r_e == r_f;
+                        let eq_eg = r_e == r_g;
+                        let eq_eh = r_e == r_h;
+                        let eq_ej = r_e == r_j;
+                        let eq_ek = r_e == r_k;
+                        let eq_el = r_e == r_l;
+                        let eq_em = r_e == r_m;
+                        let eq_ep = r_e == r_p;
+                        let eq_eq = r_e == r_q;
+                        let eq_fg = r_f == r_g;
+                        let eq_fh = r_f == r_h;
+                        let eq_fj = r_f == r_j;
+                        let eq_fk = r_f == r_k;
+                        let eq_fl = r_f == r_l;
+                        let eq_fm = r_f == r_m;
+                        let eq_fp = r_f == r_p;
+                        let eq_fq = r_f == r_q;
+                        let eq_gh = r_g == r_h;
+                        let eq_gj = r_g == r_j;
+                        let eq_gk = r_g == r_k;
+                        let eq_gl = r_g == r_l;
+                        let eq_gm = r_g == r_m;
+                        let eq_gp = r_g == r_p;
+                        let eq_gq = r_g == r_q;
+                        let eq_hj = r_h == r_j;
+                        let eq_hk = r_h == r_k;
+                        let eq_hl = r_h == r_l;
+                        let eq_hm = r_h == r_m;
+                        let eq_hp = r_h == r_p;
+                        let eq_hq = r_h == r_q;
+                        let eq_jk = r_j == r_k;
+                        let eq_jl = r_j == r_l;
+                        let eq_jm = r_j == r_m;
+                        let eq_jp = r_j == r_p;
+                        let eq_jq = r_j == r_q;
+                        let eq_kl = r_k == r_l;
+                        let eq_km = r_k == r_m;
+                        let eq_kp = r_k == r_p;
+                        let eq_kq = r_k == r_q;
+                        let eq_lm = r_l == r_m;
+                        let eq_lp = r_l == r_p;
+                        let eq_lq = r_l == r_q;
+                        let eq_mp = r_m == r_p;
+                        let eq_mq = r_m == r_q;
+                        let eq_pq = r_p == r_q;
+                        let sum = eq_bc as u32
+                            + eq_bd as u32
+                            + eq_be as u32
+                            + eq_bf as u32
+                            + eq_bg as u32
+                            + eq_bh as u32
+                            + eq_bj as u32
+                            + eq_bk as u32
+                            + eq_bl as u32
+                            + eq_bm as u32
+                            + eq_bp as u32
+                            + eq_bq as u32
+                            + eq_cd as u32
+                            + eq_ce as u32
+                            + eq_cf as u32
+                            + eq_cg as u32
+                            + eq_ch as u32
+                            + eq_cj as u32
+                            + eq_ck as u32
+                            + eq_cl as u32
+                            + eq_cm as u32
+                            + eq_cp as u32
+                            + eq_cq as u32
+                            + eq_de as u32
+                            + eq_df as u32
+                            + eq_dg as u32
+                            + eq_dh as u32
+                            + eq_dj as u32
+                            + eq_dk as u32
+                            + eq_dl as u32
+                            + eq_dm as u32
+                            + eq_dp as u32
+                            + eq_dq as u32
+                            + eq_ef as u32
+                            + eq_eg as u32
+                            + eq_eh as u32
+                            + eq_ej as u32
+                            + eq_ek as u32
+                            + eq_el as u32
+                            + eq_em as u32
+                            + eq_ep as u32
+                            + eq_eq as u32
+                            + eq_fg as u32
+                            + eq_fh as u32
+                            + eq_fj as u32
+                            + eq_fk as u32
+                            + eq_fl as u32
+                            + eq_fm as u32
+                            + eq_fp as u32
+                            + eq_fq as u32
+                            + eq_gh as u32
+                            + eq_gj as u32
+                            + eq_gk as u32
+                            + eq_gl as u32
+                            + eq_gm as u32
+                            + eq_gp as u32
+                            + eq_gq as u32
+                            + eq_hj as u32
+                            + eq_hk as u32
+                            + eq_hl as u32
+                            + eq_hm as u32
+                            + eq_hp as u32
+                            + eq_hq as u32
+                            + eq_jk as u32
+                            + eq_jl as u32
+                            + eq_jm as u32
+                            + eq_jp as u32
+                            + eq_jq as u32
+                            + eq_kl as u32
+                            + eq_km as u32
+                            + eq_kp as u32
+                            + eq_kq as u32
+                            + eq_lm as u32
+                            + eq_lp as u32
+                            + eq_lq as u32
+                            + eq_mp as u32
+                            + eq_mq as u32
+                            + eq_pq as u32;
+                        if sum <= 1 {
+                            if sum == 0 {
+                                return (27, true);
+                            }
+                            if sum == 1 {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand14!(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c1, c0, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c2, c0, c1, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c3, c0, c1, c2, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c4, c0, c1, c2, c3, c5, c6, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c5, c0, c1, c2, c3, c4, c6, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c6, c0, c1, c2, c3, c4, c5, c7, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c7, c0, c1, c2, c3, c4, c5, c6, c8, c9, c10, c11, c12, c13);
+                eval_cand14!(c8, c0, c1, c2, c3, c4, c5, c6, c7, c9, c10, c11, c12, c13);
+                eval_cand14!(c9, c0, c1, c2, c3, c4, c5, c6, c7, c8, c10, c11, c12, c13);
+                eval_cand14!(c10, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c11, c12, c13);
+                eval_cand14!(c11, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c12, c13);
+                eval_cand14!(c12, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c13);
+                eval_cand14!(c13, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);
+
+                (28, has_one_collision)
+            }
             _ => {
                 let mut best_inside = u32::MAX;
                 let target_exact = (2 * n) as u32;
@@ -3509,6 +3731,83 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         + unsafe { *parent_cap_bounds_ptr.add(count9 as usize) }
                         + unsafe { *parent_cap_bounds_ptr.add(count10 as usize) },
                 )
+            } else if num_non_empty == 12 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                let r6 = unsafe { *non_empty_indices_ptr.add(6) as usize };
+                let r7 = unsafe { *non_empty_indices_ptr.add(7) as usize };
+                let r8 = unsafe { *non_empty_indices_ptr.add(8) as usize };
+                let r9 = unsafe { *non_empty_indices_ptr.add(9) as usize };
+                let r10 = unsafe { *non_empty_indices_ptr.add(10) as usize };
+                let r11 = unsafe { *non_empty_indices_ptr.add(11) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let count3 = unsafe { *counts_ptr.add(r3) } as u32;
+                let count4 = unsafe { *counts_ptr.add(r4) } as u32;
+                let count5 = unsafe { *counts_ptr.add(r5) } as u32;
+                let count6 = unsafe { *counts_ptr.add(r6) } as u32;
+                let count7 = unsafe { *counts_ptr.add(r7) } as u32;
+                let count8 = unsafe { *counts_ptr.add(r8) } as u32;
+                let count9 = unsafe { *counts_ptr.add(r9) } as u32;
+                let count10 = unsafe { *counts_ptr.add(r10) } as u32;
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    *counts_ptr.add(r4) = 0;
+                    *counts_ptr.add(r5) = 0;
+                    *counts_ptr.add(r6) = 0;
+                    *counts_ptr.add(r7) = 0;
+                    *counts_ptr.add(r8) = 0;
+                    *counts_ptr.add(r9) = 0;
+                    *counts_ptr.add(r10) = 0;
+                    *counts_ptr.add(r11) = 0;
+                }
+                let count11 = (c_len as u32 - 1)
+                    - count0
+                    - count1
+                    - count2
+                    - count3
+                    - count4
+                    - count5
+                    - count6
+                    - count7
+                    - count8
+                    - count9
+                    - count10;
+                (
+                    1 + count0 * count0
+                        + count1 * count1
+                        + count2 * count2
+                        + count3 * count3
+                        + count4 * count4
+                        + count5 * count5
+                        + count6 * count6
+                        + count7 * count7
+                        + count8 * count8
+                        + count9 * count9
+                        + count10 * count10
+                        + count11 * count11,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count4 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count5 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count6 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count7 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count8 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count9 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count10 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count11 as usize) },
+                )
             } else {
                 let mut exp = 1u32;
                 let mut lb = c_len as u32;
@@ -4330,6 +4629,94 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     + unsafe { *parent_cap_bounds_ptr.add(c9 as usize) }
                                     + unsafe { *parent_cap_bounds_ptr.add(c10 as usize) },
                             )
+                        } else if num_non_empty == 12 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            let r4 = unsafe { *non_empty_indices_ptr.add(4) as usize };
+                            let r5 = unsafe { *non_empty_indices_ptr.add(5) as usize };
+                            let r6 = unsafe { *non_empty_indices_ptr.add(6) as usize };
+                            let r7 = unsafe { *non_empty_indices_ptr.add(7) as usize };
+                            let r8 = unsafe { *non_empty_indices_ptr.add(8) as usize };
+                            let r9 = unsafe { *non_empty_indices_ptr.add(9) as usize };
+                            let r10 = unsafe { *non_empty_indices_ptr.add(10) as usize };
+                            let r11 = unsafe { *non_empty_indices_ptr.add(11) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let count3 = unsafe { *counts_ptr.add(r3) };
+                            let count4 = unsafe { *counts_ptr.add(r4) };
+                            let count5 = unsafe { *counts_ptr.add(r5) };
+                            let count6 = unsafe { *counts_ptr.add(r6) };
+                            let count7 = unsafe { *counts_ptr.add(r7) };
+                            let count8 = unsafe { *counts_ptr.add(r8) };
+                            let count9 = unsafe { *counts_ptr.add(r9) };
+                            let count10 = unsafe { *counts_ptr.add(r10) };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                                *counts_ptr.add(r4) = 0;
+                                *counts_ptr.add(r5) = 0;
+                                *counts_ptr.add(r6) = 0;
+                                *counts_ptr.add(r7) = 0;
+                                *counts_ptr.add(r8) = 0;
+                                *counts_ptr.add(r9) = 0;
+                                *counts_ptr.add(r10) = 0;
+                                *counts_ptr.add(r11) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = count3 as u32;
+                            let c4 = count4 as u32;
+                            let c5 = count5 as u32;
+                            let c6 = count6 as u32;
+                            let c7 = count7 as u32;
+                            let c8 = count8 as u32;
+                            let c9 = count9 as u32;
+                            let c10 = count10 as u32;
+                            let c11 = (c_len as u32)
+                                - c0
+                                - c1
+                                - c2
+                                - c3
+                                - c4
+                                - c5
+                                - c6
+                                - c7
+                                - c8
+                                - c9
+                                - c10;
+                            (
+                                c0 * c0
+                                    + c1 * c1
+                                    + c2 * c2
+                                    + c3 * c3
+                                    + c4 * c4
+                                    + c5 * c5
+                                    + c6 * c6
+                                    + c7 * c7
+                                    + c8 * c8
+                                    + c9 * c9
+                                    + c10 * c10
+                                    + c11 * c11,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c4 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c5 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c6 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c7 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c8 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c9 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c10 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c11 as usize) },
+                            )
                         } else {
                             let mut exp = 0u32;
                             let mut lb = c_len as u32;
@@ -5044,7 +5431,109 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *eval_entries_ptr.add(6) = e6;
                     *eval_entries_ptr.add(7) = e7;
                 }
-            } else if num_eval >= 9 {
+            } else if num_eval == 9 {
+                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut e4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut e5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut e6 = unsafe { *eval_entries_ptr.add(6) };
+                let mut e7 = unsafe { *eval_entries_ptr.add(7) };
+                let mut e8 = unsafe { *eval_entries_ptr.add(8) };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e2.count < e3.count {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.count < e2.count {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.count < e3.count {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                if e4.count < e5.count {
+                    std::mem::swap(&mut e4, &mut e5);
+                }
+                if e6.count < e7.count {
+                    std::mem::swap(&mut e6, &mut e7);
+                }
+                if e4.count < e6.count {
+                    std::mem::swap(&mut e4, &mut e6);
+                }
+                if e5.count < e7.count {
+                    std::mem::swap(&mut e5, &mut e7);
+                }
+                if e5.count < e6.count {
+                    std::mem::swap(&mut e5, &mut e6);
+                }
+                if e0.count < e4.count {
+                    std::mem::swap(&mut e0, &mut e4);
+                }
+                if e2.count < e6.count {
+                    std::mem::swap(&mut e2, &mut e6);
+                }
+                if e2.count < e4.count {
+                    std::mem::swap(&mut e2, &mut e4);
+                }
+                if e1.count < e5.count {
+                    std::mem::swap(&mut e1, &mut e5);
+                }
+                if e3.count < e7.count {
+                    std::mem::swap(&mut e3, &mut e7);
+                }
+                if e3.count < e5.count {
+                    std::mem::swap(&mut e3, &mut e5);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                if e3.count < e4.count {
+                    std::mem::swap(&mut e3, &mut e4);
+                }
+                if e5.count < e6.count {
+                    std::mem::swap(&mut e5, &mut e6);
+                }
+                if e0.count < e8.count {
+                    std::mem::swap(&mut e0, &mut e8);
+                }
+                if e4.count < e8.count {
+                    std::mem::swap(&mut e4, &mut e8);
+                }
+                if e2.count < e4.count {
+                    std::mem::swap(&mut e2, &mut e4);
+                }
+                if e6.count < e8.count {
+                    std::mem::swap(&mut e6, &mut e8);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                if e3.count < e4.count {
+                    std::mem::swap(&mut e3, &mut e4);
+                }
+                if e5.count < e6.count {
+                    std::mem::swap(&mut e5, &mut e6);
+                }
+                if e7.count < e8.count {
+                    std::mem::swap(&mut e7, &mut e8);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
+                    *eval_entries_ptr.add(4) = e4;
+                    *eval_entries_ptr.add(5) = e5;
+                    *eval_entries_ptr.add(6) = e6;
+                    *eval_entries_ptr.add(7) = e7;
+                    *eval_entries_ptr.add(8) = e8;
+                }
+            } else if num_eval >= 10 {
                 for j in 1..num_eval {
                     let key = unsafe { *eval_entries_ptr.add(j) };
                     let mut k = j;
@@ -7316,7 +7805,7 @@ mod solver_cache_tests {
 
         // Test multiple small subsets of candidates (sizes 2..=14)
         for offset in (0..30).step_by(5) {
-            for size in 2..=14 {
+            for size in 2..=15 {
                 let bucket: Vec<usize> = (offset..offset + size).collect();
                 let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
                 let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);
