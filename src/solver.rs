@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 /// The mapped value is the exact deduplicated projection of all valid guesses,
 /// deduplicated by a Zobrist hash of the responses they produce.
 pub type EquivCache =
-    [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 1024];
+    [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<[u64]>>>; 1024];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -199,7 +199,7 @@ enum EquivState {
         parent_ptr: *const [u64],
     },
     Ready(*const [u64]),
-    Cached(std::sync::Arc<Vec<u64>>),
+    Cached(std::sync::Arc<[u64]>),
 }
 
 /// Specialized solver for a concrete word length with compile-time response parameters:
@@ -568,7 +568,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
     ) -> *const [u64] {
         let (set_hash, parent_ptr) = match *equiv_state {
             EquivState::Ready(ptr) => return ptr,
-            EquivState::Cached(ref arc) => return arc.as_slice() as *const [u64],
+            EquivState::Cached(ref arc) => return arc.as_ref() as *const [u64],
             EquivState::Uncomputed {
                 set_hash,
                 parent_ptr,
@@ -584,7 +584,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if let Some(cached) = cache.get(&set_hash) {
                 self.local_metrics.equiv_cache_hits += 1;
                 let rc = std::sync::Arc::clone(cached);
-                let ptr = rc.as_slice() as *const [u64];
+                let ptr = rc.as_ref() as *const [u64];
                 *equiv_state = EquivState::Cached(rc);
                 return ptr;
             }
@@ -963,6 +963,45 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
                     let c_u8_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) as *const u8 };
                     let mut i = 0;
+                    while i + 15 < chunk_len {
+                        let r_u64_0 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 = unsafe { (c_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                        let r0 = (r_u64_0 & 0xFF) as usize;
+                        let r1 = ((r_u64_0 >> 8) & 0xFF) as usize;
+                        let r2 = ((r_u64_0 >> 16) & 0xFF) as usize;
+                        let r3 = ((r_u64_0 >> 24) & 0xFF) as usize;
+                        let r4 = ((r_u64_0 >> 32) & 0xFF) as usize;
+                        let r5 = ((r_u64_0 >> 40) & 0xFF) as usize;
+                        let r6 = ((r_u64_0 >> 48) & 0xFF) as usize;
+                        let r7 = (r_u64_0 >> 56) as usize;
+                        let r8 = (r_u64_1 & 0xFF) as usize;
+                        let r9 = ((r_u64_1 >> 8) & 0xFF) as usize;
+                        let r10 = ((r_u64_1 >> 16) & 0xFF) as usize;
+                        let r11 = ((r_u64_1 >> 24) & 0xFF) as usize;
+                        let r12 = ((r_u64_1 >> 32) & 0xFF) as usize;
+                        let r13 = ((r_u64_1 >> 40) & 0xFF) as usize;
+                        let r14 = ((r_u64_1 >> 48) & 0xFF) as usize;
+                        let r15 = (r_u64_1 >> 56) as usize;
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) = *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) = *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) = *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) = *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) = *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) = *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) = *c_table_ptr.add(r7);
+                            *projs_ptr.add(i + 8) = *c_table_ptr.add(r8);
+                            *projs_ptr.add(i + 9) = *c_table_ptr.add(r9);
+                            *projs_ptr.add(i + 10) = *c_table_ptr.add(r10);
+                            *projs_ptr.add(i + 11) = *c_table_ptr.add(r11);
+                            *projs_ptr.add(i + 12) = *c_table_ptr.add(r12);
+                            *projs_ptr.add(i + 13) = *c_table_ptr.add(r13);
+                            *projs_ptr.add(i + 14) = *c_table_ptr.add(r14);
+                            *projs_ptr.add(i + 15) = *c_table_ptr.add(r15);
+                        }
+                        i += 16;
+                    }
                     while i + 7 < chunk_len {
                         let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
                         let r0 = (r_u64 & 0xFF) as usize;
@@ -998,6 +1037,45 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let c_u8_ptr =
                         unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) as *const u8 };
                     let mut i = 0;
+                    while i + 15 < chunk_len {
+                        let r_u64_0 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 = unsafe { (c_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                        let r0 = (r_u64_0 & 0xFF) as usize;
+                        let r1 = ((r_u64_0 >> 8) & 0xFF) as usize;
+                        let r2 = ((r_u64_0 >> 16) & 0xFF) as usize;
+                        let r3 = ((r_u64_0 >> 24) & 0xFF) as usize;
+                        let r4 = ((r_u64_0 >> 32) & 0xFF) as usize;
+                        let r5 = ((r_u64_0 >> 40) & 0xFF) as usize;
+                        let r6 = ((r_u64_0 >> 48) & 0xFF) as usize;
+                        let r7 = (r_u64_0 >> 56) as usize;
+                        let r8 = (r_u64_1 & 0xFF) as usize;
+                        let r9 = ((r_u64_1 >> 8) & 0xFF) as usize;
+                        let r10 = ((r_u64_1 >> 16) & 0xFF) as usize;
+                        let r11 = ((r_u64_1 >> 24) & 0xFF) as usize;
+                        let r12 = ((r_u64_1 >> 32) & 0xFF) as usize;
+                        let r13 = ((r_u64_1 >> 40) & 0xFF) as usize;
+                        let r14 = ((r_u64_1 >> 48) & 0xFF) as usize;
+                        let r15 = (r_u64_1 >> 56) as usize;
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
+                            *projs_ptr.add(i + 8) ^= *c_table_ptr.add(r8);
+                            *projs_ptr.add(i + 9) ^= *c_table_ptr.add(r9);
+                            *projs_ptr.add(i + 10) ^= *c_table_ptr.add(r10);
+                            *projs_ptr.add(i + 11) ^= *c_table_ptr.add(r11);
+                            *projs_ptr.add(i + 12) ^= *c_table_ptr.add(r12);
+                            *projs_ptr.add(i + 13) ^= *c_table_ptr.add(r13);
+                            *projs_ptr.add(i + 14) ^= *c_table_ptr.add(r14);
+                            *projs_ptr.add(i + 15) ^= *c_table_ptr.add(r15);
+                        }
+                        i += 16;
+                    }
                     while i + 7 < chunk_len {
                         let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
                         let r0 = (r_u64 & 0xFF) as usize;
@@ -1160,11 +1238,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.local_metrics.equiv_cache_hits += 1;
                 let rc = std::sync::Arc::clone(cached);
                 self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
-                let ptr = rc.as_slice() as *const [u64];
+                let ptr = rc.as_ref() as *const [u64];
                 *equiv_state = EquivState::Cached(rc);
                 ptr
             } else {
-                let rc = std::sync::Arc::new(bits.clone());
+                let rc: std::sync::Arc<[u64]> = std::sync::Arc::from(bits.as_slice());
                 self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
                 self.local_metrics.equiv_cache_misses += 1;
                 self.local_metrics.pruned_by_equivalence += num_guesses - kept_count;
@@ -1177,7 +1255,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
                 cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
-                let ptr = rc.as_slice() as *const [u64];
+                let ptr = rc.as_ref() as *const [u64];
                 *equiv_state = EquivState::Cached(rc);
                 ptr
             }
