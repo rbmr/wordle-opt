@@ -103,25 +103,29 @@ thread_local! {
 /// Shared helper: the projection used to deduplicate guesses that partition
 /// the candidate set identically (same scheme as `Solver::greedy_solve`).
 #[inline(always)]
-fn guess_projection(dict: &Dictionary, c_mask: u32, guess: usize) -> u64 {
-    let chars = unsafe { dict.guess_chars.get_unchecked(guess) };
-    let m = c_mask as u64;
-    if dict.word_len == 5 {
+fn guess_projection(
+    guess_chars_ptr: *const [u8; 8],
+    word_len: usize,
+    c_mask: u64,
+    guess: usize,
+) -> u64 {
+    let chars = unsafe { &*guess_chars_ptr.add(guess) };
+    if word_len == 5 {
         let l0 = chars[0] as u64;
         let l1 = chars[1] as u64;
         let l2 = chars[2] as u64;
         let l3 = chars[3] as u64;
         let l4 = chars[4] as u64;
-        ((l0 + 1) * ((m >> l0) & 1))
-            | (((l1 + 1) * ((m >> l1) & 1)) << 5)
-            | (((l2 + 1) * ((m >> l2) & 1)) << 10)
-            | (((l3 + 1) * ((m >> l3) & 1)) << 15)
-            | (((l4 + 1) * ((m >> l4) & 1)) << 20)
+        ((l0 + 1) * ((c_mask >> l0) & 1))
+            | (((l1 + 1) * ((c_mask >> l1) & 1)) << 5)
+            | (((l2 + 1) * ((c_mask >> l2) & 1)) << 10)
+            | (((l3 + 1) * ((c_mask >> l3) & 1)) << 15)
+            | (((l4 + 1) * ((c_mask >> l4) & 1)) << 20)
     } else {
         let mut proj = 0u64;
-        for i in 0..dict.word_len.min(8) {
+        for i in 0..word_len.min(8) {
             let l = chars[i] as u64;
-            proj |= ((l + 1) * ((m >> l) & 1)) << (5 * i);
+            proj |= ((l + 1) * ((c_mask >> l) & 1)) << (5 * i);
         }
         proj
     }
@@ -181,11 +185,14 @@ pub(crate) fn active_guesses_with_bound(
             let guess_masks_ptr = matrix.guess_masks.as_ptr();
 
             let mut surviving = Vec::with_capacity(num_guesses);
+            let guess_chars_ptr = dict.guess_chars.as_ptr();
+            let word_len = dict.word_len;
+            let c_mask_u64 = c_mask as u64;
             for g in 0..num_guesses {
                 if (unsafe { *guess_masks_ptr.add(g) } & c_mask) == 0 {
                     continue;
                 }
-                let proj = guess_projection(dict, c_mask, g);
+                let proj = guess_projection(guess_chars_ptr, word_len, c_mask_u64, g);
                 let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                 loop {
                     let slot = unsafe { *table_ptr.add(idx) };
@@ -447,12 +454,16 @@ pub(crate) fn active_guesses_with_bound(
                 c_len
             };
 
+            let guess_chars_ptr = dict.guess_chars.as_ptr();
+            let word_len = dict.word_len;
+            let c_mask_u64 = c_mask as u64;
+
             for g in 0..num_guesses {
                 if !skip_projections {
                     if (unsafe { *guess_masks_ptr.add(g) } & c_mask) == 0 {
                         continue;
                     }
-                    let proj = guess_projection(dict, c_mask, g);
+                    let proj = guess_projection(guess_chars_ptr, word_len, c_mask_u64, g);
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                     let is_new = loop {
                         let slot = unsafe { *table_ptr.add(idx) };
@@ -521,12 +532,10 @@ pub(crate) fn active_guesses_with_bound(
 
                 let mut expected_rem = 0u32;
                 let mut base_lb = c_len as u32;
-                let mut num_non_empty = 0;
                 for i in 0..c_len {
                     let r = unsafe { *(*stack_c_ptrs_ptr.add(i)).add(g) as usize };
                     let v = unsafe { *counts_ptr.add(r) as usize };
                     if v > 0 {
-                        num_non_empty += 1;
                         expected_rem += (v as u32) * (v as u32);
                         if r != win_response {
                             base_lb += unsafe { *cap_bounds_ptr.add(v) };
@@ -536,7 +545,7 @@ pub(crate) fn active_guesses_with_bound(
                         }
                     }
                 }
-                if num_non_empty > 1 && base_lb <= max_base_lb {
+                if base_lb <= max_base_lb {
                     out.push((g, expected_rem, base_lb));
                 }
             }
@@ -556,12 +565,16 @@ pub(crate) fn active_guesses_with_bound(
             let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
             let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
 
+            let guess_chars_ptr = dict.guess_chars.as_ptr();
+            let word_len = dict.word_len;
+            let c_mask_u64 = c_mask as u64;
+
             for g in 0..num_guesses {
                 if !skip_projections {
                     if (unsafe { *guess_masks_ptr.add(g) } & c_mask) == 0 {
                         continue;
                     }
-                    let proj = guess_projection(dict, c_mask, g);
+                    let proj = guess_projection(guess_chars_ptr, word_len, c_mask_u64, g);
                     let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
                     let is_new = loop {
                         let slot = unsafe { *table_ptr.add(idx) };
