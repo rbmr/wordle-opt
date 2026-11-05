@@ -78,3 +78,39 @@ fn solve_and_validate_from_files() {
     let listed: Vec<W> = file.guesses.iter().map(|s| word(s)).collect();
     assert_eq!(listed, inst.guesses);
 }
+
+#[test]
+fn solve_and_validate_non_5_letter_words() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    for (len, words) in [
+        (3, vec!["cat", "car", "bat", "bar", "rat", "tar"]),
+        (4, vec!["game", "gate", "gave", "tame", "late", "bake"]),
+        (6, vec!["flight", "bright", "slight", "knight", "plight"]),
+    ] {
+        let file_path = dir.path().join(format!("words_{len}.txt"));
+        fs::write(&file_path, words.join("\n")).expect("write words");
+        let tree_path = dir.path().join(format!("tree_{len}.json"));
+
+        let solved = run(&[
+            "solve",
+            "--guesses",
+            file_path.to_str().unwrap(),
+            "--candidates",
+            file_path.to_str().unwrap(),
+            "--output",
+            tree_path.to_str().unwrap(),
+            "--no-progress",
+        ]);
+        let validated = run(&["validate", tree_path.to_str().unwrap()]);
+        assert!(validated.contains("=== POLICY TREE VALID ==="));
+        assert_eq!(total_cost(&solved), total_cost(&validated));
+
+        let file = wordle_opt::policy::ReadableTreeFile::from_json(
+            &fs::read_to_string(&tree_path).expect("read tree"),
+        )
+        .expect("parse tree");
+        assert_eq!(file.strategy, "optimal");
+        assert_eq!(file.candidates.len(), words.len());
+        assert_eq!(file.guesses.len(), words.len());
+    }
+}

@@ -24,7 +24,7 @@ fn tree_json(inst: &Instance) -> String {
 /// unlike `common::Oracle` it can leave guesses out.
 struct GuessOracle {
     /// rows[g][c] = feedback of guess g on candidate c
-    rows: Vec<Vec<u8>>,
+    rows: Vec<Vec<u16>>,
     allowed: Vec<bool>,
     memo: HashMap<u64, u32>,
 }
@@ -44,8 +44,8 @@ impl GuessOracle {
         }
     }
 
-    fn buckets(&self, g: usize, mask: u64) -> Vec<(u8, u64)> {
-        let mut by: Vec<(u8, u64)> = Vec::new();
+    fn buckets(&self, g: usize, mask: u64) -> Vec<(u16, u64)> {
+        let mut by: Vec<(u16, u64)> = Vec::new();
         for c in 0..64 {
             if mask >> c & 1 == 1 {
                 let r = self.rows[g][c];
@@ -144,7 +144,7 @@ fn oracle_certificate(oracle: &mut GuessOracle, n: usize) -> Vec<Claim> {
                     continue;
                 }
                 if oracle.value(m) as u64 > l3(bs, k) && !index.contains_key(&m) {
-                    queue.insert(0, (m, Some((id as u32, g as u32, r))));
+                    queue.insert(0, (m, Some((id as u32, g as u32, r as u8))));
                 }
             }
         }
@@ -420,7 +420,7 @@ fn accepted_mutants_only_make_true_claims() {
                     Some((p, g, r)) => oracle
                         .buckets(g as usize, sets[p as usize])
                         .into_iter()
-                        .find(|&(rr, _)| rr == r)
+                        .find(|&(rr, _)| rr == r as u16)
                         .map_or(0, |(_, m)| m),
                 };
                 assert_ne!(set, 0, "{label}: accepted an empty set in claim {i}");

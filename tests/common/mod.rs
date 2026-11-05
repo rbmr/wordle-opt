@@ -18,7 +18,7 @@ use wordle_opt::policy::{
 pub type W = [u8; 5];
 
 /// Response code of the all-green response (base 3, green = 1 everywhere).
-pub const WIN: u8 = 121;
+pub const WIN: u16 = 121;
 
 /// Largest candidate set handed to the brute-force oracle. Brute force on the
 /// full tree takes ~3 s at 12, ~30 s at 20 and ~5 min at 30 (16 cores);
@@ -41,7 +41,7 @@ pub const FULL_OPTIMUM: u64 = 8001;
 /// (letter counting rather than a used-position scan). Per position: 0 black,
 /// 1 green, 2 yellow; encoded base 3 with position 0 least significant, which
 /// is the encoding the policy JSON's `b`/`g`/`y` keys use.
-pub fn feedback(guess: &W, secret: &W) -> u8 {
+pub fn feedback(guess: &W, secret: &W) -> u16 {
     let mut marks = [0u8; 5];
     let mut unmatched = [0u8; 256];
     for i in 0..5 {
@@ -58,10 +58,10 @@ pub fn feedback(guess: &W, secret: &W) -> u8 {
             unmatched[l] -= 1;
         }
     }
-    marks.iter().rev().fold(0, |acc, &m| acc * 3 + m)
+    marks.iter().rev().fold(0u16, |acc, &m| acc * 3 + m as u16)
 }
 
-pub fn code_key(code: u8) -> String {
+pub fn code_key(code: u16) -> String {
     let mut v = code;
     (0..5)
         .map(|_| {
@@ -144,8 +144,14 @@ impl Instance {
     pub fn bundled() -> Self {
         let d = Dictionary::load_default();
         Self::new(
-            d.guesses.iter().map(|w| w.0).collect(),
-            d.candidates.iter().map(|w| w.0).collect(),
+            d.guesses
+                .iter()
+                .map(|w| w.as_bytes().try_into().unwrap())
+                .collect(),
+            d.candidates
+                .iter()
+                .map(|w| w.as_bytes().try_into().unwrap())
+                .collect(),
         )
     }
 
@@ -170,8 +176,8 @@ pub struct Solved {
 /// with this file's own walker and requires it to match the claimed cost.
 pub fn solve(inst: &Instance) -> Solved {
     let dict = Dictionary::from_words(
-        inst.guesses.iter().map(|&w| Word(w)).collect(),
-        inst.candidates.iter().map(|&w| Word(w)).collect(),
+        inst.guesses.iter().map(|&w| Word::from(w)).collect(),
+        inst.candidates.iter().map(|&w| Word::from(w)).collect(),
     );
     let matrix = ResponseMatrix::new(&dict);
     let root: Vec<usize> = (0..dict.candidates.len()).collect();
@@ -258,7 +264,7 @@ pub fn walk(
     );
     assert!(!set.is_empty(), "{path}: node with no candidates");
 
-    let mut buckets: HashMap<u8, Vec<W>> = HashMap::new();
+    let mut buckets: HashMap<u16, Vec<W>> = HashMap::new();
     for s in &set {
         buckets.entry(feedback(&guess, s)).or_default().push(*s);
     }
@@ -317,7 +323,7 @@ pub fn walk(
 /// set is identical to an earlier guess's are skipped (identical rows induce
 /// identical partitions of every subset).
 pub struct Oracle {
-    pub rows: Vec<Vec<u8>>,
+    pub rows: Vec<Vec<u16>>,
     pub memo: HashMap<u64, u32>,
     pub full: u64,
 }
@@ -328,7 +334,7 @@ impl Oracle {
         let mut seen = HashSet::new();
         let mut rows = Vec::new();
         for g in guesses.iter().chain(set) {
-            let row: Vec<u8> = set.iter().map(|s| feedback(g, s)).collect();
+            let row: Vec<u16> = set.iter().map(|s| feedback(g, s)).collect();
             if seen.insert(row.clone()) {
                 rows.push(row);
             }
@@ -364,7 +370,7 @@ impl Oracle {
         let mut best = u32::MAX;
         let mut tried: HashSet<Vec<u64>> = HashSet::new();
         for r in 0..self.rows.len() {
-            let mut buckets: Vec<(u8, u64)> = Vec::new();
+            let mut buckets: Vec<(u16, u64)> = Vec::new();
             let mut m = mask;
             while m != 0 {
                 let i = m.trailing_zeros() as usize;
@@ -475,7 +481,7 @@ pub fn check_resolved_subtrees(
 
 /// Partition of `set` under `g`: non-win buckets, sorted for comparison.
 pub fn partition(g: &W, set: &[W]) -> Vec<Vec<W>> {
-    let mut buckets: HashMap<u8, Vec<W>> = HashMap::new();
+    let mut buckets: HashMap<u16, Vec<W>> = HashMap::new();
     for s in set {
         let r = feedback(g, s);
         if r != WIN {

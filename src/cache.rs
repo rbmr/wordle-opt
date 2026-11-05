@@ -24,6 +24,7 @@ const VALUE_BITS: u32 = 18;
 const VALUE_MASK: u64 = (1 << VALUE_BITS) - 1; // 0x3FFFF
 const EXACT_BIT: u64 = 1 << VALUE_BITS; // bit 18
 const HASH_SHIFT: u32 = VALUE_BITS + 1; // 19
+const VALID_HASH_BIT: u64 = 1 << (63 - HASH_SHIFT); // bit 44 of hash45 (bit 63 of packed entry)
 
 impl GlobalCache {
     pub fn new(size: usize) -> Self {
@@ -47,7 +48,7 @@ impl GlobalCache {
             VALUE_BITS
         );
         let base_index = (full_hash as usize & self.mask) << 1;
-        let hash45 = full_hash >> HASH_SHIFT;
+        let hash45 = (full_hash >> HASH_SHIFT) | VALID_HASH_BIT;
         let mut packed = (hash45 << HASH_SHIFT) | (value as u64 & VALUE_MASK);
         if is_exact {
             packed |= EXACT_BIT;
@@ -128,11 +129,11 @@ impl GlobalCache {
     #[inline]
     pub fn get(&self, full_hash: u64) -> Option<(u32, bool)> {
         let base_index = (full_hash as usize & self.mask) << 1;
-        let hash45 = full_hash >> HASH_SHIFT;
+        let hash45 = (full_hash >> HASH_SHIFT) | VALID_HASH_BIT;
 
         // Check slot 1 (depth-preferred) first, since harder subtrees are queried more often.
         let packed1 = unsafe { self.entries.get_unchecked(base_index + 1) }.load(Ordering::Relaxed);
-        if packed1 != 0 && (packed1 >> HASH_SHIFT) == hash45 {
+        if (packed1 >> HASH_SHIFT) == hash45 {
             let is_exact = (packed1 & EXACT_BIT) != 0;
             let value = (packed1 & VALUE_MASK) as u32;
             return Some((value, is_exact));
@@ -140,7 +141,7 @@ impl GlobalCache {
 
         // Check slot 0 (always-replace)
         let packed0 = unsafe { self.entries.get_unchecked(base_index) }.load(Ordering::Relaxed);
-        if packed0 != 0 && (packed0 >> HASH_SHIFT) == hash45 {
+        if (packed0 >> HASH_SHIFT) == hash45 {
             let is_exact = (packed0 & EXACT_BIT) != 0;
             let value = (packed0 & VALUE_MASK) as u32;
             return Some((value, is_exact));

@@ -7,8 +7,9 @@ use std::path::Path;
 /// Represents a loaded Wordle dictionary containing valid guesses and possible secret candidates.
 /// Both vectors are deduplicated and sorted to enable deterministic subset caching.
 pub struct Dictionary {
+    pub word_len: usize,
     pub guesses: Vec<Word>,
-    pub guess_chars: Vec<[u8; 5]>,
+    pub guess_chars: Vec<[u8; 8]>,
     pub candidates: Vec<Word>,
     pub candidate_to_guess: Vec<usize>,
 }
@@ -25,7 +26,7 @@ pub struct Dictionary {
 pub fn letter_index<'a>(words: impl IntoIterator<Item = &'a Word>) -> Option<[u8; 256]> {
     let mut used = [false; 256];
     for w in words {
-        for &b in &w.0 {
+        for &b in w.as_bytes() {
             used[b as usize] = true;
         }
     }
@@ -59,8 +60,19 @@ impl Dictionary {
         guesses_path: P1,
         candidates_path: P2,
     ) -> Result<Self, String> {
-        let guesses = Self::read_words(guesses_path)?;
-        let candidates = Self::read_words(candidates_path)?;
+        let guesses = Self::read_words(guesses_path.as_ref())?;
+        let candidates = Self::read_words(candidates_path.as_ref())?;
+        if let (Some(g), Some(c)) = (guesses.first(), candidates.first())
+            && g.len() != c.len()
+        {
+            return Err(format!(
+                "mismatched word lengths: guesses in {} has {} letters, but candidates in {} has {} letters",
+                guesses_path.as_ref().display(),
+                g.len(),
+                candidates_path.as_ref().display(),
+                c.len()
+            ));
+        }
         Ok(Self::from_words(guesses, candidates))
     }
 
@@ -98,13 +110,13 @@ impl Dictionary {
         let g: Vec<Word> = guesses
             .into_iter()
             .map(|s| s.as_ref().trim().to_lowercase())
-            .filter(|s| s.len() == 5)
+            .filter(|s| !s.is_empty())
             .map(|s| Word::new(&s))
             .collect();
         let c: Vec<Word> = candidates
             .into_iter()
             .map(|s| s.as_ref().trim().to_lowercase())
-            .filter(|s| s.len() == 5)
+            .filter(|s| !s.is_empty())
             .map(|s| Word::new(&s))
             .collect();
         Self::from_words(g, c)
@@ -130,13 +142,20 @@ impl Dictionary {
         guesses.sort();
         guesses.dedup();
 
+        let word_len = guesses.first().map(|w| w.len()).unwrap_or(5);
+
         // Every candidate is a guess, so the guesses carry the whole alphabet.
         let index = letter_index(&guesses);
         let guess_chars = guesses
             .iter()
-            .map(|g| match &index {
-                Some(ix) => g.0.map(|b| ix[b as usize]),
-                None => [0; 5],
+            .map(|g| {
+                let mut chars = [0u8; 8];
+                if let Some(ix) = &index {
+                    for (i, &b) in g.as_bytes().iter().enumerate().take(8) {
+                        chars[i] = ix[b as usize];
+                    }
+                }
+                chars
             })
             .collect();
 
@@ -146,6 +165,7 @@ impl Dictionary {
         }
 
         Self {
+            word_len,
             guesses,
             guess_chars,
             candidates,
@@ -153,13 +173,14 @@ impl Dictionary {
         }
     }
 
-    /// Reads 5-letter words from a file, returning an error if the file cannot be opened
-    /// or contains lines with unexpected word lengths.
+    /// Reads words from a file, returning an error if the file cannot be opened
+    /// or contains lines with inconsistent word lengths.
     pub fn read_words<P: AsRef<Path>>(path: P) -> Result<Vec<Word>, String> {
         let p = path.as_ref();
         let file = File::open(p).map_err(|e| format!("cannot open {}: {e}", p.display()))?;
         let reader = BufReader::new(file);
         let mut words = Vec::new();
+        let mut expected_len = None;
 
         for (line_no, line) in reader.lines().enumerate() {
             let line = line
@@ -168,14 +189,32 @@ impl Dictionary {
             if word_str.is_empty() {
                 continue;
             }
-            if word_str.len() != 5 {
-                return Err(format!(
-                    "inconsistent word length in {}: line {}: expected 5 letters, got {} in {:?}",
-                    p.display(),
-                    line_no + 1,
-                    word_str.len(),
-                    word_str
-                ));
+            let len = word_str.len();
+            match expected_len {
+                None => {
+                    if len == 0 || len > 10 {
+                        return Err(format!(
+                            "invalid word length in {}: line {}: word {:?} has {} letters (must be 1 to 10)",
+                            p.display(),
+                            line_no + 1,
+                            word_str,
+                            len
+                        ));
+                    }
+                    expected_len = Some(len);
+                }
+                Some(exp) => {
+                    if len != exp {
+                        return Err(format!(
+                            "inconsistent word length in {}: line {}: expected {} letters, got {} in {:?}",
+                            p.display(),
+                            line_no + 1,
+                            exp,
+                            len,
+                            word_str
+                        ));
+                    }
+                }
             }
             words.push(Word::new(&word_str));
         }
@@ -217,7 +256,7 @@ mod tests {
 
         // Ensure guess_chars was populated correctly
         assert_eq!(dict.guess_chars.len(), 4);
-        assert_eq!(dict.guess_chars[0], [0, 15, 15, 11, 4]); // apple
+        assert_eq!(&dict.guess_chars[0][..5], &[0, 15, 15, 11, 4]); // apple
     }
 
     #[test]
@@ -259,5 +298,34 @@ mod tests {
         assert_eq!(dict.candidates.len(), 2);
         assert_eq!(dict.guesses.len(), 4);
         assert_eq!(dict.guesses[0].to_string(), "apple");
+    }
+
+    #[test]
+    fn test_try_load_mismatched_file_lengths() {
+        let mut guesses_file = NamedTempFile::new().unwrap();
+        let mut candidates_file = NamedTempFile::new().unwrap();
+
+        writeln!(guesses_file, "word\nbird\n").unwrap();
+        writeln!(candidates_file, "apple\npeach\n").unwrap();
+
+        let res = Dictionary::try_load(guesses_file.path(), candidates_file.path());
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("mismatched word lengths"));
+    }
+
+    #[test]
+    fn test_try_load_word_length_out_of_bounds() {
+        let mut guesses_file = NamedTempFile::new().unwrap();
+        let mut candidates_file = NamedTempFile::new().unwrap();
+
+        writeln!(guesses_file, "supercalifragilistic").unwrap();
+        writeln!(candidates_file, "supercalifragilistic").unwrap();
+
+        let res = Dictionary::try_load(guesses_file.path(), candidates_file.path());
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("invalid word length"));
+        assert!(err.contains("must be 1 to 10"));
     }
 }

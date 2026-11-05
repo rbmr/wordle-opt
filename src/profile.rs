@@ -32,7 +32,7 @@ pub struct SetProfile {
 }
 
 impl SetProfile {
-    pub fn new<'a>(words: impl IntoIterator<Item = &'a [u8; 5]>) -> Self {
+    pub fn new<'a, T: AsRef<[u8]> + 'a>(words: impl IntoIterator<Item = &'a T>) -> Self {
         let mut p = SetProfile {
             words: 0,
             at: [[0; 4]; 5],
@@ -45,9 +45,10 @@ impl SetProfile {
         let mut with = [0usize; 256];
         let mut with_at = [[0usize; 256]; 5];
         for w in words {
+            let slice = w.as_ref();
             p.words += 1;
             let mut seen: ByteSet = [0; 4];
-            for (i, &b) in w.iter().enumerate() {
+            for (i, &b) in slice.iter().enumerate().take(5) {
                 add(&mut p.at[i], b);
                 with_at[i][b as usize] += 1;
                 if !has(&seen, b) {
@@ -55,8 +56,8 @@ impl SetProfile {
                     with[b as usize] += 1;
                 }
             }
-            for (i, &own) in w.iter().enumerate() {
-                for &b in w {
+            for (i, &own) in slice.iter().enumerate().take(5) {
+                for &b in slice.iter().take(5) {
                     if b != own {
                         add(&mut p.elsewhere[i], b);
                     }
@@ -78,9 +79,9 @@ impl SetProfile {
 
     /// Upper bound on the distinct responses `guess` gives on the set,
     /// never more than the number of words.
-    pub fn max_responses(&self, guess: &[u8; 5]) -> usize {
+    pub fn max_responses(&self, guess: &[u8]) -> usize {
         let mut product = 1usize;
-        for (i, &l) in guess.iter().enumerate() {
+        for (i, &l) in guess.iter().enumerate().take(5) {
             let repeated = guess.iter().filter(|&&b| b == l).count() > 1;
             let green = has(&self.at[i], l) as usize;
             let yellow = has(&self.elsewhere[i], l) as usize;
