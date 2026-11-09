@@ -1017,7 +1017,35 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `a99e67b` | pc01 | 2200 | 1 | optimal | 20.094s | 7477 | 2331 | 23629 | ~543MB | specialize candidate response decision tree for bucket size 8 in quick bucket eval; pick 20.0s; cpu 318.7s; busy cores 15.9; states 23,629 vs 23,644 [-15 states]; guesses 599,405 vs 599,524 [-119 guesses]; bounds pruned 1,960,056; equiv pruned 188,932,408; cache hits 2,433,085; validation OK |
 | 2026-11-09 | `a99e67b` | pc01 | 2340 | — | optimal | 23.525s (0.01h) | 8001 | 2478 | 26041 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-a99e67b); specialize candidate response decision tree for bucket size 8 in quick bucket eval; build 23.525s; pick 23.3s; cpu 373.8s; busy cores 15.9 (root_guesses @ 15s: 7221); states 26,041; guesses 751,862; bounds pruned 2,088,181; equiv pruned 207,707,726; cache hits 3,485,346; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `a99e67b` | pc01 | 2340 | — | optimal --certify | 23.412s (0.01h) | 8001 | 2478 | 26207 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.412s (pick 23.3s, cpu 371.5s, busy cores 15.9); 1,327,086 solver facts; 590 gap refutations (7.282s); 629,915 claims (443,101 capacity, 186,814 expansion, 0 failures, 9,448,744 bytes); independent check verified optimal in 57.557s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `b2c0e71` | pc01 | 1000 | 1 | optimal | 2.605s | 3124 | 1049 | 817 | — | specialize candidate response decision tree for bucket size 9 in quick bucket eval; pick 2.6s; cpu 41.1s; busy cores 15.8; states 817; guesses 15,001; bounds pruned 44,537; equiv pruned 5,019,886; cache hits 165,570; validation OK |
+| 2026-11-09 | `b2c0e71` | pc01 | 1600 | 1 | optimal | 8.185s | 5256 | 1681 | 3948 | — | specialize candidate response decision tree for bucket size 9 in quick bucket eval; pick 8.1s; cpu 128.3s; busy cores 15.7; states 3,948; guesses 66,174; bounds pruned 316,222; equiv pruned 29,474,976; cache hits 353,952; validation OK |
+| 2026-11-09 | `b2c0e71` | pc01 | 2000 | 1 | optimal | 13.763s | 6723 | 2119 | 7807 | — | specialize candidate response decision tree for bucket size 9 in quick bucket eval; pick 13.7s; cpu 217.1s; busy cores 15.8; states 7,807; guesses 186,894; bounds pruned 506,807; equiv pruned 59,913,936; cache hits 840,879; validation OK |
+| 2026-11-09 | `b2c0e71` | pc01 | 2200 | 1 | optimal | 20.137s | 7477 | 2331 | 23640 | ~543MB | specialize candidate response decision tree for bucket size 9 in quick bucket eval; pick 20.0s; cpu 319.6s; busy cores 15.9; states 23,640; guesses 590,235 vs 599,405 [-9,170 guesses]; bounds pruned 1,946,628; equiv pruned 188,685,264; cache hits 2,427,674; validation OK |
+| 2026-11-09 | `b2c0e71` | pc01 | 2340 | — | optimal | 23.544s (0.01h) | 8001 | 2478 | 25950 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-b2c0e71); specialize candidate response decision tree for bucket size 9 in quick bucket eval; build 23.544s; pick 23.3s; cpu 374.2s; busy cores 15.9 (root_guesses @ 15s: 7205); states 25,950 vs 26,041 [-91 states]; guesses 750,513 vs 751,862 [-1,349 guesses]; bounds pruned 2,081,230; equiv pruned 207,194,268; cache hits 3,479,853; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `b2c0e71` | pc01 | 2340 | — | optimal --certify | 23.487s (0.01h) | 8001 | 2478 | 26158 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.487s (pick 23.4s, cpu 372.6s, busy cores 15.9); 1,329,021 solver facts; 590 gap refutations (7.152s); 631,281 claims (443,672 capacity, 187,609 expansion, 0 failures, 9,469,234 bytes); independent check verified optimal in 68.255s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `b2c0e71` rows evaluate specializing candidate response decision trees for bucket size 9 in quick bucket eval:
+  - In `src/solver.rs`:
+    - Extended `quick_bucket_eval_small_elem` with specialized `9 =>` branch (`eval_cand9!`).
+    - When `has_one_collision` is true, immediately aborts candidate evaluation at first collision; returns `(17, true)` immediately if all 8 responses are distinct.
+    - When `has_one_collision` is false, evaluates the collision decision tree over pairs and tuples with early abort when collision count reaches $\ge 2$, recording `has_one_collision = true` when exactly 1 pair collision occurs.
+    - Completely bypassed loop overhead, bitmask operations, shifts, and indexing into `seen: [u64; 4]` for all 9-candidate buckets.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.605s** (cpu 41.1s, pick 2.6s, states 817, guesses 15,001, bounds pruned 44,537, cost 3124).
+    - `N=1600, seed=1`: **8.185s** (cpu 128.3s, pick 8.1s, states 3,948, guesses 66,174, bounds pruned 316,222, cost 5256).
+    - `N=2000, seed=1`: **13.763s** (new record! cpu 217.1s, pick 13.7s, states 7,807, guesses 186,894, bounds pruned 506,807, cost 6723).
+    - `N=2200, seed=1`: **20.137s** (cpu 319.6s, pick 20.0s, states 23,640, guesses 590,235 vs 599,405 [-9,170 guesses], bounds pruned 1,946,628, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-b2c0e71`): **23.544s** (cpu 374.2s, pick 23.3s, states 25,950 vs 26,041 [-91 states], guesses 750,513 vs 751,862 [-1,349 guesses], bounds pruned 2,081,230, equiv pruned 207,194,268, cache hits 3,479,853, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 128.07s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.77s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 303.29s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 44.90s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 631,281 claims with 0 failures, and independent `check` verified `3.92e11` response reads in 68.255s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `a99e67b` rows evaluate specializing candidate response decision trees for bucket size 8 in quick bucket eval:
   - In `src/solver.rs`:
