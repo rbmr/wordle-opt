@@ -452,7 +452,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     if candidates.len() <= 2 {
         return candidates.len();
     }
-    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
+    let mut effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = initial_max_k;
     if max_k >= effective_target {
         return max_k;
@@ -522,6 +522,7 @@ pub fn compute_max_branching_factor_seq_with_target(
     if has_profile {
         let b_u = !c_all_mask;
         let b_1_base = b_u | c_dup_mask;
+        let mut max_prod = 1usize;
         for i in 0..word_len {
             let a = at_mask[i];
             let e = elsewhere_mask[i];
@@ -539,6 +540,15 @@ pub fn compute_max_branching_factor_seq_with_target(
             let ge2_2 = ae_dup | (a_or_e_dup & b_r);
             let eq3_2 = ae_dup & b_r;
             active_letter_mask |= ge2_u | ge2_1 | ge2_2;
+
+            let factor = if (eq3_u | eq3_1 | eq3_2) != 0 {
+                3
+            } else if (ge2_u | ge2_1 | ge2_2) != 0 {
+                2
+            } else {
+                1
+            };
+            max_prod = max_prod.saturating_mul(factor);
 
             let tab_i = &mut m_tab[i];
             let mut m = ge2_u;
@@ -560,6 +570,11 @@ pub fn compute_max_branching_factor_seq_with_target(
                 tab_i[l + 64] = 2 + (((eq3_2 >> l) & 1) as u8);
             }
         }
+        let k_upper = max_prod.min(candidates.len()).min(matrix.num_responses);
+        if max_k >= k_upper {
+            return max_k;
+        }
+        effective_target = effective_target.min(k_upper);
     }
 
     let mid = candidates.len() / 2;
