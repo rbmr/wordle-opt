@@ -33,16 +33,39 @@ impl GlobalCache {
             "GlobalCache size must be a power of two, got {}",
             size
         );
-        let raw = vec![0u64; size * 2];
-        let mut raw = std::mem::ManuallyDrop::new(raw);
-        // SAFETY: `AtomicU64` is guaranteed to have the same size, alignment, and bit validity as `u64`.
-        // Allocating `vec![0u64; size * 2]` uses `alloc_zeroed` (`calloc`), returning OS demand-zeroed
-        // pages without faulting and zeroing all 2 GB sequentially on a single thread up front.
+        let len = size * 2;
+        let mut entries: Vec<std::mem::MaybeUninit<AtomicU64>> = Vec::with_capacity(len);
+        // SAFETY: `MaybeUninit<AtomicU64>` does not require initialization before `set_len`.
+        unsafe {
+            entries.set_len(len);
+        }
+        // Fault and zero pages in parallel across Rayon threads in contiguous 2 MB
+        // (262,144 AtomicU64) chunks so the OS backs large tables with Transparent Huge
+        // Pages (THP) up front without single-threaded page-faulting latency or runtime
+        // mmap_lock contention during the tree search.
+        const CHUNK_ELEMS: usize = 262_144;
+        if len >= CHUNK_ELEMS * 2 {
+            use rayon::prelude::*;
+            entries.par_chunks_mut(CHUNK_ELEMS).for_each(|chunk| {
+                // SAFETY: `chunk` is a valid mutable slice of `MaybeUninit<AtomicU64>`, and
+                // all-zero bytes is a valid representation of `AtomicU64::new(0)`.
+                unsafe {
+                    std::ptr::write_bytes(chunk.as_mut_ptr(), 0, chunk.len());
+                }
+            });
+        } else {
+            unsafe {
+                std::ptr::write_bytes(entries.as_mut_ptr(), 0, len);
+            }
+        }
+        let mut entries = std::mem::ManuallyDrop::new(entries);
+        // SAFETY: Every element of `entries` has been initialized to zero, and
+        // `MaybeUninit<AtomicU64>` has the exact same layout as `AtomicU64`.
         let entries = unsafe {
             Vec::from_raw_parts(
-                raw.as_mut_ptr() as *mut AtomicU64,
-                raw.len(),
-                raw.capacity(),
+                entries.as_mut_ptr() as *mut AtomicU64,
+                entries.len(),
+                entries.capacity(),
             )
         };
         let mask = size - 1;

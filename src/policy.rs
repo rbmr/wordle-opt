@@ -1824,43 +1824,48 @@ pub fn build_policy_tree(
         all_guesses_bits[num_u64s - 1] = (1 << rem) - 1;
     }
 
-    let optimal;
-    let min_remaining;
-    let max_freq;
-    let policy: &dyn CandidatesPolicy = match strategy {
-        Strategy::Optimal => {
-            optimal = OptimalPolicy::new(
-                matrix,
-                dict,
-                metrics,
-                &global_cache,
-                &equiv_cache,
-                &capacity_bounds_2d,
-                max_k,
-                &all_guesses_bits,
-            );
-            &optimal
-        }
-        Strategy::MinRemaining => {
-            min_remaining = MinRemainingPolicy::new(matrix);
-            &min_remaining
-        }
-        Strategy::MaxFreq => {
-            max_freq = MaxFreqPolicy::new(matrix, dict);
-            &max_freq
-        }
-    };
-
     let mut tree = PolicyTree::new(strategy.name(), dictionary_hash(dict), dict);
-    let stats = build_into(
-        &mut tree,
-        matrix,
-        dict,
-        policy,
-        root_candidates,
-        opts,
-        &observer,
-    )?;
+    let stats = {
+        let optimal;
+        let min_remaining;
+        let max_freq;
+        let policy: &dyn CandidatesPolicy = match strategy {
+            Strategy::Optimal => {
+                optimal = OptimalPolicy::new(
+                    matrix,
+                    dict,
+                    metrics,
+                    &global_cache,
+                    &equiv_cache,
+                    &capacity_bounds_2d,
+                    max_k,
+                    &all_guesses_bits,
+                );
+                &optimal
+            }
+            Strategy::MinRemaining => {
+                min_remaining = MinRemainingPolicy::new(matrix);
+                &min_remaining
+            }
+            Strategy::MaxFreq => {
+                max_freq = MaxFreqPolicy::new(matrix, dict);
+                &max_freq
+            }
+        };
+
+        build_into(
+            &mut tree,
+            matrix,
+            dict,
+            policy,
+            root_candidates,
+            opts,
+            &observer,
+        )?
+    };
+    if opts.cache_entries >= (1 << 20) {
+        std::thread::spawn(move || drop((global_cache, equiv_cache)));
+    }
     Ok((tree, stats))
 }
 

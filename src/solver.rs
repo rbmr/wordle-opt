@@ -190,7 +190,25 @@ fn sort_guess_tuples(tuples: &mut [GuessTuple]) {
     }
 }
 
-#[inline(always)]
+macro_rules! eval_buckets_n {
+    ($c_len:expr, $rem_total:expr, $base_exp:expr, $idx_ptr:expr, $cnt_ptr:expr, $cap_ptr:expr, $last:literal, [$($i:literal : $r:ident : $c:ident),+]) => {{
+        $(
+            let $r = *$idx_ptr.add($i) as usize;
+            let $c = *$cnt_ptr.add($r) as u32;
+        )+
+        let r_last = *$idx_ptr.add($last) as usize;
+        $(
+            *$cnt_ptr.add($r) = 0;
+        )+
+        *$cnt_ptr.add(r_last) = 0;
+        let c_last = $rem_total $( - $c )+;
+        (
+            $base_exp $( + $c * $c )+ + c_last * c_last,
+            $c_len $( + *$cap_ptr.add($c as usize) )+ + *$cap_ptr.add(c_last as usize),
+        )
+    }};
+}
+
 unsafe fn eval_non_empty_buckets_5_plus(
     c_len: u32,
     rem_total: u32,
@@ -201,47 +219,53 @@ unsafe fn eval_non_empty_buckets_5_plus(
     parent_cap_bounds_ptr: *const u32,
 ) -> (u32, u32) {
     unsafe {
-        let last_idx = num_non_empty - 1;
-        let mut exp = base_exp;
-        let mut lb = c_len;
-        let mut sum_prev = 0u32;
-        let mut i = 0usize;
-        while i + 3 < last_idx {
-            let r0 = *non_empty_indices_ptr.add(i) as usize;
-            let r1 = *non_empty_indices_ptr.add(i + 1) as usize;
-            let r2 = *non_empty_indices_ptr.add(i + 2) as usize;
-            let r3 = *non_empty_indices_ptr.add(i + 3) as usize;
-            let c0 = *counts_ptr.add(r0) as u32;
-            let c1 = *counts_ptr.add(r1) as u32;
-            let c2 = *counts_ptr.add(r2) as u32;
-            let c3 = *counts_ptr.add(r3) as u32;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            sum_prev += c0 + c1 + c2 + c3;
-            exp += c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
-            lb += *parent_cap_bounds_ptr.add(c0 as usize)
-                + *parent_cap_bounds_ptr.add(c1 as usize)
-                + *parent_cap_bounds_ptr.add(c2 as usize)
-                + *parent_cap_bounds_ptr.add(c3 as usize);
-            i += 4;
+        match num_non_empty {
+            5 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 4, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3])
+            }
+            6 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 5, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4])
+            }
+            7 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 6, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5])
+            }
+            8 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 7, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6])
+            }
+            9 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 8, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7])
+            }
+            10 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 9, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8])
+            }
+            11 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 10, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9])
+            }
+            12 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 11, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10])
+            }
+            13 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 12, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10, 11:r11:c11])
+            }
+            14 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 13, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10, 11:r11:c11, 12:r12:c12])
+            }
+            15 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 14, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10, 11:r11:c11, 12:r12:c12, 13:r13:c13])
+            }
+            _ => {
+                let mut exp = base_exp;
+                let mut lb = c_len;
+                for i in 0..num_non_empty {
+                    let r_idx = *non_empty_indices_ptr.add(i) as usize;
+                    let count = *counts_ptr.add(r_idx);
+                    *counts_ptr.add(r_idx) = 0;
+                    exp += (count as u32) * (count as u32);
+                    lb += *parent_cap_bounds_ptr.add(count as usize);
+                }
+                (exp, lb)
+            }
         }
-        while i < last_idx {
-            let r = *non_empty_indices_ptr.add(i) as usize;
-            let c = *counts_ptr.add(r) as u32;
-            *counts_ptr.add(r) = 0;
-            sum_prev += c;
-            exp += c * c;
-            lb += *parent_cap_bounds_ptr.add(c as usize);
-            i += 1;
-        }
-        let r_last = *non_empty_indices_ptr.add(last_idx) as usize;
-        *counts_ptr.add(r_last) = 0;
-        let c_last = rem_total - sum_prev;
-        exp += c_last * c_last;
-        lb += *parent_cap_bounds_ptr.add(c_last as usize);
-        (exp, lb)
     }
 }
 
