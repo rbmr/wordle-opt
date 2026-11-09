@@ -3317,6 +3317,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     return cost;
                 }
 
+                for i in 0..split_idx {
+                    unsafe {
+                        *child_max_ks_ptr.add(i) = 0;
+                    }
+                }
+
                 let mut fast_cost = cost;
                 let mut can_prune_fast = false;
                 for i in 0..split_idx {
@@ -3334,6 +3340,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                     let k_upper =
                         crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p);
+                    unsafe {
+                        *child_max_ks_ptr.add(i) = k_upper as u16;
+                    }
                     let approx_tight_lb =
                         crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k);
                     if approx_tight_lb > lb {
@@ -3352,9 +3361,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             for i in 0..split_idx {
-                unsafe {
-                    *child_max_ks_ptr.add(i) = 0;
-                }
                 let word_idx = i >> 6;
                 let bit = 1u64 << (i & 63);
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
@@ -3373,14 +3379,39 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     self.cache.insert_set(hash, p, lb, false);
                     cert_record!(6, p, lb, false);
                 } else {
+                    let k_upper = unsafe { *child_max_ks_ptr.add(i) as usize };
                     let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
                         self.matrix,
                         p,
-                        target_k,
+                        target_k.min(k_upper),
                     );
                     if k_cand >= target_k {
                         self.cache.insert_set(hash, p, lb, false);
                         cert_record!(7, p, lb, false);
+                    } else if k_cand >= k_upper {
+                        let k = k_upper;
+                        let tight_lb =
+                            crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                        let used_val = tight_lb.max(lb);
+                        unsafe {
+                            *p_lbs_ptr.add(i) = used_val;
+                        }
+                        self.cache.insert_set(hash, p, used_val, false);
+                        cert_record!(9, p, used_val, false);
+
+                        if used_val > lb {
+                            cost += used_val - lb;
+                            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                            let cutoff = beta.min(
+                                current_global_beta.saturating_sub(self.current_cost_so_far),
+                            );
+                            if cost >= cutoff {
+                                self.local_metrics.pruned_by_bounds += 1;
+                                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
+                                    sorted_set;
+                                return cost;
+                            }
+                        }
                     } else {
                         let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
                             self.matrix,
@@ -3465,12 +3496,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let child_k = if i < split_idx {
                     let stored_k = unsafe { *child_max_ks_ptr.add(i) as usize };
                     if stored_k != 0 {
-                        stored_k
+                        stored_k.min(p_len).min(parent_max_k).max(2)
                     } else {
-                        p_len.min(parent_max_k)
+                        p_len.min(parent_max_k).max(2)
                     }
                 } else {
-                    p_len.min(parent_max_k)
+                    p_len.min(parent_max_k).max(2)
                 };
 
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
