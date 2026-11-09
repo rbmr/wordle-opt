@@ -103,6 +103,41 @@ fn count_unique_responses_from_row_u8(
     }
 }
 
+#[inline(always)]
+fn count_unique_responses_contiguous_u8(g_ptr: *const u8, n: usize, mask: &mut [u64; 16]) {
+    let mut i = 0;
+    let mask_ptr = mask.as_mut_ptr();
+    while i + 7 < n {
+        let r_u64 = unsafe { (g_ptr.add(i) as *const u64).read_unaligned() };
+        let r0 = (r_u64 & 0xFF) as usize;
+        let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+        let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+        let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+        let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+        let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+        let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+        let r7 = (r_u64 >> 56) as usize;
+        unsafe {
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
+            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
+            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
+            *mask_ptr.add(r4 >> 6) |= 1u64 << (r4 & 63);
+            *mask_ptr.add(4 + (r5 >> 6)) |= 1u64 << (r5 & 63);
+            *mask_ptr.add(8 + (r6 >> 6)) |= 1u64 << (r6 & 63);
+            *mask_ptr.add(12 + (r7 >> 6)) |= 1u64 << (r7 & 63);
+        }
+        i += 8;
+    }
+    while i < n {
+        let r0 = unsafe { *g_ptr.add(i) as usize };
+        unsafe {
+            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
+        }
+        i += 1;
+    }
+}
+
 /// Computes the maximum number of distinct response patterns (branches)
 /// that ANY guess can generate across the given candidate set.
 ///
@@ -114,16 +149,32 @@ pub fn compute_max_branching_factor(
     use rayon::prelude::*;
 
     if matrix.num_responses <= 256 {
-        (0..matrix.num_guesses)
-            .into_par_iter()
-            .map(|g| {
-                let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
-                let mut mask = [0u64; 16];
-                count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
-                combine_and_count_u8(&mask)
-            })
-            .max()
-            .unwrap_or(0)
+        let n = candidates.len();
+        let is_contiguous_root =
+            n > 0 && n == matrix.num_candidates && candidates[0] == 0 && candidates[n - 1] == n - 1;
+        if is_contiguous_root {
+            (0..matrix.num_guesses)
+                .into_par_iter()
+                .map(|g| {
+                    let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
+                    let mut mask = [0u64; 16];
+                    count_unique_responses_contiguous_u8(g_ptr, n, &mut mask);
+                    combine_and_count_u8(&mask)
+                })
+                .max()
+                .unwrap_or(0)
+        } else {
+            (0..matrix.num_guesses)
+                .into_par_iter()
+                .map(|g| {
+                    let g_ptr = unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
+                    let mut mask = [0u64; 16];
+                    count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
+                    combine_and_count_u8(&mask)
+                })
+                .max()
+                .unwrap_or(0)
+        }
     } else {
         (0..matrix.num_guesses)
             .into_par_iter()

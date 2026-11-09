@@ -1230,20 +1230,32 @@ impl<'a> OptimalPolicy<'a> {
 
             let mut bucket_tasks = Vec::with_capacity(num_non_empty);
             let mut base_cost = candidates.len() as u32;
+            let mut lb_cost = base_cost;
             for i in 0..num_non_empty {
                 let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
                 let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
                 if r_idx == self.matrix.win_response.0 as usize {
                     continue;
                 }
+                let cap_lb = unsafe { *cap_bounds_ptr.add(p_len) };
                 if p_len <= 2 {
-                    base_cost += unsafe { *cap_bounds_ptr.add(p_len) };
+                    base_cost += cap_lb;
+                    lb_cost += cap_lb;
                     continue;
                 }
                 let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
-                if let Some((cached_val, true)) = self.cache.get(hash) {
-                    base_cost += cached_val;
-                    continue;
+                match self.cache.get(hash) {
+                    Some((cached_val, true)) => {
+                        base_cost += cached_val;
+                        lb_cost += cached_val;
+                        continue;
+                    }
+                    Some((cached_val, false)) => {
+                        lb_cost += cached_val.max(cap_lb);
+                    }
+                    None => {
+                        lb_cost += cap_lb;
+                    }
                 }
                 let start = unsafe { *offsets_ptr.add(r_idx) };
                 let end = start + p_len;
@@ -1251,8 +1263,37 @@ impl<'a> OptimalPolicy<'a> {
                 bucket_tasks.push((p, hash));
             }
 
-            let bucket_costs = if bucket_tasks.is_empty() {
-                0
+            let first_guess_cost = if bucket_tasks.is_empty() {
+                self.metrics
+                    .root_guesses_done
+                    .fetch_add(1, Ordering::Relaxed);
+                base_cost
+            } else if let Some(opt_cost) = cached_exact {
+                if lb_cost > opt_cost {
+                    lb_cost
+                } else {
+                    let mut solver = Solver::new(
+                        self.matrix,
+                        self.max_k,
+                        self.dict,
+                        self.metrics,
+                        self.capacity_bounds_2d,
+                        self.cache,
+                        self.equiv_cache,
+                    );
+                    let v = solver.min_guess_val(
+                        candidates,
+                        self.all_guesses_bits,
+                        first_g,
+                        opt_cost + 1,
+                        1,
+                        self.max_k,
+                    );
+                    self.metrics
+                        .root_guesses_done
+                        .fetch_add(1, Ordering::Relaxed);
+                    v
+                }
             } else {
                 bucket_tasks.sort_unstable_by_key(|b| std::cmp::Reverse(b.0.len()));
 
@@ -1314,13 +1355,11 @@ impl<'a> OptimalPolicy<'a> {
                         }
                         total_bucket_cost.fetch_add(thread_cost, Ordering::Relaxed);
                     });
-                total_bucket_cost.load(Ordering::Relaxed)
+                self.metrics
+                    .root_guesses_done
+                    .fetch_add(1, Ordering::Relaxed);
+                base_cost + total_bucket_cost.load(Ordering::Relaxed)
             };
-
-            let first_guess_cost = base_cost + bucket_costs;
-            self.metrics
-                .root_guesses_done
-                .fetch_add(1, Ordering::Relaxed);
 
             if cached_exact.is_some_and(|opt_cost| first_guess_cost <= opt_cost) {
                 return (first_g, first_guess_cost);
@@ -1807,10 +1846,17 @@ pub fn build_policy_tree(
     }
     let max_k = heuristic::compute_max_branching_factor(matrix, root_candidates);
     let mut capacity_bounds_2d = vec![vec![0u32; root_candidates.len() + 1]; max_k + 1];
-    for k in 2..=max_k {
-        for i in 0..=root_candidates.len() {
-            capacity_bounds_2d[k][i] = heuristic::capacity_bound(i, k);
-        }
+    if max_k >= 2 {
+        use rayon::prelude::*;
+        capacity_bounds_2d[2..=max_k]
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, row)| {
+                let k = idx + 2;
+                for (i, slot) in row.iter_mut().enumerate() {
+                    *slot = heuristic::capacity_bound(i, k);
+                }
+            });
     }
     let observer = opts.observer.clone().unwrap_or_default();
     let metrics = &observer.metrics;

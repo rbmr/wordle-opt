@@ -122,20 +122,34 @@ impl ResponseMatrix {
                 });
 
             data_c_g_u8.resize(total_cells, 0u8);
-            for c in 0..num_candidates {
-                for g in 0..num_guesses {
-                    data_c_g_u8[c * num_guesses + g] = data_u8[g * num_candidates + c];
-                }
-            }
+            data_c_g_u8
+                .par_chunks_mut(num_guesses)
+                .enumerate()
+                .for_each(|(c, row)| {
+                    for g in 0..num_guesses {
+                        row[g] = data_u8[g * num_candidates + c];
+                    }
+                });
 
             data.resize(total_cells, Response(0));
-            for i in 0..total_cells {
-                data[i] = Response(data_u8[i] as u16);
-            }
+            data.par_chunks_mut(num_candidates)
+                .enumerate()
+                .for_each(|(g, row)| {
+                    let src = &data_u8[g * num_candidates..(g + 1) * num_candidates];
+                    for c in 0..num_candidates {
+                        row[c] = Response(src[c] as u16);
+                    }
+                });
             data_c_g.resize(total_cells, Response(0));
-            for i in 0..total_cells {
-                data_c_g[i] = Response(data_c_g_u8[i] as u16);
-            }
+            data_c_g
+                .par_chunks_mut(num_guesses)
+                .enumerate()
+                .for_each(|(c, row)| {
+                    let src = &data_c_g_u8[c * num_guesses..(c + 1) * num_guesses];
+                    for g in 0..num_guesses {
+                        row[g] = Response(src[g] as u16);
+                    }
+                });
         } else {
             data.resize(total_cells, Response(0));
             data.par_chunks_mut(num_candidates)
@@ -148,11 +162,14 @@ impl ResponseMatrix {
                 });
 
             data_c_g.resize(total_cells, Response(0));
-            for c in 0..num_candidates {
-                for g in 0..num_guesses {
-                    data_c_g[c * num_guesses + g] = data[g * num_candidates + c];
-                }
-            }
+            data_c_g
+                .par_chunks_mut(num_guesses)
+                .enumerate()
+                .for_each(|(c, row)| {
+                    for g in 0..num_guesses {
+                        row[g] = data[g * num_candidates + c];
+                    }
+                });
         }
 
         let candidate_to_guess = dict.candidate_to_guess.clone();
