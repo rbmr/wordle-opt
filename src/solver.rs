@@ -3308,18 +3308,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            let fast_limit = parent_max_k.min(96) as u32;
-            let mut over_idx = 0;
-            while over_idx < split_idx
-                && unsafe { (*eval_entries_ptr.add(over_idx) >> 16) > fast_limit }
-            {
-                unsafe {
-                    *child_max_ks_ptr.add(over_idx) = 0;
-                }
-                over_idx += 1;
-            }
-
-            for i in (over_idx..split_idx).chain((0..over_idx).rev()) {
+            for i in 0..split_idx {
                 unsafe {
                     *child_max_ks_ptr.add(i) = 0;
                 }
