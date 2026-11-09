@@ -569,22 +569,23 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                         let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
                         let ra = unsafe { *gi_ptr.add($ca) };
                         let rb = unsafe { *gi_ptr.add($cb) };
-                        let rc = unsafe { *gi_ptr.add($cc) };
-
-                        let eq_ab = ra == rb;
-                        let eq_ac = ra == rc;
-                        let eq_bc = rb == rc;
 
                         if has_one_collision {
-                            if !eq_ab && !eq_ac && !eq_bc {
-                                return (7, true);
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    return (7, true);
+                                }
                             }
                         } else {
-                            let sum = (eq_ab as u8) + (eq_ac as u8) + (eq_bc as u8);
-                            if sum == 0 {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if ra == rb {
+                                if rc != ra {
+                                    has_one_collision = true;
+                                }
+                            } else if rc != ra && rc != rb {
                                 return (7, true);
-                            }
-                            if sum == 1 {
+                            } else {
                                 has_one_collision = true;
                             }
                         }
@@ -617,31 +618,35 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                         let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
                         let ra = unsafe { *gi_ptr.add($ca) };
                         let rb = unsafe { *gi_ptr.add($cb) };
-                        let rc = unsafe { *gi_ptr.add($cc) };
-                        let rd = unsafe { *gi_ptr.add($cd) };
-
-                        let eq_ab = ra == rb;
-                        let eq_ac = ra == rc;
-                        let eq_bc = rb == rc;
-                        let eq_ad = ra == rd;
-                        let eq_bd = rb == rd;
-                        let eq_cd = rc == rd;
 
                         if has_one_collision {
-                            if !eq_ab && !eq_ac && !eq_bc && !eq_ad && !eq_bd && !eq_cd {
-                                return (9, true);
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        return (9, true);
+                                    }
+                                }
                             }
                         } else {
-                            let sum = (eq_ab as u8)
-                                + (eq_ac as u8)
-                                + (eq_bc as u8)
-                                + (eq_ad as u8)
-                                + (eq_bd as u8)
-                                + (eq_cd as u8);
-                            if sum == 0 {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            let rd = unsafe { *gi_ptr.add($cd) };
+                            if ra == rb {
+                                if rc != ra && rd != ra && rc != rd {
+                                    has_one_collision = true;
+                                }
+                            } else if rc == ra {
+                                if rd != ra && rd != rb {
+                                    has_one_collision = true;
+                                }
+                            } else if rc == rb {
+                                if rd != rb && rd != ra {
+                                    has_one_collision = true;
+                                }
+                            } else if rd != ra && rd != rb && rd != rc {
                                 return (9, true);
-                            }
-                            if sum == 1 {
+                            } else {
                                 has_one_collision = true;
                             }
                         }
