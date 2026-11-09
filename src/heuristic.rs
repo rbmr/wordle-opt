@@ -58,11 +58,48 @@ pub fn sort_guesses_by_expected_remaining(
 
 #[inline(always)]
 fn combine_and_count_u8(mask: &[u64; 16]) -> usize {
-    let m0 = mask[0] | mask[4] | mask[8] | mask[12];
-    let m1 = mask[1] | mask[5] | mask[9] | mask[13];
-    let m2 = mask[2] | mask[6] | mask[10] | mask[14];
-    let m3 = mask[3] | mask[7] | mask[11] | mask[15];
-    (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
+    #[cfg(target_arch = "x86_64")]
+    {
+        #[target_feature(enable = "avx2")]
+        unsafe fn combine_and_count_avx2(mask: &[u64; 16]) -> usize {
+            use std::arch::x86_64::*;
+            unsafe {
+                let p = mask.as_ptr() as *const __m256i;
+                let v0 = _mm256_loadu_si256(p);
+                let v1 = _mm256_loadu_si256(p.add(1));
+                let v2 = _mm256_loadu_si256(p.add(2));
+                let v3 = _mm256_loadu_si256(p.add(3));
+                let v01 = _mm256_or_si256(v0, v1);
+                let v23 = _mm256_or_si256(v2, v3);
+                let vor = _mm256_or_si256(v01, v23);
+                let mut m = std::mem::MaybeUninit::<[u64; 4]>::uninit();
+                _mm256_storeu_si256(m.as_mut_ptr() as *mut __m256i, vor);
+                let m = m.assume_init();
+                (m[0].count_ones() + m[1].count_ones() + m[2].count_ones() + m[3].count_ones())
+                    as usize
+            }
+        }
+
+        #[cfg(target_feature = "avx2")]
+        {
+            unsafe { combine_and_count_avx2(mask) }
+        }
+        #[cfg(not(target_feature = "avx2"))]
+        {
+            if is_x86_feature_detected!("avx2") {
+                return unsafe { combine_and_count_avx2(mask) };
+            }
+        }
+    }
+
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+    {
+        let m0 = mask[0] | mask[4] | mask[8] | mask[12];
+        let m1 = mask[1] | mask[5] | mask[9] | mask[13];
+        let m2 = mask[2] | mask[6] | mask[10] | mask[14];
+        let m3 = mask[3] | mask[7] | mask[11] | mask[15];
+        (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
+    }
 }
 
 #[inline(always)]
