@@ -2604,6 +2604,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
             if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
                 return cost;
             }
             let mut active_guesses_ptr: Option<*const [u64]> = None;
@@ -2613,14 +2614,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if entry.is_exact {
                     continue;
                 }
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
                 let used_val = entry.used_val;
                 let b = cost - used_val;
                 let new_beta = beta.saturating_sub(b);
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 let effective_beta =
                     new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
 
-                if effective_beta == 0 {
+                if effective_beta <= used_val {
+                    self.local_metrics.pruned_by_bounds += 1;
                     return cost;
                 }
 
@@ -3493,6 +3500,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
             if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
                 self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                 return cost;
             }
@@ -3509,8 +3517,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let r_idx = (!entry & 0xFFFF) as usize;
 
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = current_global_beta.saturating_sub(self.current_cost_so_far);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
                 if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return cost;
                 }
@@ -3525,7 +3534,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let effective_beta =
                     new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
 
-                if effective_beta == 0 {
+                if effective_beta <= actual_lb {
+                    self.local_metrics.pruned_by_bounds += 1;
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return cost;
                 }
