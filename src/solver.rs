@@ -2379,6 +2379,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut r_buf = std::mem::MaybeUninit::<[u16; 16]>::uninit();
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+            let mut r_to_idx = std::mem::MaybeUninit::<[u8; R]>::uninit();
+            let r_to_idx_ptr = r_to_idx.as_mut_ptr() as *mut u8;
 
             let mut seen = [0u64; M];
             let mut num_non_empty = 0usize;
@@ -2397,6 +2399,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *word |= bit;
                     prev_idx = num_non_empty;
                     unsafe {
+                        if R <= 256 {
+                            *r_to_idx_ptr.add(r as usize) = num_non_empty as u8;
+                        }
                         *local_counts_ptr.add(num_non_empty) = LocalCount {
                             r,
                             count: 1,
@@ -2405,16 +2410,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     num_non_empty += 1;
                 } else {
-                    let mut target_idx = prev_idx;
-                    if unsafe { (*local_counts_ptr.add(target_idx)).r } != r {
-                        for i in 0..num_non_empty {
-                            if unsafe { (*local_counts_ptr.add(i)).r } == r {
-                                target_idx = i;
-                                prev_idx = i;
-                                break;
+                    let target_idx = if R <= 256 {
+                        unsafe { *r_to_idx_ptr.add(r as usize) as usize }
+                    } else {
+                        let mut target_idx = prev_idx;
+                        if unsafe { (*local_counts_ptr.add(target_idx)).r } != r {
+                            for i in 0..num_non_empty {
+                                if unsafe { (*local_counts_ptr.add(i)).r } == r {
+                                    target_idx = i;
+                                    prev_idx = i;
+                                    break;
+                                }
                             }
                         }
-                    }
+                        target_idx
+                    };
                     let entry = unsafe { &mut *local_counts_ptr.add(target_idx) };
                     let cnt = entry.count;
                     entry.count = cnt + 1;
@@ -2673,6 +2683,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
                 if b + val >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
                     return b + val;
                 }
                 cost = b + val;
@@ -3456,7 +3467,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             self.matrix,
                             p,
                             k_cand,
-                            target_k,
+                            target_k.min(k_upper),
                         );
                         if k >= target_k {
                             unsafe {
@@ -3576,6 +3587,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
                 if b + val >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return b + val;
                 }
