@@ -257,6 +257,100 @@ pub fn compute_candidate_branching_factor(
     )
 }
 
+/// Computes an instant information-theoretic upper bound on the maximum branching factor
+/// achievable by ANY guess on `candidates`.
+///
+/// Runs in O(|candidates|) bitwise operations with zero dictionary scans or heap allocations.
+#[inline(always)]
+pub fn compute_branching_factor_upper_bound(
+    matrix: &crate::matrix::ResponseMatrix,
+    candidates: &[usize],
+) -> usize {
+    let n = candidates.len();
+    if n <= 2 {
+        return n;
+    }
+    let word_len = matrix.word_len;
+    let mut c_mask = 0u32;
+    let mut c_all_mask = u32::MAX;
+    let mut c_dup_mask = 0u32;
+    let mut at_mask = [0u32; 8];
+    let mut elsewhere_mask = [0u32; 8];
+    let mut dup_elsewhere_mask = [0u32; 8];
+
+    for &c in candidates {
+        let cp = unsafe { matrix.candidate_profiles.get_unchecked(c) };
+        let m = cp.mask;
+        c_mask |= m;
+        c_all_mask &= m;
+        if m != u32::MAX && word_len <= 8 {
+            let dup = cp.dup_mask;
+            c_dup_mask |= dup;
+            if word_len == 5 {
+                let b0 = cp.at_mask[0];
+                at_mask[0] |= b0;
+                elsewhere_mask[0] |= m & !b0;
+                dup_elsewhere_mask[0] |= dup & !b0;
+
+                let b1 = cp.at_mask[1];
+                at_mask[1] |= b1;
+                elsewhere_mask[1] |= m & !b1;
+                dup_elsewhere_mask[1] |= dup & !b1;
+
+                let b2 = cp.at_mask[2];
+                at_mask[2] |= b2;
+                elsewhere_mask[2] |= m & !b2;
+                dup_elsewhere_mask[2] |= dup & !b2;
+
+                let b3 = cp.at_mask[3];
+                at_mask[3] |= b3;
+                elsewhere_mask[3] |= m & !b3;
+                dup_elsewhere_mask[3] |= dup & !b3;
+
+                let b4 = cp.at_mask[4];
+                at_mask[4] |= b4;
+                elsewhere_mask[4] |= m & !b4;
+                dup_elsewhere_mask[4] |= dup & !b4;
+            } else {
+                for i in 0..word_len {
+                    let bit = cp.at_mask[i];
+                    at_mask[i] |= bit;
+                    elsewhere_mask[i] |= m & !bit;
+                    dup_elsewhere_mask[i] |= dup & !bit;
+                }
+            }
+        }
+    }
+
+    if c_mask == u32::MAX || word_len > 8 {
+        return n.min(matrix.num_responses);
+    }
+
+    let b_u = !c_all_mask;
+    let b_1_base = b_u | c_dup_mask;
+    let mut max_prod = 1usize;
+    for i in 0..word_len {
+        let a = at_mask[i];
+        let e = elsewhere_mask[i];
+        let e_dup = dup_elsewhere_mask[i];
+        let b_r = if (a & (a - 1)) == 0 { !a } else { u32::MAX };
+        let b_1 = b_r & b_1_base;
+        let ae = a & e;
+        let a_or_e = a | e;
+        let ae_dup = a & e_dup;
+        let a_or_e_dup = a | e_dup;
+        let eq3 = (ae & b_u) | (ae & b_1) | (ae_dup & b_r);
+        let factor = if eq3 != 0 {
+            3
+        } else {
+            let ge2 = (ae | (a_or_e & b_u)) | (ae | (a_or_e & b_1)) | (ae_dup | (a_or_e_dup & b_r));
+            if ge2 != 0 { 2 } else { 1 }
+        };
+        max_prod = max_prod.saturating_mul(factor);
+    }
+    max_prod.min(n).min(matrix.num_responses)
+}
+
 /// Finds the smallest branching factor `k` in 2..=n.min(num_responses) such that
 /// `tight_capacity_bound(n, k, max_k) <= target_bound`.
 /// If no such `k` exists (even for k = n.min(num_responses)), returns `n.min(num_responses) + 1`.
@@ -1390,6 +1484,10 @@ mod target_bound_tests {
                 compute_max_branching_factor_seq(&matrix, subset),
                 compute_max_branching_factor(&matrix, subset)
             );
+            assert!(
+                compute_branching_factor_upper_bound(&matrix, subset)
+                    >= compute_max_branching_factor(&matrix, subset)
+            );
         }
 
         // Also a subset sharing fixed letters at the last two positions.
@@ -1400,6 +1498,10 @@ mod target_bound_tests {
         assert_eq!(
             compute_max_branching_factor_seq(&matrix, &er_subset),
             compute_max_branching_factor(&matrix, &er_subset)
+        );
+        assert!(
+            compute_branching_factor_upper_bound(&matrix, &er_subset)
+                >= compute_max_branching_factor(&matrix, &er_subset)
         );
     }
 }

@@ -3308,6 +3308,49 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
+            if split_idx > 0 {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
+                }
+
+                let mut fast_cost = cost;
+                let mut can_prune_fast = false;
+                for i in 0..split_idx {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    let entry = unsafe { *eval_entries_ptr.add(i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+
+                    let k_upper =
+                        crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p);
+                    let approx_tight_lb =
+                        crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k);
+                    if approx_tight_lb > lb {
+                        fast_cost += approx_tight_lb - lb;
+                        if fast_cost >= cutoff {
+                            can_prune_fast = true;
+                            break;
+                        }
+                    }
+                }
+                if can_prune_fast {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return fast_cost;
+                }
+            }
+
             for i in 0..split_idx {
                 unsafe {
                     *child_max_ks_ptr.add(i) = 0;
