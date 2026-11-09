@@ -993,7 +993,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `b5a05aa` | pc01 | 2200 | 1 | optimal | 20.159s | 7477 | 2331 | 23676 | ~543MB | specialize candidate response decision tree for bucket size 6 in quick bucket eval; pick 20.1s; cpu 319.9s; busy cores 15.9; states 23,676; guesses 599,563; bounds pruned 1,964,318; equiv pruned 189,272,634; cache hits 2,432,799; validation OK |
 | 2026-11-09 | `b5a05aa` | pc01 | 2340 | — | optimal | 23.889s (0.01h) | 8001 | 2478 | 25950 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-b5a05aa); specialize candidate response decision tree for bucket size 6 in quick bucket eval; build 23.889s; pick 23.6s; cpu 379.5s; busy cores 15.9 (root_guesses @ 15s: 7085); states 25,950 vs 25,971 [-21 states]; guesses 751,909; bounds pruned 2,101,901 vs 2,072,916 [+28,985 bounds pruned]; equiv pruned 207,227,702; cache hits 3,489,789; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `b5a05aa` | pc01 | 2340 | — | optimal --certify | 23.543s (0.01h) | 8001 | 2478 | 26192 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.543s (pick 23.4s, cpu 373.7s, busy cores 15.9); 1,327,762 solver facts; 590 gap refutations (7.540s); 633,113 claims (444,760 capacity, 188,353 expansion, 0 failures, 9,496,714 bytes); independent check verified optimal in 59.460s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `a5141bd` | pc01 | 1000 | 1 | optimal | 2.604s | 3124 | 1049 | 814 | — | unroll response counting loops by 8 in branching factor heuristic; pick 2.6s; cpu 41.1s; busy cores 15.8; states 814 vs 819 [-5 states]; guesses 14,966 vs 15,107 [-141 guesses]; bounds pruned 50,004; equiv pruned 5,038,103; cache hits 90,832; validation OK |
+| 2026-11-09 | `a5141bd` | pc01 | 1600 | 1 | optimal | 8.204s | 5256 | 1681 | 3955 | — | unroll response counting loops by 8 in branching factor heuristic; pick 8.2s; cpu 128.5s; busy cores 15.7; states 3,955; guesses 66,251; bounds pruned 315,572; equiv pruned 29,380,591; cache hits 449,881; validation OK |
+| 2026-11-09 | `a5141bd` | pc01 | 2000 | 1 | optimal | 13.776s | 6723 | 2119 | 7801 | — | unroll response counting loops by 8 in branching factor heuristic; pick 13.8s; cpu 217.0s; busy cores 15.8; states 7,801; guesses 185,842; bounds pruned 502,146; equiv pruned 59,573,506; cache hits 837,605; validation OK |
+| 2026-11-09 | `a5141bd` | pc01 | 2200 | 1 | optimal | 20.072s | 7477 | 2331 | 23604 | ~543MB | unroll response counting loops by 8 in branching factor heuristic; pick 20.0s; cpu 318.5s; busy cores 15.9; states 23,604 vs 23,676 [-72 states]; guesses 589,352 vs 599,563 [-10,211 guesses]; bounds pruned 1,930,064; equiv pruned 188,719,742; cache hits 2,434,136; validation OK |
+| 2026-11-09 | `a5141bd` | pc01 | 2340 | — | optimal | 23.613s (0.01h) | 8001 | 2478 | 26032 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-a5141bd); unroll response counting loops by 8 in branching factor heuristic; build 23.613s; pick 23.4s; cpu 374.8s; busy cores 15.9 (root_guesses @ 15s: 7197); states 26,032; guesses 751,311; bounds pruned 2,088,693; equiv pruned 207,682,436; cache hits 3,481,152; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `a5141bd` | pc01 | 2340 | — | optimal --certify | 23.431s (0.01h) | 8001 | 2478 | 26192 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.431s (pick 23.3s, cpu 371.9s, busy cores 15.9); 1,327,194 solver facts; 590 gap refutations (7.297s); 633,931 claims (445,147 capacity, 188,784 expansion, 0 failures, 9,508,984 bytes); independent check verified optimal in 60.373s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `a5141bd` rows evaluate unrolling response counting loops by 8 in branching factor heuristic:
+  - In `src/heuristic.rs`:
+    - In `count_unique_responses_from_row_u8` and `count_unique_responses_u8`: unrolled hot response counting from 4-way to 8-way interleaving, matching `count_unique_responses_contiguous_u8`.
+    - Halved loop condition checks and pointer increment instructions across candidate evaluation loops.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.604s** (cpu 41.1s, pick 2.6s, states 814 vs 819 [-5 states], guesses 14,966 vs 15,107 [-141 guesses], bounds pruned 50,004, cost 3124).
+    - `N=1600, seed=1`: **8.204s** (cpu 128.5s, pick 8.2s, states 3,955, guesses 66,251, bounds pruned 315,572, cost 5256).
+    - `N=2000, seed=1`: **13.776s** (cpu 217.0s, pick 13.8s, states 7,801, guesses 185,842, bounds pruned 502,146, cost 6723).
+    - `N=2200, seed=1`: **20.072s** (cpu 318.5s, pick 20.0s, states 23,604 vs 23,676 [-72 states], guesses 589,352 vs 599,563 [-10,211 guesses], bounds pruned 1,930,064, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-a5141bd`): **23.613s** (cpu 374.8s, pick 23.4s, states 26,032, guesses 751,311, bounds pruned 2,088,693, equiv pruned 207,682,436, cache hits 3,481,152, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 131.50s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.37s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 302.50s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 49.35s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 633,931 claims with 0 failures, and independent `check` verified `3.93e11` response reads in 60.373s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `b5a05aa` rows evaluate specializing candidate response decision trees for bucket size 6 in quick bucket eval:
   - In `src/solver.rs`:
