@@ -963,7 +963,34 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `08d33d9` | pc01 | 2200 | 1 | optimal | 19.763s | 7477 | 2331 | 23519 | ~542MB | direct response index lookup for small candidate partitions; pick 19.7s; cpu 313.3s; busy cores 15.9; states 23,519; guesses 588,736; bounds pruned 1,933,696; equiv pruned 188,179,049; cache hits 2,427,033; validation OK |
 | 2026-11-09 | `08d33d9` | pc01 | 2340 | — | optimal | 23.219s (0.01h) | 8001 | 2478 | 25998 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-08d33d9); direct response index lookup for small candidate partitions; build 23.219s; pick 23.0s; cpu 369.2s; busy cores 15.9 (root_guesses @ 15s: 7517); states 25,998; guesses 752,206; bounds pruned 2,086,991; equiv pruned 207,363,941; cache hits 3,494,542; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `08d33d9` | pc01 | 2340 | — | optimal --certify | 23.078s (0.01h) | 8001 | 2478 | 26232 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.078s (pick 23.0s, cpu 366.0s, busy cores 15.9); 1,327,272 solver facts; 587 gap refutations (7.287s); 633,082 claims (444,888 capacity, 188,194 expansion, 0 failures, 9,496,249 bytes); independent check verified optimal in 60.165s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `27f230a` | pc01 | 1000 | 1 | optimal | 2.603s | 3124 | 1049 | 820 | — | resolve duplicate pair partitions in Phase 2 via bitmask bounds; pick 2.6s; cpu 41.0s; busy cores 15.8; states 820; guesses 15,082; bounds pruned 44,695; equiv pruned 5,073,168; cache hits 165,646; validation OK |
+| 2026-11-09 | `27f230a` | pc01 | 1600 | 1 | optimal | 8.195s | 5256 | 1681 | 3953 | — | resolve duplicate pair partitions in Phase 2 via bitmask bounds; pick 8.1s; cpu 128.5s; busy cores 15.7; states 3,953; guesses 66,194; bounds pruned 316,363; equiv pruned 29,532,907; cache hits 353,895; validation OK |
+| 2026-11-09 | `27f230a` | pc01 | 2000 | 1 | optimal | 13.845s | 6723 | 2119 | 7789 | — | resolve duplicate pair partitions in Phase 2 via bitmask bounds; pick 13.7s; cpu 217.9s; busy cores 15.7; states 7,789; guesses 185,624; bounds pruned 502,043; equiv pruned 59,692,201; cache hits 839,180; validation OK |
+| 2026-11-09 | `27f230a` | pc01 | 2200 | 1 | optimal | 20.140s | 7477 | 2331 | 23617 | ~543MB | resolve duplicate pair partitions in Phase 2 via bitmask bounds; pick 20.1s; cpu 319.7s; busy cores 15.9; states 23,617; guesses 598,194; bounds pruned 1,957,509; equiv pruned 188,875,246; cache hits 2,430,453; validation OK |
+| 2026-11-09 | `27f230a` | pc01 | 2340 | — | optimal | 23.657s (0.01h) | 8001 | 2478 | 25996 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-27f230a); resolve duplicate pair partitions in Phase 2 via bitmask bounds; build 23.657s; pick 23.4s; cpu 375.9s; busy cores 15.9 (root_guesses @ 15s: 7169); states 25,996; guesses 750,861; bounds pruned 2,085,572; equiv pruned 207,173,721; cache hits 3,487,253; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `27f230a` | pc01 | 2340 | — | optimal --certify | 23.571s (0.01h) | 8001 | 2478 | 26125 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.571s (pick 23.5s, cpu 373.8s, busy cores 15.9); 1,326,868 solver facts; 590 gap refutations (7.457s); 634,225 claims (445,377 capacity, 188,848 expansion, 0 failures, 9,513,394 bytes); independent check verified optimal in 60.054s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `27f230a` rows evaluate resolving duplicate pair partitions in Phase 2 via bitmask bounds:
+  - In `src/solver.rs`:
+    - Tracked second response occurrences using a secondary bitmask `seen2: [u64; M]` and boolean `has_size_ge_3`.
+    - When `!has_size_ge_3`, all duplicate buckets are guaranteed to have size $\le 2$ (pairs and singletons).
+    - Calculated `num_non_empty = c_len - duplicates` and exact achievable cost `lb_cost = (2 * c_len + duplicates) as u32` in $O(1)$ directly from the bitmask pass, bypassing the second candidate pass and array zeroing over `counts_ptr` and `non_empty_indices`.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.603s** (cpu 41.0s, pick 2.6s, states 820 vs 834 [-14 states], guesses 15,082 vs 15,111, cost 3124).
+    - `N=1600, seed=1`: **8.195s** (cpu 128.5s, pick 8.1s, states 3,953, guesses 66,194, bounds pruned 316,363 vs 313,767, cost 5256).
+    - `N=2000, seed=1`: **13.845s** (cpu 217.9s, pick 13.7s, states 7,789 vs 7,795 [-6 states], guesses 185,624 vs 186,684 [-1,060 guesses], cost 6723).
+    - `N=2200, seed=1`: **20.140s** (cpu 319.7s, pick 20.1s, states 23,617, guesses 598,194, bounds pruned 1,957,509 vs 1,933,696 [+23.8k bounds pruned], cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-27f230a`): **23.657s** (cpu 375.9s, pick 23.4s, states 25,996 vs 25,998, guesses 750,861 vs 752,206 [-1,345 guesses], bounds pruned 2,085,572, equiv pruned 207,173,721, cache hits 3,487,253, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 130.54s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.82s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 299.99s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 45.96s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 634,225 claims with 0 failures, and independent `check` verified `3.93e11` response reads in 60.054s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `08d33d9` rows evaluate direct response index lookup for small candidate partitions:
   - In `src/solver.rs`:
