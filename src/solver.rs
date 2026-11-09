@@ -1031,6 +1031,258 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
 
                 (16, has_one_collision)
             }
+            9 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let c8 = unsafe { *bucket_ptr.add(8) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand9 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident, $cg:ident, $ch:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        let re = unsafe { *gi_ptr.add($ce) };
+                                        if re != ra && re != rb && re != rc && re != rd {
+                                            let rf = unsafe { *gi_ptr.add($cf) };
+                                            if rf != ra
+                                                && rf != rb
+                                                && rf != rc
+                                                && rf != rd
+                                                && rf != re
+                                            {
+                                                let rg = unsafe { *gi_ptr.add($cg) };
+                                                if rg != ra
+                                                    && rg != rb
+                                                    && rg != rc
+                                                    && rg != rd
+                                                    && rg != re
+                                                    && rg != rf
+                                                {
+                                                    let rh = unsafe { *gi_ptr.add($ch) };
+                                                    if rh != ra
+                                                        && rh != rb
+                                                        && rh != rc
+                                                        && rh != rd
+                                                        && rh != re
+                                                        && rh != rf
+                                                        && rh != rg
+                                                    {
+                                                        return (17, true);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ra == rb {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc != ra {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rc && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rc && rf != rd && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc == ra || rc == rb {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rb {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rd && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd == ra || rd == rb || rd == rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re == ra || re == rb || re == rc || re == rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != rd {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf == ra || rf == rb || rf == rc || rf == rd || rf == re
+                                        {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        } else {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg == ra
+                                                || rg == rb
+                                                || rg == rc
+                                                || rg == rd
+                                                || rg == re
+                                                || rg == rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            } else {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    return (17, true);
+                                                } else {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                eval_cand9!(c0, c1, c2, c3, c4, c5, c6, c7, c8);
+                eval_cand9!(c1, c0, c2, c3, c4, c5, c6, c7, c8);
+                eval_cand9!(c2, c0, c1, c3, c4, c5, c6, c7, c8);
+                eval_cand9!(c3, c0, c1, c2, c4, c5, c6, c7, c8);
+                eval_cand9!(c4, c0, c1, c2, c3, c5, c6, c7, c8);
+                eval_cand9!(c5, c0, c1, c2, c3, c4, c6, c7, c8);
+                eval_cand9!(c6, c0, c1, c2, c3, c4, c5, c7, c8);
+                eval_cand9!(c7, c0, c1, c2, c3, c4, c5, c6, c8);
+                eval_cand9!(c8, c0, c1, c2, c3, c4, c5, c6, c7);
+
+                (18, has_one_collision)
+            }
             _ => {
                 let n = bucket.len();
                 let mut has_one_collision = false;
