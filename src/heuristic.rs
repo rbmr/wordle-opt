@@ -504,8 +504,6 @@ fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 16])
     }
 }
 
-const THREE_POW: [u32; 11] = [1, 3, 9, 27, 81, 243, 729, 2187, 6561, 19683, 59049];
-
 pub fn compute_max_branching_factor_seq_with_target(
     matrix: &crate::matrix::ResponseMatrix,
     candidates: &[usize],
@@ -667,7 +665,6 @@ pub fn compute_max_branching_factor_seq_with_target(
         if has_profile && word_len == 5 {
             let non_c_mask = !active_letter_mask;
             let mut min_non_overlap = min_non_overlap_for_len(5, max_k);
-            let mut max_k32 = max_k as u32;
             let tab0 = &m_tab[0];
             let tab1 = &m_tab[1];
             let tab2 = &m_tab[2];
@@ -677,24 +674,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
-                let c0 = unsafe { *tab0.get_unchecked(p.chars[0] as usize) as u32 };
-                if c0 * 81 <= max_k32 {
-                    continue;
-                }
-                let p01 = c0 * unsafe { *tab1.get_unchecked(p.chars[1] as usize) as u32 };
-                if p01 * 27 <= max_k32 {
-                    continue;
-                }
-                let p012 = p01 * unsafe { *tab2.get_unchecked(p.chars[2] as usize) as u32 };
-                if p012 * 9 <= max_k32 {
-                    continue;
-                }
-                let p0123 = p012 * unsafe { *tab3.get_unchecked(p.chars[3] as usize) as u32 };
-                if p0123 * 3 <= max_k32 {
-                    continue;
-                }
-                let prod = p0123 * unsafe { *tab4.get_unchecked(p.chars[4] as usize) as u32 };
-                if prod <= max_k32 {
+                let prod = unsafe {
+                    (*tab0.get_unchecked(p.chars[0] as usize) as u32)
+                        * (*tab1.get_unchecked(p.chars[1] as usize) as u32)
+                        * (*tab2.get_unchecked(p.chars[2] as usize) as u32)
+                        * (*tab3.get_unchecked(p.chars[3] as usize) as u32)
+                        * (*tab4.get_unchecked(p.chars[4] as usize) as u32)
+                };
+                if prod as usize <= max_k {
                     continue;
                 }
 
@@ -715,28 +702,21 @@ pub fn compute_max_branching_factor_seq_with_target(
                     if max_k >= effective_target {
                         break;
                     }
-                    max_k32 = max_k as u32;
                     min_non_overlap = min_non_overlap_for_len(5, max_k);
                 }
             }
         } else if has_profile {
             let non_c_mask = !active_letter_mask;
             let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
-            let mut max_k32 = max_k as u32;
             for (g, p) in matrix.guess_profiles.iter().enumerate() {
                 if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
                 let mut prod = 1u32;
-                let mut can_prune = false;
                 for i in 0..word_len {
                     prod *= unsafe { *m_tab[i].get_unchecked(p.chars[i] as usize) as u32 };
-                    if prod * THREE_POW[word_len - 1 - i] <= max_k32 {
-                        can_prune = true;
-                        break;
-                    }
                 }
-                if can_prune {
+                if prod as usize <= max_k {
                     continue;
                 }
 
@@ -757,7 +737,6 @@ pub fn compute_max_branching_factor_seq_with_target(
                     if max_k >= effective_target {
                         break;
                     }
-                    max_k32 = max_k as u32;
                     min_non_overlap = min_non_overlap_for_len(word_len, max_k);
                 }
             }
@@ -810,22 +789,16 @@ pub fn compute_max_branching_factor_seq_with_target(
 
         let non_c_mask = !active_letter_mask;
         let mut min_non_overlap = min_non_overlap_for_len(word_len, max_k);
-        let mut max_k32 = max_k as u32;
         for (g, p) in matrix.guess_profiles.iter().enumerate() {
             if has_profile {
                 if (p.mask & non_c_mask).count_ones() >= min_non_overlap {
                     continue;
                 }
                 let mut prod = 1u32;
-                let mut can_prune = false;
                 for i in 0..word_len {
                     prod *= unsafe { *m_tab[i].get_unchecked(p.chars[i] as usize) as u32 };
-                    if prod * THREE_POW[word_len - 1 - i] <= max_k32 {
-                        can_prune = true;
-                        break;
-                    }
                 }
-                if can_prune {
+                if prod as usize <= max_k {
                     continue;
                 }
             } else if (p.mask & c_mask) == 0 {
@@ -865,7 +838,6 @@ pub fn compute_max_branching_factor_seq_with_target(
                     break;
                 }
                 if has_profile {
-                    max_k32 = max_k as u32;
                     min_non_overlap = min_non_overlap_for_len(word_len, max_k);
                 }
             }
