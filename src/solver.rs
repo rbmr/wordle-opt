@@ -3402,9 +3402,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         if used_val > lb {
                             cost += used_val - lb;
                             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                            let cutoff = beta.min(
-                                current_global_beta.saturating_sub(self.current_cost_so_far),
-                            );
+                            let cutoff = beta
+                                .min(current_global_beta.saturating_sub(self.current_cost_so_far));
                             if cost >= cutoff {
                                 self.local_metrics.pruned_by_bounds += 1;
                                 self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
