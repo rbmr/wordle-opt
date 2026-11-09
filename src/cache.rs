@@ -33,8 +33,18 @@ impl GlobalCache {
             "GlobalCache size must be a power of two, got {}",
             size
         );
-        let mut entries = Vec::with_capacity(size * 2);
-        entries.resize_with(size * 2, || AtomicU64::new(0));
+        let raw = vec![0u64; size * 2];
+        let mut raw = std::mem::ManuallyDrop::new(raw);
+        // SAFETY: `AtomicU64` is guaranteed to have the same size, alignment, and bit validity as `u64`.
+        // Allocating `vec![0u64; size * 2]` uses `alloc_zeroed` (`calloc`), returning OS demand-zeroed
+        // pages without faulting and zeroing all 2 GB sequentially on a single thread up front.
+        let entries = unsafe {
+            Vec::from_raw_parts(
+                raw.as_mut_ptr() as *mut AtomicU64,
+                raw.len(),
+                raw.capacity(),
+            )
+        };
         let mask = size - 1;
         Self { entries, mask }
     }

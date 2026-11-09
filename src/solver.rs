@@ -190,6 +190,7 @@ fn sort_guess_tuples(tuples: &mut [GuessTuple]) {
     }
 }
 
+#[inline(always)]
 unsafe fn eval_non_empty_buckets_5_plus(
     c_len: u32,
     rem_total: u32,
@@ -200,693 +201,47 @@ unsafe fn eval_non_empty_buckets_5_plus(
     parent_cap_bounds_ptr: *const u32,
 ) -> (u32, u32) {
     unsafe {
-        if num_non_empty == 5 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
+        let last_idx = num_non_empty - 1;
+        let mut exp = base_exp;
+        let mut lb = c_len;
+        let mut sum_prev = 0u32;
+        let mut i = 0usize;
+        while i + 3 < last_idx {
+            let r0 = *non_empty_indices_ptr.add(i) as usize;
+            let r1 = *non_empty_indices_ptr.add(i + 1) as usize;
+            let r2 = *non_empty_indices_ptr.add(i + 2) as usize;
+            let r3 = *non_empty_indices_ptr.add(i + 3) as usize;
+            let c0 = *counts_ptr.add(r0) as u32;
+            let c1 = *counts_ptr.add(r1) as u32;
+            let c2 = *counts_ptr.add(r2) as u32;
+            let c3 = *counts_ptr.add(r3) as u32;
             *counts_ptr.add(r0) = 0;
             *counts_ptr.add(r1) = 0;
             *counts_ptr.add(r2) = 0;
             *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            let count4 = rem_total - count0 - count1 - count2 - count3;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize),
-            )
-        } else if num_non_empty == 6 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            let count5 = rem_total - count0 - count1 - count2 - count3 - count4;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize),
-            )
-        } else if num_non_empty == 7 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            let count6 = rem_total - count0 - count1 - count2 - count3 - count4 - count5;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize),
-            )
-        } else if num_non_empty == 8 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            let count7 = rem_total - count0 - count1 - count2 - count3 - count4 - count5 - count6;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize),
-            )
-        } else if num_non_empty == 9 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            let count8 =
-                rem_total - count0 - count1 - count2 - count3 - count4 - count5 - count6 - count7;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize),
-            )
-        } else if num_non_empty == 10 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            let count8 = *counts_ptr.add(r8) as u32;
-            let r9 = *non_empty_indices_ptr.add(9) as usize;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            *counts_ptr.add(r9) = 0;
-            let count9 = rem_total
-                - count0
-                - count1
-                - count2
-                - count3
-                - count4
-                - count5
-                - count6
-                - count7
-                - count8;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8
-                    + count9 * count9,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize)
-                    + *parent_cap_bounds_ptr.add(count9 as usize),
-            )
-        } else if num_non_empty == 11 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            let r9 = *non_empty_indices_ptr.add(9) as usize;
-            let r10 = *non_empty_indices_ptr.add(10) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let count8 = *counts_ptr.add(r8) as u32;
-            let count9 = *counts_ptr.add(r9) as u32;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            *counts_ptr.add(r9) = 0;
-            *counts_ptr.add(r10) = 0;
-            let count10 = rem_total
-                - count0
-                - count1
-                - count2
-                - count3
-                - count4
-                - count5
-                - count6
-                - count7
-                - count8
-                - count9;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8
-                    + count9 * count9
-                    + count10 * count10,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize)
-                    + *parent_cap_bounds_ptr.add(count9 as usize)
-                    + *parent_cap_bounds_ptr.add(count10 as usize),
-            )
-        } else if num_non_empty == 12 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            let r9 = *non_empty_indices_ptr.add(9) as usize;
-            let r10 = *non_empty_indices_ptr.add(10) as usize;
-            let r11 = *non_empty_indices_ptr.add(11) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let count8 = *counts_ptr.add(r8) as u32;
-            let count9 = *counts_ptr.add(r9) as u32;
-            let count10 = *counts_ptr.add(r10) as u32;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            *counts_ptr.add(r9) = 0;
-            *counts_ptr.add(r10) = 0;
-            *counts_ptr.add(r11) = 0;
-            let count11 = rem_total
-                - count0
-                - count1
-                - count2
-                - count3
-                - count4
-                - count5
-                - count6
-                - count7
-                - count8
-                - count9
-                - count10;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8
-                    + count9 * count9
-                    + count10 * count10
-                    + count11 * count11,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize)
-                    + *parent_cap_bounds_ptr.add(count9 as usize)
-                    + *parent_cap_bounds_ptr.add(count10 as usize)
-                    + *parent_cap_bounds_ptr.add(count11 as usize),
-            )
-        } else if num_non_empty == 13 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            let r9 = *non_empty_indices_ptr.add(9) as usize;
-            let r10 = *non_empty_indices_ptr.add(10) as usize;
-            let r11 = *non_empty_indices_ptr.add(11) as usize;
-            let r12 = *non_empty_indices_ptr.add(12) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let count8 = *counts_ptr.add(r8) as u32;
-            let count9 = *counts_ptr.add(r9) as u32;
-            let count10 = *counts_ptr.add(r10) as u32;
-            let count11 = *counts_ptr.add(r11) as u32;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            *counts_ptr.add(r9) = 0;
-            *counts_ptr.add(r10) = 0;
-            *counts_ptr.add(r11) = 0;
-            *counts_ptr.add(r12) = 0;
-            let count12 = rem_total
-                - count0
-                - count1
-                - count2
-                - count3
-                - count4
-                - count5
-                - count6
-                - count7
-                - count8
-                - count9
-                - count10
-                - count11;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8
-                    + count9 * count9
-                    + count10 * count10
-                    + count11 * count11
-                    + count12 * count12,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize)
-                    + *parent_cap_bounds_ptr.add(count9 as usize)
-                    + *parent_cap_bounds_ptr.add(count10 as usize)
-                    + *parent_cap_bounds_ptr.add(count11 as usize)
-                    + *parent_cap_bounds_ptr.add(count12 as usize),
-            )
-        } else if num_non_empty == 14 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            let r9 = *non_empty_indices_ptr.add(9) as usize;
-            let r10 = *non_empty_indices_ptr.add(10) as usize;
-            let r11 = *non_empty_indices_ptr.add(11) as usize;
-            let r12 = *non_empty_indices_ptr.add(12) as usize;
-            let r13 = *non_empty_indices_ptr.add(13) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let count8 = *counts_ptr.add(r8) as u32;
-            let count9 = *counts_ptr.add(r9) as u32;
-            let count10 = *counts_ptr.add(r10) as u32;
-            let count11 = *counts_ptr.add(r11) as u32;
-            let count12 = *counts_ptr.add(r12) as u32;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            *counts_ptr.add(r9) = 0;
-            *counts_ptr.add(r10) = 0;
-            *counts_ptr.add(r11) = 0;
-            *counts_ptr.add(r12) = 0;
-            *counts_ptr.add(r13) = 0;
-            let count13 = rem_total
-                - count0
-                - count1
-                - count2
-                - count3
-                - count4
-                - count5
-                - count6
-                - count7
-                - count8
-                - count9
-                - count10
-                - count11
-                - count12;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8
-                    + count9 * count9
-                    + count10 * count10
-                    + count11 * count11
-                    + count12 * count12
-                    + count13 * count13,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize)
-                    + *parent_cap_bounds_ptr.add(count9 as usize)
-                    + *parent_cap_bounds_ptr.add(count10 as usize)
-                    + *parent_cap_bounds_ptr.add(count11 as usize)
-                    + *parent_cap_bounds_ptr.add(count12 as usize)
-                    + *parent_cap_bounds_ptr.add(count13 as usize),
-            )
-        } else if num_non_empty == 15 {
-            let r0 = *non_empty_indices_ptr.add(0) as usize;
-            let r1 = *non_empty_indices_ptr.add(1) as usize;
-            let r2 = *non_empty_indices_ptr.add(2) as usize;
-            let r3 = *non_empty_indices_ptr.add(3) as usize;
-            let r4 = *non_empty_indices_ptr.add(4) as usize;
-            let r5 = *non_empty_indices_ptr.add(5) as usize;
-            let r6 = *non_empty_indices_ptr.add(6) as usize;
-            let r7 = *non_empty_indices_ptr.add(7) as usize;
-            let r8 = *non_empty_indices_ptr.add(8) as usize;
-            let r9 = *non_empty_indices_ptr.add(9) as usize;
-            let r10 = *non_empty_indices_ptr.add(10) as usize;
-            let r11 = *non_empty_indices_ptr.add(11) as usize;
-            let r12 = *non_empty_indices_ptr.add(12) as usize;
-            let r13 = *non_empty_indices_ptr.add(13) as usize;
-            let r14 = *non_empty_indices_ptr.add(14) as usize;
-            let count0 = *counts_ptr.add(r0) as u32;
-            let count1 = *counts_ptr.add(r1) as u32;
-            let count2 = *counts_ptr.add(r2) as u32;
-            let count3 = *counts_ptr.add(r3) as u32;
-            let count4 = *counts_ptr.add(r4) as u32;
-            let count5 = *counts_ptr.add(r5) as u32;
-            let count6 = *counts_ptr.add(r6) as u32;
-            let count7 = *counts_ptr.add(r7) as u32;
-            let count8 = *counts_ptr.add(r8) as u32;
-            let count9 = *counts_ptr.add(r9) as u32;
-            let count10 = *counts_ptr.add(r10) as u32;
-            let count11 = *counts_ptr.add(r11) as u32;
-            let count12 = *counts_ptr.add(r12) as u32;
-            let count13 = *counts_ptr.add(r13) as u32;
-            *counts_ptr.add(r0) = 0;
-            *counts_ptr.add(r1) = 0;
-            *counts_ptr.add(r2) = 0;
-            *counts_ptr.add(r3) = 0;
-            *counts_ptr.add(r4) = 0;
-            *counts_ptr.add(r5) = 0;
-            *counts_ptr.add(r6) = 0;
-            *counts_ptr.add(r7) = 0;
-            *counts_ptr.add(r8) = 0;
-            *counts_ptr.add(r9) = 0;
-            *counts_ptr.add(r10) = 0;
-            *counts_ptr.add(r11) = 0;
-            *counts_ptr.add(r12) = 0;
-            *counts_ptr.add(r13) = 0;
-            *counts_ptr.add(r14) = 0;
-            let count14 = rem_total
-                - count0
-                - count1
-                - count2
-                - count3
-                - count4
-                - count5
-                - count6
-                - count7
-                - count8
-                - count9
-                - count10
-                - count11
-                - count12
-                - count13;
-            (
-                base_exp
-                    + count0 * count0
-                    + count1 * count1
-                    + count2 * count2
-                    + count3 * count3
-                    + count4 * count4
-                    + count5 * count5
-                    + count6 * count6
-                    + count7 * count7
-                    + count8 * count8
-                    + count9 * count9
-                    + count10 * count10
-                    + count11 * count11
-                    + count12 * count12
-                    + count13 * count13
-                    + count14 * count14,
-                c_len
-                    + *parent_cap_bounds_ptr.add(count0 as usize)
-                    + *parent_cap_bounds_ptr.add(count1 as usize)
-                    + *parent_cap_bounds_ptr.add(count2 as usize)
-                    + *parent_cap_bounds_ptr.add(count3 as usize)
-                    + *parent_cap_bounds_ptr.add(count4 as usize)
-                    + *parent_cap_bounds_ptr.add(count5 as usize)
-                    + *parent_cap_bounds_ptr.add(count6 as usize)
-                    + *parent_cap_bounds_ptr.add(count7 as usize)
-                    + *parent_cap_bounds_ptr.add(count8 as usize)
-                    + *parent_cap_bounds_ptr.add(count9 as usize)
-                    + *parent_cap_bounds_ptr.add(count10 as usize)
-                    + *parent_cap_bounds_ptr.add(count11 as usize)
-                    + *parent_cap_bounds_ptr.add(count12 as usize)
-                    + *parent_cap_bounds_ptr.add(count13 as usize)
-                    + *parent_cap_bounds_ptr.add(count14 as usize),
-            )
-        } else {
-            let mut exp = base_exp;
-            let mut lb = c_len;
-            for i in 0..num_non_empty {
-                let r_idx = *non_empty_indices_ptr.add(i) as usize;
-                let count = *counts_ptr.add(r_idx);
-                *counts_ptr.add(r_idx) = 0;
-                exp += (count as u32) * (count as u32);
-                lb += *parent_cap_bounds_ptr.add(count as usize);
-            }
-            (exp, lb)
+            sum_prev += c0 + c1 + c2 + c3;
+            exp += c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+            lb += *parent_cap_bounds_ptr.add(c0 as usize)
+                + *parent_cap_bounds_ptr.add(c1 as usize)
+                + *parent_cap_bounds_ptr.add(c2 as usize)
+                + *parent_cap_bounds_ptr.add(c3 as usize);
+            i += 4;
         }
+        while i < last_idx {
+            let r = *non_empty_indices_ptr.add(i) as usize;
+            let c = *counts_ptr.add(r) as u32;
+            *counts_ptr.add(r) = 0;
+            sum_prev += c;
+            exp += c * c;
+            lb += *parent_cap_bounds_ptr.add(c as usize);
+            i += 1;
+        }
+        let r_last = *non_empty_indices_ptr.add(last_idx) as usize;
+        *counts_ptr.add(r_last) = 0;
+        let c_last = rem_total - sum_prev;
+        exp += c_last * c_last;
+        lb += *parent_cap_bounds_ptr.add(c_last as usize);
+        (exp, lb)
     }
 }
 
@@ -4243,9 +3598,6 @@ impl<'a> Solver<'a> {
         let mut best_guess = usize::MAX;
         let mut min_expected_rem = u32::MAX;
 
-        let mut counts = vec![0u16; matrix.num_responses];
-        let mut non_empty_indices = vec![0u16; matrix.num_responses];
-
         let skip_projections = c_mask.count_ones() >= 26;
         let mut seen_projections = if skip_projections {
             rustc_hash::FxHashSet::default()
@@ -4257,9 +3609,14 @@ impl<'a> Solver<'a> {
         };
 
         if matrix.num_responses <= 256 {
+            let mut counts = [0u16; 256];
+            let mut non_empty_indices = [0u16; 256];
             let matrix_data_ptr = matrix.data_u8.as_ptr();
             for g in 0..dict.guesses.len() {
                 if !skip_projections {
+                    if (matrix.guess_masks[g] & c_mask) == 0 {
+                        continue;
+                    }
                     let chars = &dict.guess_chars[g];
                     let mut proj = 0u64;
                     for i in 0..dict.word_len.min(8) {
@@ -4314,12 +3671,12 @@ impl<'a> Solver<'a> {
                 counts[r] += 1;
             }
 
-            let mut offsets = vec![0usize; matrix.num_responses + 1];
+            let mut offsets = [0usize; 257];
             for r_idx in 0..matrix.num_responses {
                 offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
             }
             let mut sorted_set = vec![0usize; set.len()];
-            let mut current_offsets = offsets.clone();
+            let mut current_offsets = offsets;
             for &c in set {
                 let r = unsafe { *best_g_ptr.add(c) as usize };
                 let pos = current_offsets[r];
@@ -4339,9 +3696,14 @@ impl<'a> Solver<'a> {
             }
             cost
         } else {
+            let mut counts = vec![0u16; matrix.num_responses];
+            let mut non_empty_indices = vec![0u16; matrix.num_responses];
             let matrix_data_ptr = matrix.data.as_ptr();
             for g in 0..dict.guesses.len() {
                 if !skip_projections {
+                    if (matrix.guess_masks[g] & c_mask) == 0 {
+                        continue;
+                    }
                     let chars = &dict.guess_chars[g];
                     let mut proj = 0u64;
                     for i in 0..dict.word_len.min(8) {
