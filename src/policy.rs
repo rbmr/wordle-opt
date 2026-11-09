@@ -1338,7 +1338,17 @@ impl<'a> OptimalPolicy<'a> {
                             }
                             let bucket_greedy =
                                 Solver::greedy_solve(self.matrix, self.dict, bucket);
-                            let bucket_k = bucket.len().min(self.max_k).max(2);
+                            let bucket_k = if bucket.len() > 15 {
+                                crate::heuristic::compute_branching_factor_upper_bound(
+                                    self.matrix,
+                                    bucket,
+                                )
+                                .min(bucket.len())
+                                .min(self.max_k)
+                                .max(2)
+                            } else {
+                                bucket.len().min(self.max_k).max(2)
+                            };
                             let val = solver.min_state_val_with_hash(
                                 bucket,
                                 hash,

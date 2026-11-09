@@ -2643,6 +2643,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 };
                 let active_guesses_slice = unsafe { &*active_ptr };
 
+                let p_k = if p_len > 15 {
+                    crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p_slice)
+                        .min(p_len)
+                        .min(parent_max_k)
+                        .max(2)
+                } else {
+                    p_len.min(parent_max_k).max(2)
+                };
                 self.current_cost_so_far += b;
                 let val = self.min_state_val_with_hash(
                     p_slice,
@@ -2650,7 +2658,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     active_guesses_slice,
                     effective_beta,
                     depth + 1,
-                    p_len.min(parent_max_k).max(2),
+                    p_k,
                     used_val,
                 );
                 self.current_cost_so_far -= b;
@@ -4023,8 +4031,21 @@ impl<'a> Solver<'a> {
                         equiv_cache,
                     );
                     let bucket_greedy = Self::greedy_solve(matrix, dict, &bucket);
-                    let val =
-                        solver.min_state_val(&bucket, &all_guesses_bits, bucket_greedy, 2, max_k);
+                    let bucket_k = if bucket.len() > 15 {
+                        crate::heuristic::compute_branching_factor_upper_bound(matrix, &bucket)
+                            .min(bucket.len())
+                            .min(max_k)
+                            .max(2)
+                    } else {
+                        bucket.len().min(max_k).max(2)
+                    };
+                    let val = solver.min_state_val(
+                        &bucket,
+                        &all_guesses_bits,
+                        bucket_greedy,
+                        2,
+                        bucket_k,
+                    );
                     val.min(bucket_greedy)
                 })
                 .sum();

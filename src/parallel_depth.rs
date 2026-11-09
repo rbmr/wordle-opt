@@ -197,8 +197,16 @@ pub fn solve_parallel_depth2<'a>(
                     return;
                 }
 
+                let bucket_k = if bucket.len() > 15 {
+                    crate::heuristic::compute_branching_factor_upper_bound(matrix, &bucket)
+                        .min(bucket.len())
+                        .min(max_k)
+                        .max(2)
+                } else {
+                    bucket.len().min(max_k).max(2)
+                };
                 let val =
-                    solver.min_state_val(&bucket, &all_guesses_bits, effective_beta, 2, max_k);
+                    solver.min_state_val(&bucket, &all_guesses_bits, effective_beta, 2, bucket_k);
 
                 let net_increase = val.saturating_sub(p_lbs[r_idx]);
 
@@ -371,8 +379,16 @@ pub fn solve_parallel_depth2<'a>(
                     return;
                 }
 
+                let bucket_k = if bucket.len() > 15 {
+                    crate::heuristic::compute_branching_factor_upper_bound(matrix, &bucket)
+                        .min(bucket.len())
+                        .min(max_k)
+                        .max(2)
+                } else {
+                    bucket.len().min(max_k).max(2)
+                };
                 let val =
-                    solver.min_state_val(&bucket, &all_guesses_bits, effective_beta, 2, max_k);
+                    solver.min_state_val(&bucket, &all_guesses_bits, effective_beta, 2, bucket_k);
 
                 let net_increase = val.saturating_sub(p_lbs[r_idx]);
 
