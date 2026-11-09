@@ -1565,10 +1565,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
             let mut num_non_empty = 0;
             let mut duplicates = 0;
-            if M <= 4 {
+            if M <= 4 && max_allowed_duplicates == 0 {
                 let mut seen = [0u64; M];
-                let mut seen2 = [0u64; M];
-                let mut num_3plus = 0usize;
                 let mut aborted = false;
                 for i in 0..cand_idx {
                     let c = unsafe { *set_ptr.add(i) };
@@ -1577,36 +1575,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let bit = 1u64 << (r & 63);
                     let word = unsafe { seen.get_unchecked_mut(word_idx) };
                     if (*word & bit) != 0 {
-                        duplicates += 1;
-                        if duplicates > max_allowed_duplicates {
-                            for j in 0..num_3plus {
-                                unsafe {
-                                    let r_idx = *non_empty_indices_ptr.add(j) as usize;
-                                    *counts_ptr.add(r_idx) = 0;
-                                }
-                            }
-                            aborted = true;
-                            break;
-                        }
-                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                        if (*word2 & bit) != 0 {
-                            unsafe {
-                                let cnt_ptr = counts_ptr.add(r);
-                                let cnt = *cnt_ptr;
-                                if cnt == 0 {
-                                    *non_empty_indices_ptr.add(num_3plus) = r as u16;
-                                    num_3plus += 1;
-                                    *cnt_ptr = 3;
-                                } else {
-                                    *cnt_ptr = cnt + 1;
-                                }
-                            }
-                        } else {
-                            *word2 |= bit;
-                        }
-                    } else {
-                        *word |= bit;
+                        aborted = true;
+                        break;
                     }
+                    *word |= bit;
                 }
                 if !aborted {
                     for i in (cand_idx + 1)..c_len {
@@ -1616,114 +1588,27 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let bit = 1u64 << (r & 63);
                         let word = unsafe { seen.get_unchecked_mut(word_idx) };
                         if (*word & bit) != 0 {
-                            duplicates += 1;
-                            if duplicates > max_allowed_duplicates {
-                                for j in 0..num_3plus {
-                                    unsafe {
-                                        let r_idx = *non_empty_indices_ptr.add(j) as usize;
-                                        *counts_ptr.add(r_idx) = 0;
-                                    }
-                                }
-                                aborted = true;
-                                break;
-                            }
-                            let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                            if (*word2 & bit) != 0 {
-                                unsafe {
-                                    let cnt_ptr = counts_ptr.add(r);
-                                    let cnt = *cnt_ptr;
-                                    if cnt == 0 {
-                                        *non_empty_indices_ptr.add(num_3plus) = r as u16;
-                                        num_3plus += 1;
-                                        *cnt_ptr = 3;
-                                    } else {
-                                        *cnt_ptr = cnt + 1;
-                                    }
-                                }
-                            } else {
-                                *word2 |= bit;
-                            }
-                        } else {
-                            *word |= bit;
+                            aborted = true;
+                            break;
                         }
+                        *word |= bit;
                     }
                 }
                 if aborted {
                     min_val_found = min_val_found.min(best_val);
                     continue;
                 }
-                let total_non_empty = c_len - duplicates;
-                if total_non_empty > local_max_k {
-                    local_max_k = total_non_empty;
-                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                }
-                if num_3plus == 0 {
-                    let lb_cost = (2 * c_len - 1 + duplicates) as u32;
-                    if lb_cost < best_val {
-                        if total_non_empty > valid_phase1_k {
-                            valid_phase1_k = total_non_empty;
-                        }
-                        self.local_metrics.guesses_evaluated += 1;
-                        min_val_found = min_val_found.min(lb_cost);
-                        best_val = lb_cost;
-                        if duplicates > 0 {
-                            k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
-                            min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                            max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                        }
-                    } else {
-                        min_val_found = min_val_found.min(lb_cost);
-                    }
-                    if duplicates == 0 || min_k_needed > c_len {
-                        break;
-                    }
-                    continue;
-                }
-                let (expected_rem, lb_cost) = if num_3plus == 1 {
-                    let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
-                    let c0 = unsafe { *counts_ptr.add(r0) as usize };
-                    unsafe {
-                        *counts_ptr.add(r0) = 0;
-                    }
-                    let c0_u32 = c0 as u32;
-                    (
-                        (c_len + 2 * duplicates) as u32 + (c0_u32 - 1) * (c0_u32 - 2),
-                        (2 * c_len - 1 + duplicates) as u32
-                            + unsafe { *parent_cap_bounds_ptr.add(c0) }
-                            - (2 * c0_u32 - 1),
-                    )
-                } else {
-                    let mut exp = (c_len + 2 * duplicates) as u32;
-                    let mut lb = (2 * c_len - 1 + duplicates) as u32;
-                    for j in 0..num_3plus {
-                        let r_idx = unsafe { *non_empty_indices_ptr.add(j) as usize };
-                        let c_r = unsafe { *counts_ptr.add(r_idx) as usize };
-                        unsafe {
-                            *counts_ptr.add(r_idx) = 0;
-                        }
-                        let c_u32 = c_r as u32;
-                        exp += (c_u32 - 1) * (c_u32 - 2);
-                        lb += unsafe { *parent_cap_bounds_ptr.add(c_r) } - (2 * c_u32 - 1);
-                    }
-                    (exp, lb)
-                };
+                let lb_cost = (2 * c_len - 1) as u32;
+                local_max_k = c_len;
                 if lb_cost < best_val {
-                    if total_non_empty > valid_phase1_k {
-                        valid_phase1_k = total_non_empty;
-                    }
-                    phase1_tuples.push(GuessTuple {
-                        lb: lb_cost,
-                        exp: expected_rem,
-                        g: g as u32,
-                    });
+                    valid_phase1_k = c_len;
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
                 } else {
                     min_val_found = min_val_found.min(lb_cost);
                 }
-                if min_k_needed > c_len {
-                    break;
-                }
-                continue;
+                break;
             } else {
                 let mut aborted = false;
                 for i in 0..cand_idx {
@@ -2065,8 +1950,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut duplicates = 0;
                         if M <= 4 {
                             let mut seen = [0u64; M];
-                            let mut seen2 = [0u64; M];
-                            let mut num_3plus = 0usize;
                             let mut aborted = false;
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
@@ -2077,30 +1960,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 if (*word & bit) != 0 {
                                     duplicates += 1;
                                     if duplicates > max_allowed_duplicates {
-                                        for j in 0..num_3plus {
-                                            unsafe {
-                                                let r_idx = *non_empty_indices_ptr.add(j) as usize;
-                                                *counts_ptr.add(r_idx) = 0;
-                                            }
-                                        }
                                         aborted = true;
                                         break;
-                                    }
-                                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                                    if (*word2 & bit) != 0 {
-                                        unsafe {
-                                            let cnt_ptr = counts_ptr.add(r);
-                                            let cnt = *cnt_ptr;
-                                            if cnt == 0 {
-                                                *non_empty_indices_ptr.add(num_3plus) = r as u16;
-                                                num_3plus += 1;
-                                                *cnt_ptr = 3;
-                                            } else {
-                                                *cnt_ptr = cnt + 1;
-                                            }
-                                        }
-                                    } else {
-                                        *word2 |= bit;
                                     }
                                 } else {
                                     *word |= bit;
@@ -2110,14 +1971,22 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 min_val_found = min_val_found.min(best_val);
                                 continue;
                             }
-                            num_non_empty = c_len - duplicates;
-                            if num_3plus == 0 {
+                            if duplicates == 0 {
+                                let lb_cost = (2 * c_len) as u32;
+                                local_max_k = c_len;
+                                valid_phase2_k = c_len;
+                                self.local_metrics.guesses_evaluated += 1;
+                                min_val_found = min_val_found.min(lb_cost);
+                                best_val = lb_cost;
+                                break 'guess_loop;
+                            } else if duplicates == 1 {
+                                num_non_empty = c_len - 1;
                                 if num_non_empty > local_max_k {
                                     local_max_k = num_non_empty;
                                     min_k_needed = (local_max_k + 1).min(k_to_beat_best);
                                     max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                                 }
-                                let lb_cost = (2 * c_len + duplicates) as u32;
+                                let lb_cost = (2 * c_len + 1) as u32;
                                 if lb_cost < best_val {
                                     if num_non_empty > valid_phase2_k {
                                         valid_phase2_k = num_non_empty;
@@ -2125,74 +1994,32 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     self.local_metrics.guesses_evaluated += 1;
                                     min_val_found = min_val_found.min(lb_cost);
                                     best_val = lb_cost;
-                                    if duplicates > 0 {
-                                        k_to_beat_best = (3 * c_len as u32)
-                                            .saturating_sub(best_val.saturating_sub(1))
-                                            as usize;
-                                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
-                                    }
+                                    k_to_beat_best = (3 * c_len as u32)
+                                        .saturating_sub(best_val.saturating_sub(1))
+                                        as usize;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                                 } else {
                                     min_val_found = min_val_found.min(lb_cost);
                                 }
-                                if duplicates == 0 || min_k_needed > c_len {
+                                if min_k_needed > c_len {
                                     break 'guess_loop;
                                 }
                                 continue;
                             }
-                            let (expected_rem, lb_cost) = if num_3plus == 1 {
-                                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
-                                let c0 = unsafe { *counts_ptr.add(r0) as usize };
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
                                 unsafe {
-                                    *counts_ptr.add(r0) = 0;
-                                }
-                                if c0 >= c_len - 1 {
-                                    continue;
-                                }
-                                let c0_u32 = c0 as u32;
-                                (
-                                    (c_len + 2 * duplicates) as u32 + (c0_u32 - 1) * (c0_u32 - 2),
-                                    (2 * c_len + duplicates) as u32
-                                        + unsafe { *parent_cap_bounds_ptr.add(c0) }
-                                        - (2 * c0_u32 - 1),
-                                )
-                            } else {
-                                let mut exp = (c_len + 2 * duplicates) as u32;
-                                let mut lb = (2 * c_len + duplicates) as u32;
-                                for j in 0..num_3plus {
-                                    let r_idx = unsafe { *non_empty_indices_ptr.add(j) as usize };
-                                    let c_r = unsafe { *counts_ptr.add(r_idx) as usize };
-                                    unsafe {
-                                        *counts_ptr.add(r_idx) = 0;
+                                    let cnt_ptr = counts_ptr.add(r);
+                                    let cnt = *cnt_ptr;
+                                    if cnt == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                        num_non_empty += 1;
                                     }
-                                    let c_u32 = c_r as u32;
-                                    exp += (c_u32 - 1) * (c_u32 - 2);
-                                    lb += unsafe { *parent_cap_bounds_ptr.add(c_r) }
-                                        - (2 * c_u32 - 1);
+                                    *cnt_ptr = cnt + 1;
                                 }
-                                (exp, lb)
-                            };
-                            if num_non_empty > local_max_k {
-                                local_max_k = num_non_empty;
-                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
-                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                             }
-                            if lb_cost < best_val {
-                                if num_non_empty > valid_phase2_k {
-                                    valid_phase2_k = num_non_empty;
-                                }
-                                phase2_tuples.push(GuessTuple {
-                                    lb: lb_cost,
-                                    exp: expected_rem,
-                                    g: g as u32,
-                                });
-                            } else {
-                                min_val_found = min_val_found.min(lb_cost);
-                            }
-                            if min_k_needed > c_len {
-                                break 'guess_loop;
-                            }
-                            continue;
                         } else {
                             let mut aborted = false;
                             for c_idx in 0..c_len {
@@ -2495,13 +2322,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
         if c_len <= 16 {
+            #[derive(Clone, Copy)]
+            struct LocalCount {
+                r: u16,
+                count: u16,
+                hash: u64,
+            }
+
             let set_ptr = set.as_ptr();
 
             let mut seen = [0u64; M];
-            let mut seen2 = [0u64; M];
-            let mut seen3 = [0u64; M];
             let mut dup = 0usize;
-            let mut has_3plus = false;
 
             let mut r_buf = std::mem::MaybeUninit::<[u16; 16]>::uninit();
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
@@ -2523,15 +2354,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if dup + 1 >= c_len {
                         return beta;
                     }
-                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                    if (*word2 & bit) == 0 {
-                        *word2 |= bit;
-                    } else {
-                        unsafe {
-                            *seen3.get_unchecked_mut(word_idx) |= bit;
-                        }
-                        has_3plus = true;
-                    }
                 }
             }
 
@@ -2540,65 +2362,102 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-            let has_win = (seen[WIN >> 6] & (1u64 << (WIN & 63))) != 0;
-            let mut cost = (2 * c_len + dup - (has_win as usize)) as u32;
-            if !has_3plus || cost >= cutoff {
+
+            if dup == 0 || dup == 1 {
+                let has_win = (seen[WIN >> 6] & (1u64 << (WIN & 63))) != 0;
+                let cost = if has_win {
+                    (2 * c_len - 1 + dup) as u32
+                } else {
+                    (2 * c_len + dup) as u32
+                };
                 if cost >= cutoff {
                     self.local_metrics.pruned_by_bounds += 1;
                 }
                 return cost;
             }
 
-            let mut num_eval = 0usize;
-            let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 5]>::uninit();
-            let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
+            let mut cost = c_len as u32;
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+
+            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
+
             let mut seen_pass2 = [0u64; M];
+            let mut num_non_empty = 0usize;
+            let mut prev_idx = 0usize;
 
             for cand_idx in 0..c_len {
+                let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { *r_buf_ptr.add(cand_idx) };
                 let word_idx = (r as usize) >> 6;
                 let bit = 1u64 << (r & 63);
-                if (unsafe { *seen3.get_unchecked(word_idx) } & bit) == 0 {
-                    continue;
-                }
-                let c = unsafe { *set_ptr.add(cand_idx) };
-                let h = unsafe { *zobrist_ptr.add(c) };
                 let word = unsafe { seen_pass2.get_unchecked_mut(word_idx) };
                 if (*word & bit) == 0 {
                     *word |= bit;
+                    prev_idx = num_non_empty;
+                    let h = unsafe { *zobrist_ptr.add(c) };
                     unsafe {
-                        *eval_entries_ptr.add(num_eval) = EvalEntry {
-                            hash: h,
-                            used_val: 0,
+                        *local_counts_ptr.add(num_non_empty) = LocalCount {
                             r,
                             count: 1,
-                            is_exact: false,
+                            hash: h,
                         };
                     }
-                    num_eval += 1;
+                    num_non_empty += 1;
                 } else {
-                    for i in 0..num_eval {
-                        let entry = unsafe { &mut *eval_entries_ptr.add(i) };
-                        if entry.r == r {
-                            entry.count += 1;
-                            entry.hash ^= h;
-                            break;
+                    let h = unsafe { *zobrist_ptr.add(c) };
+                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
+                    if prev_entry.r == r {
+                        prev_entry.count += 1;
+                        prev_entry.hash ^= h;
+                    } else {
+                        for i in 0..num_non_empty {
+                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
+                            if entry.r == r {
+                                entry.count += 1;
+                                entry.hash ^= h;
+                                prev_idx = i;
+                                break;
+                            }
                         }
                     }
                 }
             }
 
-            for i in 0..num_eval {
-                let p_len = unsafe { (*eval_entries_ptr.add(i)).count as usize };
+            let mut num_eval = 0;
+            let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 5]>::uninit();
+            let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
+
+            for i in 0..num_non_empty {
+                let entry = unsafe { *local_counts_ptr.add(i) };
+                let r_idx = entry.r as usize;
+                if r_idx == WIN {
+                    continue;
+                }
+                let p_len = entry.count as usize;
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let extra_lb = lb - (2 * p_len - 1) as u32;
-                if extra_lb > 0 {
-                    cost += extra_lb;
+                if lb > 0 {
+                    cost += lb;
                     if cost >= cutoff {
                         self.local_metrics.pruned_by_bounds += 1;
                         return cost;
                     }
+                }
+                if p_len > 2 {
+                    unsafe {
+                        *eval_entries_ptr.add(num_eval) = EvalEntry {
+                            hash: entry.hash,
+                            used_val: 0,
+                            r: entry.r,
+                            count: entry.count,
+                            is_exact: false,
+                        };
+                    }
+                    num_eval += 1;
                 }
             }
 
