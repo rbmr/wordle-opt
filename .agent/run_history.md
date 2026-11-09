@@ -927,7 +927,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `02a2d9d` | pc01 | 1600 | 1 | optimal | 8.116s | 5256 | 1681 | 3948 | — | early exit in branching factor search when max_k >= k_upper and clamp effective_target; pick 8.1s; cpu 127.2s; busy cores 15.7; states 3948; guesses 66,027; bounds pruned 313,116; validation OK |
 | 2026-11-09 | `02a2d9d` | pc01 | 2000 | 1 | optimal | 13.654s | 6723 | 2119 | 7728 | — | early exit in branching factor search when max_k >= k_upper and clamp effective_target; pick 13.6s; cpu 215.1s; busy cores 15.8; states 7728; guesses 185,394; bounds pruned 500,225; validation OK |
 | 2026-11-09 | `02a2d9d` | pc01 | 2200 | 1 | optimal | 19.716s | 7477 | 2331 | 23577 | ~542MB | early exit in branching factor search when max_k >= k_upper and clamp effective_target; pick 19.6s; cpu 313.0s; busy cores 15.9; states 23,577; guesses 589,575; bounds pruned 1,930,563; validation OK |
+| 2026-11-09 | `73e0d92` | pc01 | 1000 | 1 | optimal | 2.559s | 3124 | 1049 | 816 | — | propagate branching factor upper bound to child search (k_upper stored in child_max_ks, Pass 2b dictionary scan skipped when k_cand >= k_upper, Pass 3 child_k bounded by k_upper); pick 2.5s; cpu 40.4s; busy cores 15.8; states 816; guesses 14,988; bounds pruned 49,583; validation OK |
+| 2026-11-09 | `73e0d92` | pc01 | 1600 | 1 | optimal | 8.092s | 5256 | 1681 | 3964 | — | propagate branching factor upper bound to child search; pick 8.0s; cpu 126.9s; busy cores 15.7; states 3964; guesses 66,002; bounds pruned 313,411; validation OK |
+| 2026-11-09 | `73e0d92` | pc01 | 2000 | 1 | optimal | 13.652s | 6723 | 2119 | 7787 | — | propagate branching factor upper bound to child search; pick 13.6s; cpu 215.2s; busy cores 15.8; states 7787; guesses 186,235; bounds pruned 501,474; validation OK |
+| 2026-11-09 | `73e0d92` | pc01 | 2200 | 1 | optimal | 19.800s | 7477 | 2331 | 23538 | ~542MB | propagate branching factor upper bound to child search; pick 19.7s; cpu 314.0s; busy cores 15.9; states 23,538; guesses 590,029; bounds pruned 1,932,818; validation OK |
+| 2026-11-09 | `73e0d92` | pc01 | 2340 | — | optimal | 23.254s (0.01h) | 8001 | 2478 | 26029 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-73e0d92); propagate branching factor upper bound to child search; build 23.254s; pick 23.0s; cpu 369.5s; busy cores 15.9 (root_guesses @ 15s: 7529); states 26,029; guesses 752,934; bounds pruned 2,076,691; equiv pruned 207,648,095; cache hits 3,498,977; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `73e0d92` | pc01 | 2340 | — | optimal --certify | 23.032s (0.01h) | 8001 | 2478 | 26268 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.032s (pick 22.9s, cpu 365.6s, busy cores 15.9); 1,327,327 solver facts; 587 gap refutations (7.097s); 632,677 claims (444,717 capacity, 187,960 expansion, 0 failures, 9,490,174 bytes); independent check verified optimal in 60.674s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `73e0d92` rows evaluate propagating the fast branching factor upper bound $k_{upper}$ through to Pass 2b and Pass 3 in `min_guess_val_inner`:
+  - In `src/solver.rs`: Stored $k_{upper}$ into `child_max_ks_ptr` during the fast capacity bound pre-pass for large uncached buckets ($p\_len > 15$).
+  - In Pass 2b: Clamped candidate target branching factor to `target_k.min(k_upper)`. When candidate words already achieve $k_{cand} \ge k_{upper}$, the true maximum branching factor is mathematically proven to be $k_{upper}$, completely skipping the 14,855-guess dictionary search.
+  - In Pass 3: When exact $k$ was not computed (because $target\_k = 2$, $k_{cand} \ge target\_k$, or $k \ge target\_k$), bounded `child_k` by `stored_k.min(p_len).min(parent_max_k).max(2)` rather than loose `p_len.min(parent_max_k)`, propagating the proven branching upper bound down into the child DFS subtree.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.559s** (cpu 40.4s, pick 2.5s, states 816 vs 824/832, guesses 14,988 vs 15,115, cost 3124).
+    - `N=1600, seed=1`: **8.092s** (cpu 126.9s, pick 8.0s, states 3964, guesses 66,002, cost 5256).
+    - `N=2000, seed=1`: **13.652s** (cpu 215.2s, pick 13.6s, states 7787, guesses 186,235, cost 6723).
+    - `N=2200, seed=1`: **19.800s** (cpu 314.0s, pick 19.7s, states 23,538, guesses 590,029, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-73e0d92`): **23.254s** (cpu 369.5s, pick 23.0s, states 26,029, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 130.65s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.56s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 295.76s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 46.63s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 632,677 claims with 0 failures, and independent `check` verified `3.93e11` response reads in 60.674s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `02a2d9d` rows evaluate the early exit in `compute_max_branching_factor_seq_with_target` when `max_k >= k_upper` and clamping `effective_target` to `k_upper` using positional response factors already computed in register during candidate letter-profile analysis. On `N=2000, seed=1`, explored states dropped from 7,797 to 7,728 with build time 13.654s, and on `N=2200, seed=1` runtime held at 19.716s (pick 19.6s, states 23,577), maintaining the ~40% speedup achieved by the capacity bound pre-pass with invariant golden cost and passing tree validation.
 
