@@ -2331,11 +2331,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let set_ptr = set.as_ptr();
 
-            let mut seen = [0u64; M];
-            let mut dup = 0usize;
-
+            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 16]>::uninit();
+            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut r_buf = std::mem::MaybeUninit::<[u16; 16]>::uninit();
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+
+            let mut seen = [0u64; M];
+            let mut num_non_empty = 0usize;
+            let mut prev_idx = 0usize;
 
             for cand_idx in 0..c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
@@ -2343,89 +2347,61 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 unsafe {
                     *r_buf_ptr.add(cand_idx) = r;
                 }
-                let r_usize = r as usize;
-                let word_idx = r_usize >> 6;
-                let bit = 1u64 << (r_usize & 63);
+                let word_idx = (r as usize) >> 6;
+                let bit = 1u64 << (r & 63);
                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
                 if (*word & bit) == 0 {
                     *word |= bit;
-                } else {
-                    dup += 1;
-                    if dup + 1 >= c_len {
-                        return beta;
-                    }
-                }
-            }
-
-            if c_len - dup <= 1 {
-                return beta;
-            }
-
-            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-
-            if dup == 0 || dup == 1 {
-                let has_win = (seen[WIN >> 6] & (1u64 << (WIN & 63))) != 0;
-                let cost = if has_win {
-                    (2 * c_len - 1 + dup) as u32
-                } else {
-                    (2 * c_len + dup) as u32
-                };
-                if cost >= cutoff {
-                    self.local_metrics.pruned_by_bounds += 1;
-                }
-                return cost;
-            }
-
-            let mut cost = c_len as u32;
-            if cost >= cutoff {
-                self.local_metrics.pruned_by_bounds += 1;
-                return cost;
-            }
-
-            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 16]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-
-            let mut seen_pass2 = [0u64; M];
-            let mut num_non_empty = 0usize;
-            let mut prev_idx = 0usize;
-
-            for cand_idx in 0..c_len {
-                let c = unsafe { *set_ptr.add(cand_idx) };
-                let r = unsafe { *r_buf_ptr.add(cand_idx) };
-                let word_idx = (r as usize) >> 6;
-                let bit = 1u64 << (r & 63);
-                let word = unsafe { seen_pass2.get_unchecked_mut(word_idx) };
-                if (*word & bit) == 0 {
-                    *word |= bit;
                     prev_idx = num_non_empty;
-                    let h = unsafe { *zobrist_ptr.add(c) };
                     unsafe {
                         *local_counts_ptr.add(num_non_empty) = LocalCount {
                             r,
                             count: 1,
-                            hash: h,
+                            hash: c as u64,
                         };
                     }
                     num_non_empty += 1;
                 } else {
-                    let h = unsafe { *zobrist_ptr.add(c) };
-                    let prev_entry = unsafe { &mut *local_counts_ptr.add(prev_idx) };
-                    if prev_entry.r == r {
-                        prev_entry.count += 1;
-                        prev_entry.hash ^= h;
-                    } else {
+                    let mut target_idx = prev_idx;
+                    if unsafe { (*local_counts_ptr.add(target_idx)).r } != r {
                         for i in 0..num_non_empty {
-                            let entry = unsafe { &mut *local_counts_ptr.add(i) };
-                            if entry.r == r {
-                                entry.count += 1;
-                                entry.hash ^= h;
+                            if unsafe { (*local_counts_ptr.add(i)).r } == r {
+                                target_idx = i;
                                 prev_idx = i;
                                 break;
                             }
                         }
                     }
+                    let entry = unsafe { &mut *local_counts_ptr.add(target_idx) };
+                    let cnt = entry.count;
+                    entry.count = cnt + 1;
+                    if cnt == 1 {
+                        entry.hash |= (c as u64) << 32;
+                    } else if cnt == 2 {
+                        let c0 = (entry.hash & 0xFFFF_FFFF) as usize;
+                        let c1 = (entry.hash >> 32) as usize;
+                        entry.hash = unsafe {
+                            *zobrist_ptr.add(c0) ^ *zobrist_ptr.add(c1) ^ *zobrist_ptr.add(c)
+                        };
+                    } else {
+                        entry.hash ^= unsafe { *zobrist_ptr.add(c) };
+                    }
                 }
+            }
+
+            if num_non_empty <= 1 {
+                return beta;
+            }
+
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            let has_win = (seen[WIN >> 6] & (1u64 << (WIN & 63))) != 0;
+            let mut cost = (3 * c_len - num_non_empty - (has_win as usize)) as u32;
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+            if c_len - num_non_empty <= 1 {
+                return cost;
             }
 
             let mut num_eval = 0;
@@ -2434,20 +2410,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             for i in 0..num_non_empty {
                 let entry = unsafe { *local_counts_ptr.add(i) };
-                let r_idx = entry.r as usize;
-                if r_idx == WIN {
-                    continue;
-                }
-                let p_len = entry.count as usize;
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                if lb > 0 {
-                    cost += lb;
+                if entry.count > 2 {
+                    let p_len = entry.count as usize;
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    cost += lb - (2 * p_len - 1) as u32;
                     if cost >= cutoff {
                         self.local_metrics.pruned_by_bounds += 1;
                         return cost;
                     }
-                }
-                if p_len > 2 {
                     unsafe {
                         *eval_entries_ptr.add(num_eval) = EvalEntry {
                             hash: entry.hash,
@@ -2459,6 +2429,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     num_eval += 1;
                 }
+            }
+
+            if num_eval == 0 {
+                return cost;
             }
 
             if num_eval == 2 {
