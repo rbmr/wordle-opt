@@ -1005,7 +1005,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `3dc6c2b` | pc01 | 2200 | 1 | optimal | 20.077s | 7477 | 2331 | 23607 | ~543MB | specialize candidate response decision tree for bucket size 7 in quick bucket eval; pick 20.0s; cpu 318.7s; busy cores 15.9; states 23,607 vs 23,676 [-69 states]; guesses 589,882; bounds pruned 1,943,251; equiv pruned 188,464,185; cache hits 2,427,694; validation OK |
 | 2026-11-09 | `3dc6c2b` | pc01 | 2340 | — | optimal | 23.615s (0.01h) | 8001 | 2478 | 26022 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-3dc6c2b); specialize candidate response decision tree for bucket size 7 in quick bucket eval; build 23.615s; pick 23.4s; cpu 375.1s; busy cores 15.9 (root_guesses @ 15s: 7189); states 26,022; guesses 751,331; bounds pruned 2,087,238; equiv pruned 207,463,582; cache hits 3,486,383; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `3dc6c2b` | pc01 | 2340 | — | optimal --certify | 23.470s (0.01h) | 8001 | 2478 | 26206 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.470s (pick 23.4s, cpu 372.5s, busy cores 15.9); 1,326,742 solver facts; 589 gap refutations (7.541s); 633,414 claims (445,095 capacity, 188,319 expansion, 0 failures, 9,501,229 bytes); independent check verified optimal in 58.495s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `df56d56` | pc01 | 1000 | 1 | optimal | 2.602s | 3124 | 1049 | 815 | — | extract vector lanes directly into registers in AVX2 response combination; pick 2.6s; cpu 41.1s; busy cores 15.8; states 815 vs 819 [-4 states]; guesses 15,043 vs 15,059 [-16 guesses]; bounds pruned 44,655; equiv pruned 5,863,810; cache hits 111,364; validation OK |
+| 2026-11-09 | `df56d56` | pc01 | 1600 | 1 | optimal | 8.183s | 5256 | 1681 | 3960 | — | extract vector lanes directly into registers in AVX2 response combination; pick 8.1s; cpu 128.2s; busy cores 15.7; states 3,960; guesses 66,293; bounds pruned 315,979; equiv pruned 38,243,168; cache hits 554,302; validation OK |
+| 2026-11-09 | `df56d56` | pc01 | 2000 | 1 | optimal | 13.778s | 6723 | 2119 | 7788 | — | extract vector lanes directly into registers in AVX2 response combination; pick 13.7s; cpu 217.0s; busy cores 15.8; states 7,788; guesses 186,540; bounds pruned 503,349; equiv pruned 59,860,707; cache hits 838,682; validation OK |
+| 2026-11-09 | `df56d56` | pc01 | 2200 | 1 | optimal | 20.107s | 7477 | 2331 | 23644 | ~543MB | extract vector lanes directly into registers in AVX2 response combination; pick 20.0s; cpu 319.1s; busy cores 15.9; states 23,644; guesses 599,524; bounds pruned 1,964,870; equiv pruned 189,002,379; cache hits 2,431,037; validation OK |
+| 2026-11-09 | `df56d56` | pc01 | 2340 | — | optimal | 23.570s (0.01h) | 8001 | 2478 | 25946 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-df56d56); extract vector lanes directly into registers in AVX2 response combination; build 23.570s; pick 23.3s; cpu 374.5s; busy cores 15.9 (root_guesses @ 15s: 7201); states 25,946; guesses 752,609; bounds pruned 2,081,397; equiv pruned 207,094,948; cache hits 3,496,951; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `df56d56` | pc01 | 2340 | — | optimal --certify | 23.437s (0.01h) | 8001 | 2478 | 26202 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.437s (pick 23.3s, cpu 372.2s, busy cores 15.9); 1,329,648 solver facts; 590 gap refutations (7.550s); 631,700 claims (444,075 capacity, 187,625 expansion, 0 failures, 9,475,519 bytes); independent check verified optimal in 62.853s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `df56d56` rows evaluate extracting vector lanes directly into registers in AVX2 response combination:
+  - In `src/heuristic.rs`:
+    - In `combine_and_count_avx2`, replaced stack store (`_mm256_storeu_si256`) and subsequent reloads with direct lane extractions (`_mm256_extract_epi64::<0..4>`).
+    - Eliminates stack allocation, store-to-load forwarding penalties, and memory bus traffic for every combined vector in response counting.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.602s** (cpu 41.1s, pick 2.6s, states 815 vs 819 [-4 states], guesses 15,043 vs 15,059 [-16 guesses], bounds pruned 44,655, cost 3124).
+    - `N=1600, seed=1`: **8.183s** (cpu 128.2s, pick 8.1s, states 3,960, guesses 66,293, bounds pruned 315,979, cost 5256).
+    - `N=2000, seed=1`: **13.778s** (cpu 217.0s, pick 13.7s, states 7,788, guesses 186,540, bounds pruned 503,349, cost 6723).
+    - `N=2200, seed=1`: **20.107s** (cpu 319.1s, pick 20.0s, states 23,644, guesses 599,524, bounds pruned 1,964,870, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-df56d56`): **23.570s** (cpu 374.5s, pick 23.3s, states 25,946, guesses 752,609, bounds pruned 2,081,397, equiv pruned 207,094,948, cache hits 3,496,951, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 132.42s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.91s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 301.50s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 47.83s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 631,700 claims with 0 failures, and independent `check` verified `3.92e11` response reads in 62.853s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `3dc6c2b` rows evaluate specializing candidate response decision trees for bucket size 7 in quick bucket eval:
   - In `src/solver.rs`:
