@@ -669,46 +669,33 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                     let g = unsafe { *cand_to_guess_ptr.add(cand) };
                     let g_ptr = unsafe { data_ptr.add(g * num_cand) };
                     let mut collisions = 0;
-                    let max_collisions = if has_one_collision { 0 } else { 1 };
 
                     if Elem::IS_U8 {
                         let mut seen = [0u64; 4];
-                        let mut aborted = false;
                         for j in 0..i {
                             let c2 = unsafe { *bucket_ptr.add(j) };
                             let r = unsafe { (*g_ptr.add(c2)).to_usize() };
-                            let word = unsafe { seen.get_unchecked_mut(r >> 6) };
-                            let bit = 1u64 << (r & 63);
-                            if (*word & bit) != 0 {
-                                collisions += 1;
-                                if collisions > max_collisions {
-                                    aborted = true;
-                                    break;
-                                }
-                            } else {
-                                *word |= bit;
+                            unsafe {
+                                *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                             }
                         }
-                        if !aborted {
-                            for j in (i + 1)..n {
-                                let c2 = unsafe { *bucket_ptr.add(j) };
-                                let r = unsafe { (*g_ptr.add(c2)).to_usize() };
-                                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
-                                let bit = 1u64 << (r & 63);
-                                if (*word & bit) != 0 {
-                                    collisions += 1;
-                                    if collisions > max_collisions {
-                                        break;
-                                    }
-                                } else {
-                                    *word |= bit;
-                                }
+                        for j in (i + 1)..n {
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            unsafe {
+                                *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                             }
                         }
+                        let unique = (seen[0].count_ones()
+                            + seen[1].count_ones()
+                            + seen[2].count_ones()
+                            + seen[3].count_ones()) as usize;
+                        collisions = (n - 1) - unique;
                     } else {
                         let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
                         let seen_ptr = seen.as_mut_ptr() as *mut Elem;
                         let mut seen_len = 0;
+                        let max_collisions = if has_one_collision { 0 } else { 1 };
 
                         'inner: for j in 0..n {
                             if i == j {
