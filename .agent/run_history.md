@@ -951,7 +951,39 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `c73de40` | pc01 | 2200 | 1 | optimal | 19.740s | 7477 | 2331 | 23540 | ~542MB | retain fast capacity bounds during partition large bucket evaluations; pick 19.6s; cpu 313.4s; busy cores 15.9; states 23,540; guesses 589,121; bounds pruned 1,928,009; equiv pruned 188,189,590; cache hits 2,426,146; validation OK |
 | 2026-11-09 | `c73de40` | pc01 | 2340 | — | optimal | 23.342s (0.01h) | 8001 | 2478 | 26027 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-c73de40); retain fast capacity bounds during partition large bucket evaluations; build 23.342s; pick 23.1s; cpu 370.9s; busy cores 15.9 (root_guesses @ 15s: 7497); states 26,027; guesses 750,991; bounds pruned 2,061,588; equiv pruned 207,531,506; cache hits 3,486,353; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `c73de40` | pc01 | 2340 | — | optimal --certify | 23.211s (0.01h) | 8001 | 2478 | 26103 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.211s (pick 23.1s, cpu 368.2s, busy cores 15.9); 1,326,881 solver facts; 588 gap refutations (7.216s); 632,790 claims (444,568 capacity, 188,222 expansion, 0 failures, 9,491,869 bytes); independent check verified optimal in 67.704s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `1d2ed8a` | pc01 | 1000 | 1 | optimal | 2.582s | 3124 | 1049 | 830 | — | align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; pick 2.5s; cpu 40.7s; busy cores 15.8; states 830; guesses 15,104; bounds pruned 49,773; equiv pruned 5,082,728; cache hits 165,571; validation OK |
+| 2026-11-09 | `1d2ed8a` | pc01 | 1600 | 1 | optimal | 8.086s | 5256 | 1681 | 3954 | — | align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; pick 8.0s; cpu 126.8s; busy cores 15.7; states 3,954; guesses 66,063; bounds pruned 314,086; equiv pruned 29,561,092; cache hits 353,481; validation OK |
+| 2026-11-09 | `1d2ed8a` | pc01 | 2000 | 1 | optimal | 13.654s | 6723 | 2119 | 7768 | — | align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; pick 13.6s; cpu 215.2s; busy cores 15.8; states 7,768; guesses 186,232; bounds pruned 502,603; equiv pruned 59,476,077; cache hits 843,987; validation OK |
+| 2026-11-09 | `1d2ed8a` | pc01 | 2200 | 1 | optimal | 19.761s | 7477 | 2331 | 23575 | ~543MB | align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; pick 19.7s; cpu 313.5s; busy cores 15.9; states 23,575; guesses 589,376; bounds pruned 1,929,580; equiv pruned 188,382,149; cache hits 2,428,103; validation OK |
+| 2026-11-09 | `1d2ed8a` | pc01 | 2340 | — | optimal | 23.244s (0.01h) | 8001 | 2478 | 25958 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-1d2ed8a); align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; build 23.244s; pick 23.0s; cpu 369.0s; busy cores 15.9 (root_guesses @ 15s: 7521); states 25,958; guesses 751,474; bounds pruned 2,069,354; equiv pruned 207,353,273; cache hits 3,490,866; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `1d2ed8a` | pc01 | 2340 | — | optimal --certify | 23.119s (0.01h) | 8001 | 2478 | 26120 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.119s (pick 23.0s, cpu 366.9s, busy cores 15.9); 1,328,797 solver facts; 589 gap refutations (7.039s); 634,751 claims (445,812 capacity, 188,939 expansion, 0 failures, 9,521,284 bytes); independent check verified optimal in 68.897s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `1d2ed8a` rows evaluate aligning Pass 3 bound cutoffs and prune metrics with bucket lower bounds:
+  - In `src/solver.rs`:
+    - In `min_guess_val_inner` for `c_len <= 16`:
+      - Accounted for Pass 3 pre-loop prune in `self.local_metrics.pruned_by_bounds`.
+      - Added early bound cutoff check `if cost >= cutoff { self.local_metrics.pruned_by_bounds += 1; return cost; }` at the start of each Pass 3 bucket iteration, skipping child bucket extraction and recursive searches when prior bucket updates or concurrent `global_beta` tightening pushed `cost >= cutoff`.
+      - Replaced `if effective_beta == 0 { return cost; }` with `if effective_beta <= used_val { self.local_metrics.pruned_by_bounds += 1; return cost; }`, immediately pruning recursive calls when the remaining budget cannot cover the known lower bound of the child bucket.
+    - In `min_guess_val_inner` for `c_len > 16`:
+      - Accounted for Pass 3 pre-loop prune in `self.local_metrics.pruned_by_bounds`.
+      - Aligned `cutoff` calculation to `beta.min(current_global_beta.saturating_sub(self.current_cost_so_far))` and incremented `self.local_metrics.pruned_by_bounds` upon cutoff abort.
+      - Replaced `if effective_beta == 0 { ... return cost; }` with `if effective_beta <= actual_lb { self.local_metrics.pruned_by_bounds += 1; ... return cost; }`.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.582s** (cpu 40.7s, pick 2.5s, states 830, guesses 15,104, bounds pruned 49,773, cost 3124).
+    - `N=1600, seed=1`: **8.086s** (cpu 126.8s, pick 8.0s, states 3,954 vs 3,957, guesses 66,063 vs 66,192, bounds pruned 314,086, cost 5256).
+    - `N=2000, seed=1`: **13.654s** (cpu 215.2s, pick 13.6s, states 7,768 vs 7,787, guesses 186,232, bounds pruned 502,603 vs 501,393, cost 6723).
+    - `N=2200, seed=1`: **19.761s** (cpu 313.5s, pick 19.7s, states 23,575, guesses 589,376, bounds pruned 1,929,580, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-1d2ed8a`): **23.244s** (cpu 369.0s, pick 23.0s, states 25,958 vs 26,027 [-69 states], guesses 751,474, bounds pruned 2,069,354 vs 2,061,588 [+7,766 bounds pruned], equiv pruned 207,353,273, cache hits 3,490,866, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 127.63s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.60s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 298.65s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 45.27s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 634,751 claims with 0 failures, and independent `check` verified `3.93e11` response reads in 68.897s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `c73de40` rows evaluate retaining fast capacity bounds during partition large bucket evaluations (`min_guess_val_inner` Pass 2b):
   - In `src/solver.rs`:
