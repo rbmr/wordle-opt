@@ -668,32 +668,68 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                     let cand = unsafe { *bucket_ptr.add(i) };
                     let g = unsafe { *cand_to_guess_ptr.add(cand) };
                     let g_ptr = unsafe { data_ptr.add(g * num_cand) };
-
-                    let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
-                    let seen_ptr = seen.as_mut_ptr() as *mut Elem;
-                    let mut seen_len = 0;
                     let mut collisions = 0;
                     let max_collisions = if has_one_collision { 0 } else { 1 };
 
-                    'inner: for j in 0..n {
-                        if i == j {
-                            continue;
-                        }
-                        let c2 = unsafe { *bucket_ptr.add(j) };
-                        let r = unsafe { *g_ptr.add(c2) };
-                        for k in 0..seen_len {
-                            if unsafe { *seen_ptr.add(k) == r } {
+                    if Elem::IS_U8 {
+                        let mut seen = [0u64; 4];
+                        let mut aborted = false;
+                        for j in 0..i {
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                            let bit = 1u64 << (r & 63);
+                            if (*word & bit) != 0 {
                                 collisions += 1;
                                 if collisions > max_collisions {
-                                    break 'inner;
+                                    aborted = true;
+                                    break;
                                 }
-                                continue 'inner;
+                            } else {
+                                *word |= bit;
                             }
                         }
-                        unsafe {
-                            *seen_ptr.add(seen_len) = r;
+                        if !aborted {
+                            for j in (i + 1)..n {
+                                let c2 = unsafe { *bucket_ptr.add(j) };
+                                let r = unsafe { (*g_ptr.add(c2)).to_usize() };
+                                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                                let bit = 1u64 << (r & 63);
+                                if (*word & bit) != 0 {
+                                    collisions += 1;
+                                    if collisions > max_collisions {
+                                        break;
+                                    }
+                                } else {
+                                    *word |= bit;
+                                }
+                            }
                         }
-                        seen_len += 1;
+                    } else {
+                        let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
+                        let seen_ptr = seen.as_mut_ptr() as *mut Elem;
+                        let mut seen_len = 0;
+
+                        'inner: for j in 0..n {
+                            if i == j {
+                                continue;
+                            }
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { *g_ptr.add(c2) };
+                            for k in 0..seen_len {
+                                if unsafe { *seen_ptr.add(k) == r } {
+                                    collisions += 1;
+                                    if collisions > max_collisions {
+                                        break 'inner;
+                                    }
+                                    continue 'inner;
+                                }
+                            }
+                            unsafe {
+                                *seen_ptr.add(seen_len) = r;
+                            }
+                            seen_len += 1;
+                        }
                     }
 
                     if collisions == 0 {
@@ -2007,6 +2043,22 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 }
                                 continue;
                             }
+                            let min_lb_cost = (2 * c_len + duplicates) as u32;
+                            if c_len - duplicates >= 3
+                                && min_lb_cost >= best_val
+                                && min_val_found <= min_lb_cost
+                            {
+                                num_non_empty = c_len - duplicates;
+                                if num_non_empty > local_max_k {
+                                    local_max_k = num_non_empty;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                                }
+                                if min_k_needed > c_len {
+                                    break 'guess_loop;
+                                }
+                                continue;
+                            }
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
@@ -2817,8 +2869,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
             let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
 
-            let mut cost = set.len() as u32;
-            let mut max_p_len = 0;
+            let has_win = (unsafe { *seen.get_unchecked(WIN >> 6) } & (1u64 << (WIN & 63))) != 0;
+            let mut cost = (3 * c_len - total_buckets as usize - (has_win as usize)) as u32;
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+            if c_len - total_buckets as usize <= 1 {
+                return cost;
+            }
 
             for m in 0..M {
                 let mut word = unsafe { *seen.get_unchecked(m) };
@@ -2827,21 +2886,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r = (m << 6) | bit_idx;
                     word &= word - 1;
                     let p_len = unsafe { *counts_ptr.add(r) as usize };
-                    if r == WIN {
-                        continue;
-                    }
-                    if p_len > max_p_len {
-                        max_p_len = p_len;
-                    }
-                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                    if lb > 0 {
-                        cost += lb;
+                    if p_len > 2 && r != WIN {
+                        let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                        cost += lb - (2 * p_len - 1) as u32;
                         if cost >= cutoff {
                             self.local_metrics.pruned_by_bounds += 1;
                             return cost;
                         }
-                    }
-                    if p_len > 2 {
                         let entry = ((p_len as u32) << 16) | ((!r as u16) as u32);
                         unsafe {
                             *eval_entries_ptr.add(num_eval) = entry;
@@ -2851,7 +2902,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            if max_p_len <= 2 {
+            if num_eval == 0 {
                 return cost;
             }
 

@@ -201,21 +201,37 @@ pub fn compute_candidate_branching_factor_with_target(
     candidates: &[usize],
     target_k: usize,
 ) -> usize {
-    if candidates.len() <= 2 {
-        return candidates.len();
+    let n = candidates.len();
+    if n <= 2 {
+        return n;
     }
-    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
+    let effective_target = target_k.min(n).min(matrix.num_responses);
     let mut max_k = 0;
     if matrix.num_responses <= 256 {
         let data_ptr = matrix.data_u8.as_ptr();
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
-            let mut mask = [0u64; 16];
-            count_unique_responses_from_row_u8(g_ptr, candidates, &mut mask);
-            let k = combine_and_count_u8(&mask);
-            if k > max_k {
-                max_k = k;
+            let max_allowed_duplicates = n - (max_k + 1);
+            let mut seen = [0u64; 4];
+            let mut duplicates = 0usize;
+            let mut aborted = false;
+            for &other in candidates {
+                let r = unsafe { *g_ptr.add(other) as usize };
+                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                let bit = 1u64 << (r & 63);
+                if (*word & bit) != 0 {
+                    duplicates += 1;
+                    if duplicates > max_allowed_duplicates {
+                        aborted = true;
+                        break;
+                    }
+                } else {
+                    *word |= bit;
+                }
+            }
+            if !aborted {
+                max_k = n - duplicates;
                 if max_k >= effective_target {
                     return max_k;
                 }
@@ -226,16 +242,26 @@ pub fn compute_candidate_branching_factor_with_target(
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
             let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
+            let max_allowed_duplicates = n - (max_k + 1);
             let mut mask = [0u64; 36];
+            let mut duplicates = 0usize;
+            let mut aborted = false;
             for &other in candidates {
                 let r = unsafe { (*g_ptr.add(other)).0 as usize };
-                unsafe {
-                    *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                let word = unsafe { mask.get_unchecked_mut(r >> 6) };
+                let bit = 1u64 << (r & 63);
+                if (*word & bit) != 0 {
+                    duplicates += 1;
+                    if duplicates > max_allowed_duplicates {
+                        aborted = true;
+                        break;
+                    }
+                } else {
+                    *word |= bit;
                 }
             }
-            let k: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
-            if k > max_k {
-                max_k = k;
+            if !aborted {
+                max_k = n - duplicates;
                 if max_k >= effective_target {
                     return max_k;
                 }
@@ -316,37 +342,27 @@ fn min_non_overlap_for_len(word_len: usize, max_k: usize) -> u32 {
 
 /// Sequential version of `compute_max_branching_factor` with early stopping and target_k.
 #[inline(always)]
-fn count_unique_responses_u8(ptrs: &[*const u8], g: usize, mask: &mut [u64; 16]) {
-    let n = ptrs.len();
-    let mut p_it = ptrs.as_ptr();
-    let p_end4 = unsafe { p_it.add(n & !3) };
-    let mask_ptr = mask.as_mut_ptr();
-    while p_it < p_end4 {
-        let c_ptr0 = unsafe { *p_it };
-        let c_ptr1 = unsafe { *p_it.add(1) };
-        let c_ptr2 = unsafe { *p_it.add(2) };
-        let c_ptr3 = unsafe { *p_it.add(3) };
-        let r0 = unsafe { *c_ptr0.add(g) as usize };
-        let r1 = unsafe { *c_ptr1.add(g) as usize };
-        let r2 = unsafe { *c_ptr2.add(g) as usize };
-        let r3 = unsafe { *c_ptr3.add(g) as usize };
-        unsafe {
-            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
-            *mask_ptr.add(4 + (r1 >> 6)) |= 1u64 << (r1 & 63);
-            *mask_ptr.add(8 + (r2 >> 6)) |= 1u64 << (r2 & 63);
-            *mask_ptr.add(12 + (r3 >> 6)) |= 1u64 << (r3 & 63);
-            p_it = p_it.add(4);
+fn count_unique_responses_abort_u8(
+    ptrs: &[*const u8],
+    g: usize,
+    max_allowed_duplicates: usize,
+) -> Option<usize> {
+    let mut seen = [0u64; 4];
+    let mut duplicates = 0usize;
+    for &c_ptr in ptrs {
+        let r = unsafe { *c_ptr.add(g) as usize };
+        let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+        let bit = 1u64 << (r & 63);
+        if (*word & bit) != 0 {
+            duplicates += 1;
+            if duplicates > max_allowed_duplicates {
+                return None;
+            }
+        } else {
+            *word |= bit;
         }
     }
-    let p_end = unsafe { ptrs.as_ptr().add(n) };
-    while p_it < p_end {
-        let c_ptr0 = unsafe { *p_it };
-        let r0 = unsafe { *c_ptr0.add(g) as usize };
-        unsafe {
-            *mask_ptr.add(r0 >> 6) |= 1u64 << (r0 & 63);
-            p_it = p_it.add(1);
-        }
-    }
+    Some(ptrs.len() - duplicates)
 }
 
 pub fn compute_max_branching_factor_seq_with_target(
@@ -355,10 +371,11 @@ pub fn compute_max_branching_factor_seq_with_target(
     initial_max_k: usize,
     target_k: usize,
 ) -> usize {
-    if candidates.len() <= 2 {
-        return candidates.len();
+    let n = candidates.len();
+    if n <= 2 {
+        return n;
     }
-    let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
+    let effective_target = target_k.min(n).min(matrix.num_responses);
     let mut max_k = initial_max_k;
     if max_k >= effective_target {
         return max_k;
@@ -468,28 +485,26 @@ pub fn compute_max_branching_factor_seq_with_target(
         }
     }
 
-    let mid = candidates.len() / 2;
-    let rem_len = candidates.len() - mid;
     let num_guesses = matrix.num_guesses;
+    let mut max_allowed_duplicates = n - (max_k + 1);
     if matrix.num_responses <= 256 {
         let data_c_g_ptr = matrix.data_c_g_u8.as_ptr();
         let mut stack_ptrs = std::mem::MaybeUninit::<[*const u8; 256]>::uninit();
         let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const u8;
         let mut heap_ptrs = Vec::new();
-        let (all_ptrs, c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+        let all_ptrs = if n <= 256 {
             for (i, &c) in candidates.iter().enumerate() {
                 unsafe {
                     *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                 }
             }
-            let all = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
-            (all, &all[..mid], &all[mid..])
+            unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, n) }
         } else {
-            heap_ptrs.reserve(candidates.len());
+            heap_ptrs.reserve(n);
             for &c in candidates {
                 heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
             }
-            (&heap_ptrs[..], &heap_ptrs[..mid], &heap_ptrs[mid..])
+            &heap_ptrs[..]
         };
 
         if has_profile && word_len == 5 {
@@ -515,23 +530,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
-                let mut mask = [0u64; 16];
-                if rem_len < max_k {
-                    count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
-                    let half_unique = combine_and_count_u8(&mask);
-                    if half_unique + rem_len <= max_k {
-                        continue;
-                    }
-                    count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
-                } else {
-                    count_unique_responses_u8(all_ptrs, g, &mut mask);
-                }
-                let k = combine_and_count_u8(&mask);
-                if k > max_k {
+                if let Some(k) =
+                    count_unique_responses_abort_u8(all_ptrs, g, max_allowed_duplicates)
+                {
                     max_k = k;
                     if max_k >= effective_target {
                         break;
                     }
+                    max_allowed_duplicates = n - (max_k + 1);
                     min_non_overlap = min_non_overlap_for_len(5, max_k);
                 }
             }
@@ -550,23 +556,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                     continue;
                 }
 
-                let mut mask = [0u64; 16];
-                if rem_len < max_k {
-                    count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
-                    let half_unique = combine_and_count_u8(&mask);
-                    if half_unique + rem_len <= max_k {
-                        continue;
-                    }
-                    count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
-                } else {
-                    count_unique_responses_u8(all_ptrs, g, &mut mask);
-                }
-                let k = combine_and_count_u8(&mask);
-                if k > max_k {
+                if let Some(k) =
+                    count_unique_responses_abort_u8(all_ptrs, g, max_allowed_duplicates)
+                {
                     max_k = k;
                     if max_k >= effective_target {
                         break;
                     }
+                    max_allowed_duplicates = n - (max_k + 1);
                     min_non_overlap = min_non_overlap_for_len(word_len, max_k);
                 }
             }
@@ -576,23 +573,14 @@ pub fn compute_max_branching_factor_seq_with_target(
                 if overlap == 0 {
                     continue;
                 }
-                let mut mask = [0u64; 16];
-                if rem_len < max_k {
-                    count_unique_responses_u8(c_half1_ptrs, g, &mut mask);
-                    let half_unique = combine_and_count_u8(&mask);
-                    if half_unique + rem_len <= max_k {
-                        continue;
-                    }
-                    count_unique_responses_u8(c_half2_ptrs, g, &mut mask);
-                } else {
-                    count_unique_responses_u8(all_ptrs, g, &mut mask);
-                }
-                let k = combine_and_count_u8(&mask);
-                if k > max_k {
+                if let Some(k) =
+                    count_unique_responses_abort_u8(all_ptrs, g, max_allowed_duplicates)
+                {
                     max_k = k;
                     if max_k >= effective_target {
                         break;
                     }
+                    max_allowed_duplicates = n - (max_k + 1);
                 }
             }
         }
@@ -601,20 +589,19 @@ pub fn compute_max_branching_factor_seq_with_target(
         let mut stack_ptrs = std::mem::MaybeUninit::<[*const crate::core::Response; 256]>::uninit();
         let stack_ptrs_ptr = stack_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
         let mut heap_ptrs = Vec::new();
-        let (all_ptrs, c_half1_ptrs, c_half2_ptrs) = if candidates.len() <= 256 {
+        let all_ptrs = if n <= 256 {
             for (i, &c) in candidates.iter().enumerate() {
                 unsafe {
                     *stack_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
                 }
             }
-            let all = unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, candidates.len()) };
-            (all, &all[..mid], &all[mid..])
+            unsafe { std::slice::from_raw_parts(stack_ptrs_ptr, n) }
         } else {
-            heap_ptrs.reserve(candidates.len());
+            heap_ptrs.reserve(n);
             for &c in candidates {
                 heap_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
             }
-            (&heap_ptrs[..], &heap_ptrs[..mid], &heap_ptrs[mid..])
+            &heap_ptrs[..]
         };
 
         let non_c_mask = !active_letter_mask;
@@ -636,37 +623,28 @@ pub fn compute_max_branching_factor_seq_with_target(
             }
 
             let mut mask = [0u64; 36];
-            if rem_len < max_k {
-                for &c_base in c_half1_ptrs {
-                    let r = unsafe { (*c_base.add(g)).0 as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+            let mut duplicates = 0usize;
+            let mut aborted = false;
+            for &c_base in all_ptrs {
+                let r = unsafe { (*c_base.add(g)).0 as usize };
+                let word = unsafe { mask.get_unchecked_mut(r >> 6) };
+                let bit = 1u64 << (r & 63);
+                if (*word & bit) != 0 {
+                    duplicates += 1;
+                    if duplicates > max_allowed_duplicates {
+                        aborted = true;
+                        break;
                     }
-                }
-                let half_unique: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
-                if half_unique + rem_len <= max_k {
-                    continue;
-                }
-                for &c_base in c_half2_ptrs {
-                    let r = unsafe { (*c_base.add(g)).0 as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
-                }
-            } else {
-                for &c_base in all_ptrs {
-                    let r = unsafe { (*c_base.add(g)).0 as usize };
-                    unsafe {
-                        *mask.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                    }
+                } else {
+                    *word |= bit;
                 }
             }
-            let k: usize = mask.iter().map(|w| w.count_ones() as usize).sum();
-            if k > max_k {
-                max_k = k;
+            if !aborted {
+                max_k = n - duplicates;
                 if max_k >= effective_target {
                     break;
                 }
+                max_allowed_duplicates = n - (max_k + 1);
                 if has_profile {
                     min_non_overlap = min_non_overlap_for_len(word_len, max_k);
                 }
