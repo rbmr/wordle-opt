@@ -933,7 +933,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `73e0d92` | pc01 | 2200 | 1 | optimal | 19.800s | 7477 | 2331 | 23538 | ~542MB | propagate branching factor upper bound to child search; pick 19.7s; cpu 314.0s; busy cores 15.9; states 23,538; guesses 590,029; bounds pruned 1,932,818; validation OK |
 | 2026-11-09 | `73e0d92` | pc01 | 2340 | — | optimal | 23.254s (0.01h) | 8001 | 2478 | 26029 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-73e0d92); propagate branching factor upper bound to child search; build 23.254s; pick 23.0s; cpu 369.5s; busy cores 15.9 (root_guesses @ 15s: 7529); states 26,029; guesses 752,934; bounds pruned 2,076,691; equiv pruned 207,648,095; cache hits 3,498,977; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `73e0d92` | pc01 | 2340 | — | optimal --certify | 23.032s (0.01h) | 8001 | 2478 | 26268 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.032s (pick 22.9s, cpu 365.6s, busy cores 15.9); 1,327,327 solver facts; 587 gap refutations (7.097s); 632,677 claims (444,717 capacity, 187,960 expansion, 0 failures, 9,490,174 bytes); independent check verified optimal in 60.674s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `49519bd` | pc01 | 1000 | 1 | optimal | 2.585s | 3124 | 1049 | 826 | — | bound child branching factor in opener and parallel bucket evaluations; pick 2.5s; cpu 40.7s; busy cores 15.7; states 826; guesses 15,078; bounds pruned 49,443; validation OK |
+| 2026-11-09 | `49519bd` | pc01 | 1600 | 1 | optimal | 8.104s | 5256 | 1681 | 3948 | — | bound child branching factor in opener and parallel bucket evaluations; pick 8.0s; cpu 127.0s; busy cores 15.7; states 3948 (fewer than 73e0d92); guesses 65,970; bounds pruned 313,630; validation OK |
+| 2026-11-09 | `49519bd` | pc01 | 2000 | 1 | optimal | 13.641s | 6723 | 2119 | 7751 | — | bound child branching factor in opener and parallel bucket evaluations; pick 13.6s; cpu 215.0s; busy cores 15.8; states 7751 (fewer than 73e0d92); guesses 186,088; bounds pruned 501,279; validation OK |
+| 2026-11-09 | `49519bd` | pc01 | 2200 | 1 | optimal | 19.739s | 7477 | 2331 | 23533 | ~543MB | bound child branching factor in opener and parallel bucket evaluations; pick 19.7s; cpu 313.2s; busy cores 15.9; states 23,533 (fewer than 73e0d92); guesses 589,304; bounds pruned 1,932,831; validation OK |
+| 2026-11-09 | `49519bd` | pc01 | 2340 | — | optimal | 23.210s (0.01h) | 8001 | 2478 | 26031 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-49519bd); bound child branching factor in opener and parallel bucket evaluations; build 23.210s; pick 23.0s; cpu 368.6s; busy cores 15.9 (root_guesses @ 15s: 7533); states 26,031; guesses 751,089; bounds pruned 2,070,473; equiv pruned 207,699,046; cache hits 3,483,767; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `49519bd` | pc01 | 2340 | — | optimal --certify | 23.198s (0.01h) | 8001 | 2478 | 26204 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.198s (pick 23.1s, cpu 368.3s, busy cores 15.9); 1,326,275 solver facts; 587 gap refutations (6.945s); 628,547 claims (442,060 capacity, 186,487 expansion, 0 failures, 9,428,224 bytes); independent check verified optimal in 63.716s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `49519bd` rows evaluate bounding child branching factors with `compute_branching_factor_upper_bound` across opener child bucket evaluation and parallel bucket routines:
+  - In `src/policy.rs` line 1341 (`OptimalPolicy::scan`): Replaced loose `bucket.len().min(self.max_k)` with `compute_branching_factor_upper_bound(self.matrix, bucket).min(bucket.len()).min(self.max_k).max(2)` for uncached buckets with $p\_len > 15$, constraining child capacity bounds right at depth 2 without dictionary scanning.
+  - In `src/solver.rs`: Constrained $p\_k$ in `min_guess_val_inner` fast-path 2-bucket partitions and `Solver::solve` parallel bucket map.
+  - In `src/parallel_depth.rs`: Constrained `bucket_k` across parallel depth 2 scans.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.585s** (cpu 40.7s, pick 2.5s, states 826, guesses 15,078, cost 3124).
+    - `N=1600, seed=1`: **8.104s** (cpu 127.0s, pick 8.0s, states 3948 vs 3964, guesses 65,970 vs 66,002, cost 5256).
+    - `N=2000, seed=1`: **13.641s** (cpu 215.0s, pick 13.6s, states 7751 vs 7787, guesses 186,088 vs 186,235, cost 6723).
+    - `N=2200, seed=1`: **19.739s** (cpu 313.2s, pick 19.7s, states 23,533 vs 23,538, guesses 589,304 vs 590,029, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-49519bd`): **23.210s** (cpu 368.6s, pick 23.0s, states 26,031, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 131.89s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.46s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 295.54s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 53.02s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 628,547 claims with 0 failures, and independent `check` verified `3.91e11` response reads in 63.716s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `73e0d92` rows evaluate propagating the fast branching factor upper bound $k_{upper}$ through to Pass 2b and Pass 3 in `min_guess_val_inner`:
   - In `src/solver.rs`: Stored $k_{upper}$ into `child_max_ks_ptr` during the fast capacity bound pre-pass for large uncached buckets ($p\_len > 15$).
