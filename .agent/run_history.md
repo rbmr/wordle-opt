@@ -957,7 +957,38 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `1d2ed8a` | pc01 | 2200 | 1 | optimal | 19.761s | 7477 | 2331 | 23575 | ~543MB | align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; pick 19.7s; cpu 313.5s; busy cores 15.9; states 23,575; guesses 589,376; bounds pruned 1,929,580; equiv pruned 188,382,149; cache hits 2,428,103; validation OK |
 | 2026-11-09 | `1d2ed8a` | pc01 | 2340 | — | optimal | 23.244s (0.01h) | 8001 | 2478 | 25958 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-1d2ed8a); align Pass 3 bound cutoffs and prune metrics with bucket lower bounds; build 23.244s; pick 23.0s; cpu 369.0s; busy cores 15.9 (root_guesses @ 15s: 7521); states 25,958; guesses 751,474; bounds pruned 2,069,354; equiv pruned 207,353,273; cache hits 3,490,866; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `1d2ed8a` | pc01 | 2340 | — | optimal --certify | 23.119s (0.01h) | 8001 | 2478 | 26120 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.119s (pick 23.0s, cpu 366.9s, busy cores 15.9); 1,328,797 solver facts; 589 gap refutations (7.039s); 634,751 claims (445,812 capacity, 188,939 expansion, 0 failures, 9,521,284 bytes); independent check verified optimal in 68.897s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `08d33d9` | pc01 | 1000 | 1 | optimal | 2.583s | 3124 | 1049 | 834 | — | direct response index lookup for small candidate partitions; pick 2.5s; cpu 40.7s; busy cores 15.8; states 834; guesses 15,111; bounds pruned 50,135; equiv pruned 5,125,490; cache hits 165,627; validation OK |
+| 2026-11-09 | `08d33d9` | pc01 | 1600 | 1 | optimal | 8.102s | 5256 | 1681 | 3948 | — | direct response index lookup for small candidate partitions; pick 8.0s; cpu 127.0s; busy cores 15.7; states 3,948; guesses 66,091; bounds pruned 313,767; equiv pruned 29,521,111; cache hits 353,591; validation OK |
+| 2026-11-09 | `08d33d9` | pc01 | 2000 | 1 | optimal | 13.638s | 6723 | 2119 | 7795 | — | direct response index lookup for small candidate partitions; pick 13.6s; cpu 214.9s; busy cores 15.8; states 7,795; guesses 186,684; bounds pruned 504,486; equiv pruned 59,697,026; cache hits 842,357; validation OK |
+| 2026-11-09 | `08d33d9` | pc01 | 2200 | 1 | optimal | 19.763s | 7477 | 2331 | 23519 | ~542MB | direct response index lookup for small candidate partitions; pick 19.7s; cpu 313.3s; busy cores 15.9; states 23,519; guesses 588,736; bounds pruned 1,933,696; equiv pruned 188,179,049; cache hits 2,427,033; validation OK |
+| 2026-11-09 | `08d33d9` | pc01 | 2340 | — | optimal | 23.219s (0.01h) | 8001 | 2478 | 25998 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-08d33d9); direct response index lookup for small candidate partitions; build 23.219s; pick 23.0s; cpu 369.2s; busy cores 15.9 (root_guesses @ 15s: 7517); states 25,998; guesses 752,206; bounds pruned 2,086,991; equiv pruned 207,363,941; cache hits 3,494,542; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `08d33d9` | pc01 | 2340 | — | optimal --certify | 23.078s (0.01h) | 8001 | 2478 | 26232 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.078s (pick 23.0s, cpu 366.0s, busy cores 15.9); 1,327,272 solver facts; 587 gap refutations (7.287s); 633,082 claims (444,888 capacity, 188,194 expansion, 0 failures, 9,496,249 bytes); independent check verified optimal in 60.165s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `08d33d9` rows evaluate direct response index lookup for small candidate partitions:
+  - In `src/solver.rs`:
+    - In `min_guess_val_inner` for `c_len <= 16`:
+      - Replaced linear response duplicate scan `for i in 0..num_non_empty { if local_counts[i].r == r ... }` with an uninitialized stack direct-lookup table `r_to_idx: MaybeUninit<[u8; R]>`.
+      - On first encounter of response `r` (`(*word & bit) == 0`), recorded `*r_to_idx_ptr.add(r as usize) = num_non_empty as u8;` for `R <= 256` (covering word lengths 1–5).
+      - On duplicate responses (`(*word & bit) != 0`), retrieved `target_idx = *r_to_idx_ptr.add(r as usize) as usize` in O(1) time without looping or zeroing. For `R > 256`, preserved linear scan fallback.
+    - In `min_guess_val_inner` for `c_len > 16`:
+      - Clamped `compute_max_branching_factor_seq_with_target` target to `target_k.min(k_upper)` in Pass 2b dictionary scan, avoiding unbounded scans beyond known branching upper bound `k_upper`.
+      - Accounted for late Pass 3 cutoff prune (`b + val >= cutoff`) in `self.local_metrics.pruned_by_bounds += 1;` in both `c_len <= 16` and `c_len > 16` paths.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.583s** (cpu 40.7s, pick 2.5s, states 834, guesses 15,111, bounds pruned 50,135, cost 3124).
+    - `N=1600, seed=1`: **8.102s** (cpu 127.0s, pick 8.0s, states 3,948 vs 3,954 [-6 states], guesses 66,091, bounds pruned 313,767, cost 5256).
+    - `N=2000, seed=1`: **13.638s** (cpu 214.9s, pick 13.6s, states 7,795, guesses 186,684, bounds pruned 504,486, cost 6723).
+    - `N=2200, seed=1`: **19.763s** (cpu 313.3s, pick 19.7s, states 23,519 vs 23,575 [-56 states], guesses 588,736, bounds pruned 1,933,696, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-08d33d9`): **23.219s** (cpu 369.2s, pick 23.0s, states 25,998, guesses 752,206, bounds pruned 2,086,991 vs 2,069,354 [+17,637 bounds pruned], equiv pruned 207,363,941, cache hits 3,494,542, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 128.50s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.86s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 297.60s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 49.44s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 633,082 claims with 0 failures, and independent `check` verified `3.93e11` response reads in 60.165s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `1d2ed8a` rows evaluate aligning Pass 3 bound cutoffs and prune metrics with bucket lower bounds:
   - In `src/solver.rs`:
