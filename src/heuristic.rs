@@ -72,11 +72,11 @@ fn combine_and_count_u8(mask: &[u64; 16]) -> usize {
                 let v01 = _mm256_or_si256(v0, v1);
                 let v23 = _mm256_or_si256(v2, v3);
                 let vor = _mm256_or_si256(v01, v23);
-                let mut m = std::mem::MaybeUninit::<[u64; 4]>::uninit();
-                _mm256_storeu_si256(m.as_mut_ptr() as *mut __m256i, vor);
-                let m = m.assume_init();
-                (m[0].count_ones() + m[1].count_ones() + m[2].count_ones() + m[3].count_ones())
-                    as usize
+                let m0 = _mm256_extract_epi64::<0>(vor) as u64;
+                let m1 = _mm256_extract_epi64::<1>(vor) as u64;
+                let m2 = _mm256_extract_epi64::<2>(vor) as u64;
+                let m3 = _mm256_extract_epi64::<3>(vor) as u64;
+                (m0.count_ones() + m1.count_ones() + m2.count_ones() + m3.count_ones()) as usize
             }
         }
 
