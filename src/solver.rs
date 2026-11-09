@@ -1595,8 +1595,10 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
             let mut num_non_empty = 0;
             let mut duplicates = 0;
-            if M <= 4 && max_allowed_duplicates == 0 {
+            if M <= 4 {
                 let mut seen = [0u64; M];
+                let mut seen2 = [0u64; M];
+                let mut has_size_ge_3 = false;
                 let mut aborted = false;
                 for i in 0..cand_idx {
                     let c = unsafe { *set_ptr.add(i) };
@@ -1605,10 +1607,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let bit = 1u64 << (r & 63);
                     let word = unsafe { seen.get_unchecked_mut(word_idx) };
                     if (*word & bit) != 0 {
-                        aborted = true;
-                        break;
+                        duplicates += 1;
+                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                        if (*word2 & bit) != 0 {
+                            has_size_ge_3 = true;
+                        } else {
+                            *word2 |= bit;
+                        }
+                        if duplicates > max_allowed_duplicates {
+                            aborted = true;
+                            break;
+                        }
+                    } else {
+                        *word |= bit;
                     }
-                    *word |= bit;
                 }
                 if !aborted {
                     for i in (cand_idx + 1)..c_len {
@@ -1618,27 +1630,81 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let bit = 1u64 << (r & 63);
                         let word = unsafe { seen.get_unchecked_mut(word_idx) };
                         if (*word & bit) != 0 {
-                            aborted = true;
-                            break;
+                            duplicates += 1;
+                            let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                            if (*word2 & bit) != 0 {
+                                has_size_ge_3 = true;
+                            } else {
+                                *word2 |= bit;
+                            }
+                            if duplicates > max_allowed_duplicates {
+                                aborted = true;
+                                break;
+                            }
+                        } else {
+                            *word |= bit;
                         }
-                        *word |= bit;
                     }
                 }
                 if aborted {
                     min_val_found = min_val_found.min(best_val);
                     continue;
                 }
-                let lb_cost = (2 * c_len - 1) as u32;
-                local_max_k = c_len;
-                if lb_cost < best_val {
-                    valid_phase1_k = c_len;
-                    self.local_metrics.guesses_evaluated += 1;
-                    min_val_found = min_val_found.min(lb_cost);
-                    best_val = lb_cost;
-                } else {
-                    min_val_found = min_val_found.min(lb_cost);
+                if !has_size_ge_3 {
+                    let total_non_empty = c_len - duplicates;
+                    if total_non_empty > local_max_k {
+                        local_max_k = total_non_empty;
+                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                    }
+                    let lb_cost = (2 * c_len - 1 + duplicates) as u32;
+                    if lb_cost < best_val {
+                        if total_non_empty > valid_phase1_k {
+                            valid_phase1_k = total_non_empty;
+                        }
+                        self.local_metrics.guesses_evaluated += 1;
+                        min_val_found = min_val_found.min(lb_cost);
+                        best_val = lb_cost;
+                        if duplicates == 0 {
+                            break;
+                        }
+                        k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
+                    }
+                    if min_k_needed > c_len {
+                        break;
+                    }
+                    continue;
                 }
-                break;
+                for i in 0..cand_idx {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr = cnt + 1;
+                    }
+                }
+                for i in (cand_idx + 1)..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr = cnt + 1;
+                    }
+                }
             } else {
                 let mut aborted = false;
                 for i in 0..cand_idx {
