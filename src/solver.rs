@@ -256,12 +256,34 @@ unsafe fn eval_non_empty_buckets_5_plus(
             _ => {
                 let mut exp = base_exp;
                 let mut lb = c_len;
-                for i in 0..num_non_empty {
+                let mut i = 0usize;
+                while i + 3 < num_non_empty {
+                    let r0 = *non_empty_indices_ptr.add(i) as usize;
+                    let r1 = *non_empty_indices_ptr.add(i + 1) as usize;
+                    let r2 = *non_empty_indices_ptr.add(i + 2) as usize;
+                    let r3 = *non_empty_indices_ptr.add(i + 3) as usize;
+                    let c0 = *counts_ptr.add(r0) as u32;
+                    let c1 = *counts_ptr.add(r1) as u32;
+                    let c2 = *counts_ptr.add(r2) as u32;
+                    let c3 = *counts_ptr.add(r3) as u32;
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    exp += c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+                    lb += *parent_cap_bounds_ptr.add(c0 as usize)
+                        + *parent_cap_bounds_ptr.add(c1 as usize)
+                        + *parent_cap_bounds_ptr.add(c2 as usize)
+                        + *parent_cap_bounds_ptr.add(c3 as usize);
+                    i += 4;
+                }
+                while i < num_non_empty {
                     let r_idx = *non_empty_indices_ptr.add(i) as usize;
-                    let count = *counts_ptr.add(r_idx);
+                    let count = *counts_ptr.add(r_idx) as u32;
                     *counts_ptr.add(r_idx) = 0;
-                    exp += (count as u32) * (count as u32);
+                    exp += count * count;
                     lb += *parent_cap_bounds_ptr.add(count as usize);
+                    i += 1;
                 }
                 (exp, lb)
             }
