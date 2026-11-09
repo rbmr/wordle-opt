@@ -661,6 +661,90 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
 
                 (10, has_one_collision)
             }
+            6 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand6 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        let re = unsafe { *gi_ptr.add($ce) };
+                                        if re != ra && re != rb && re != rc && re != rd {
+                                            return (11, true);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ra == rb {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc != ra {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rc && re != rd {
+                                        has_one_collision = true;
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc == ra || rc == rb {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rb {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rd {
+                                        has_one_collision = true;
+                                    }
+                                }
+                            } else {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd == ra || rd == rb || rd == rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc {
+                                        has_one_collision = true;
+                                    }
+                                } else {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc && re != rd {
+                                        return (11, true);
+                                    } else {
+                                        has_one_collision = true;
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                eval_cand6!(c0, c1, c2, c3, c4, c5);
+                eval_cand6!(c1, c0, c2, c3, c4, c5);
+                eval_cand6!(c2, c0, c1, c3, c4, c5);
+                eval_cand6!(c3, c0, c1, c2, c4, c5);
+                eval_cand6!(c4, c0, c1, c2, c3, c5);
+                eval_cand6!(c5, c0, c1, c2, c3, c4);
+
+                (12, has_one_collision)
+            }
             _ => {
                 let n = bucket.len();
                 let mut has_one_collision = false;
