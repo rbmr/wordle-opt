@@ -1980,6 +1980,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let mut duplicates = 0;
                         if M <= 4 {
                             let mut seen = [0u64; M];
+                            let mut seen2 = [0u64; M];
+                            let mut has_size_ge_3 = false;
                             let mut aborted = false;
                             for c_idx in 0..c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
@@ -1987,33 +1989,34 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 let word_idx = r >> 6;
                                 let bit = 1u64 << (r & 63);
                                 let word = unsafe { seen.get_unchecked_mut(word_idx) };
-                                duplicates += ((*word & bit) != 0) as usize;
-                                *word |= bit;
-                                if duplicates > max_allowed_duplicates {
-                                    aborted = true;
-                                    break;
+                                if (*word & bit) != 0 {
+                                    duplicates += 1;
+                                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                    if (*word2 & bit) != 0 {
+                                        has_size_ge_3 = true;
+                                    } else {
+                                        *word2 |= bit;
+                                    }
+                                    if duplicates > max_allowed_duplicates {
+                                        aborted = true;
+                                        break;
+                                    }
+                                } else {
+                                    *word |= bit;
                                 }
                             }
                             if aborted {
                                 min_val_found = min_val_found.min(best_val);
                                 continue;
                             }
-                            if duplicates == 0 {
-                                let lb_cost = (2 * c_len) as u32;
-                                local_max_k = c_len;
-                                valid_phase2_k = c_len;
-                                self.local_metrics.guesses_evaluated += 1;
-                                min_val_found = min_val_found.min(lb_cost);
-                                best_val = lb_cost;
-                                break 'guess_loop;
-                            } else if duplicates == 1 {
-                                num_non_empty = c_len - 1;
+                            if !has_size_ge_3 {
+                                num_non_empty = c_len - duplicates;
                                 if num_non_empty > local_max_k {
                                     local_max_k = num_non_empty;
                                     min_k_needed = (local_max_k + 1).min(k_to_beat_best);
                                     max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
                                 }
-                                let lb_cost = (2 * c_len + 1) as u32;
+                                let lb_cost = (2 * c_len + duplicates) as u32;
                                 if lb_cost < best_val {
                                     if num_non_empty > valid_phase2_k {
                                         valid_phase2_k = num_non_empty;
@@ -2021,6 +2024,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     self.local_metrics.guesses_evaluated += 1;
                                     min_val_found = min_val_found.min(lb_cost);
                                     best_val = lb_cost;
+                                    if duplicates == 0 {
+                                        break 'guess_loop;
+                                    }
                                     k_to_beat_best = (3 * c_len as u32)
                                         .saturating_sub(best_val.saturating_sub(1))
                                         as usize;
