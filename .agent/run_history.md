@@ -981,7 +981,32 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `0755659` | pc01 | 2200 | 1 | optimal | 20.147s | 7477 | 2331 | 23626 | ~543MB | short-circuit candidate response comparisons in small bucket evaluation; pick 20.1s; cpu 319.4s; busy cores 15.9; states 23,626; guesses 599,719; bounds pruned 1,956,998; equiv pruned 188,889,645; cache hits 2,434,914; validation OK |
 | 2026-11-09 | `0755659` | pc01 | 2340 | — | optimal | 23.664s (0.01h) | 8001 | 2478 | 26022 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-0755659); short-circuit candidate response comparisons in small bucket evaluation; build 23.664s; pick 23.4s; cpu 375.8s; busy cores 15.9 (root_guesses @ 15s: 7169); states 26,022; guesses 752,280; bounds pruned 2,086,462; equiv pruned 207,524,572; cache hits 3,488,872; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `0755659` | pc01 | 2340 | — | optimal --certify | 23.520s (0.01h) | 8001 | 2478 | 26212 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.520s (pick 23.4s, cpu 373.3s, busy cores 15.9); 1,326,844 solver facts; 590 gap refutations (7.791s); 631,132 claims (443,787 capacity, 187,345 expansion, 0 failures, 9,466,999 bytes); independent check verified optimal in 69.406s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-09 | `899ef0d` | pc01 | 1000 | 1 | optimal | 2.602s | 3124 | 1049 | 828 | — | vectorize response mask combination with AVX2 SIMD in branching factor heuristic; pick 2.6s; cpu 41.0s; busy cores 15.8; states 828; guesses 15,137; bounds pruned 50,061; equiv pruned 4,899,557; cache hits 91,195; validation OK |
+| 2026-11-09 | `899ef0d` | pc01 | 1600 | 1 | optimal | 8.216s | 5256 | 1681 | 3948 | — | vectorize response mask combination with AVX2 SIMD in branching factor heuristic; pick 8.2s; cpu 128.7s; busy cores 15.7; states 3,948 vs 3,959; guesses 66,181 vs 66,269; bounds pruned 310,981; equiv pruned 28,833,075; cache hits 449,673; validation OK |
+| 2026-11-09 | `899ef0d` | pc01 | 2000 | 1 | optimal | 13.844s | 6723 | 2119 | 7786 | — | vectorize response mask combination with AVX2 SIMD in branching factor heuristic; pick 13.8s; cpu 218.2s; busy cores 15.8; states 7,786; guesses 185,929; bounds pruned 502,601; equiv pruned 59,749,108; cache hits 839,543; validation OK |
+| 2026-11-09 | `899ef0d` | pc01 | 2200 | 1 | optimal | 20.113s | 7477 | 2331 | 23624 | ~543MB | vectorize response mask combination with AVX2 SIMD in branching factor heuristic; pick 20.0s; cpu 319.1s; busy cores 15.9; states 23,624 vs 23,626; guesses 599,747; bounds pruned 1,961,136; equiv pruned 188,877,619; cache hits 2,433,900; validation OK |
+| 2026-11-09 | `899ef0d` | pc01 | 2340 | — | optimal | 23.620s (0.01h) | 8001 | 2478 | 25971 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-899ef0d); vectorize response mask combination with AVX2 SIMD in branching factor heuristic; build 23.620s; pick 23.4s; cpu 375.2s; busy cores 15.9 (root_guesses @ 15s: 7177); states 25,971 vs 26,022 [-51 states]; guesses 751,237 vs 752,280 [-1,043 guesses]; bounds pruned 2,072,916; equiv pruned 207,080,157; cache hits 3,487,242; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-09 | `899ef0d` | pc01 | 2340 | — | optimal --certify | 23.518s (0.01h) | 8001 | 2478 | 26218 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.518s (pick 23.4s, cpu 373.2s, busy cores 15.9); 1,327,967 solver facts; 590 gap refutations (7.318s); 630,963 claims (443,377 capacity, 187,586 expansion, 0 failures, 9,464,464 bytes); independent check verified optimal in 68.815s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `899ef0d` rows evaluate vectorizing response mask combination with AVX2 SIMD in branching factor heuristic:
+  - In `src/heuristic.rs`:
+    - In `combine_and_count_u8`: replaced scalar 16-element array `OR` passes with 256-bit AVX2 SIMD intrinsics (`_mm256_loadu_si256`, `_mm256_or_si256`, and `_mm256_storeu_si256`), combining lanes in 3 vector operations instead of 12 scalar operations and register moves.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.602s** (cpu 41.0s, pick 2.6s, states 828, guesses 15,137, bounds pruned 50,061, cost 3124).
+    - `N=1600, seed=1`: **8.216s** (cpu 128.7s, pick 8.2s, states 3,948 vs 3,959 [-11 states], guesses 66,181, bounds pruned 310,981, cost 5256).
+    - `N=2000, seed=1`: **13.844s** (cpu 218.2s, pick 13.8s, states 7,786, guesses 185,929, bounds pruned 502,601, cost 6723).
+    - `N=2200, seed=1`: **20.113s** (cpu 319.1s, pick 20.0s, states 23,624 vs 23,626 [-2 states], guesses 599,747, bounds pruned 1,961,136, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-09-899ef0d`): **23.620s** (cpu 375.2s, pick 23.4s, states 25,971 vs 26,022 [-51 states], guesses 751,237 vs 752,280 [-1,043 guesses], bounds pruned 2,072,916, equiv pruned 207,080,157, cache hits 3,487,242, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 129.23s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.53s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 303.57s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 49.63s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 630,963 claims with 0 failures, and independent `check` verified `3.92e11` response reads in 68.815s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `0755659` rows evaluate short-circuiting candidate response comparisons in small bucket evaluation:
   - In `src/solver.rs`:
