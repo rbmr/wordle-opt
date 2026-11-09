@@ -3269,53 +3269,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            for i in split_idx..num_eval {
-                let word_idx = i >> 6;
-                let bit = 1u64 << (i & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let entry = unsafe { *eval_entries_ptr.add(i) };
-                let p_len = (entry >> 16) as usize;
-                let r_idx = (!entry & 0xFFFF) as usize;
-                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
-                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-
-                let (quick_val, is_exact) =
-                    quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, p);
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let used_val = quick_val.max(lb);
-                unsafe {
-                    *p_lbs_ptr.add(i) = used_val;
-                }
-                if is_exact {
-                    unsafe {
-                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
-                    }
-                    num_exact += 1;
-                }
-                self.cache.insert_set(hash, p, used_val, is_exact);
-                cert_record!(5, p, used_val, is_exact);
-
-                if used_val > lb {
-                    cost += used_val - lb;
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    let cutoff =
-                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                    if cost >= cutoff {
-                        self.local_metrics.pruned_by_bounds += 1;
-                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                        return cost;
-                    }
-                }
-            }
-
-            if num_exact == num_eval {
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
+            let mut fast_cost = cost;
             if split_idx > 0 {
                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                 let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
@@ -3331,7 +3285,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                 }
 
-                let mut fast_cost = cost;
                 let mut can_prune_fast = false;
                 for i in 0..split_idx {
                     let word_idx = i >> 6;
@@ -3366,6 +3319,55 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
                     return fast_cost;
                 }
+            }
+
+            for i in split_idx..num_eval {
+                let word_idx = i >> 6;
+                let bit = 1u64 << (i & 63);
+                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                    continue;
+                }
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                let p_len = (entry >> 16) as usize;
+                let r_idx = (!entry & 0xFFFF) as usize;
+                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                let hash = unsafe { *hashes_ptr.add(r_idx) };
+
+                let (quick_val, is_exact) =
+                    quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, p);
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let used_val = quick_val.max(lb);
+                unsafe {
+                    *p_lbs_ptr.add(i) = used_val;
+                }
+                if is_exact {
+                    unsafe {
+                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                    }
+                    num_exact += 1;
+                }
+                self.cache.insert_set(hash, p, used_val, is_exact);
+                cert_record!(5, p, used_val, is_exact);
+
+                if used_val > lb {
+                    let delta = used_val - lb;
+                    cost += delta;
+                    fast_cost += delta;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if fast_cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return fast_cost;
+                    }
+                }
+            }
+
+            if num_exact == num_eval {
+                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                return cost;
             }
 
             for i in 0..split_idx {
