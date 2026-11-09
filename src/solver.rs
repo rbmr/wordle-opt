@@ -3305,7 +3305,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *child_max_ks_ptr.add(i) = k_upper as u16;
                     }
                     let approx_tight_lb =
-                        crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k);
+                        crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k)
+                            .max(lb);
+                    unsafe {
+                        *p_lbs_ptr.add(i) = approx_tight_lb;
+                    }
                     if approx_tight_lb > lb {
                         fast_cost += approx_tight_lb - lb;
                         if fast_cost >= cutoff {
@@ -3376,6 +3380,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
                     continue;
                 }
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if fast_cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return fast_cost;
+                }
+
                 let entry = unsafe { *eval_entries_ptr.add(i) };
                 let p_len = (entry >> 16) as usize;
                 let r_idx = (!entry & 0xFFFF) as usize;
@@ -3384,8 +3396,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let hash = unsafe { *hashes_ptr.add(r_idx) };
 
                 let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let approx_tight_lb = unsafe { *p_lbs_ptr.add(i) };
+                let approx_inc = approx_tight_lb - lb;
+
                 let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
                 if target_k == 2 {
+                    unsafe {
+                        *p_lbs_ptr.add(i) = lb;
+                    }
                     self.cache.insert_set(hash, p, lb, false);
                     cert_record!(6, p, lb, false);
                 } else {
@@ -3396,6 +3414,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         target_k.min(k_upper),
                     );
                     if k_cand >= target_k {
+                        unsafe {
+                            *p_lbs_ptr.add(i) = lb;
+                        }
                         self.cache.insert_set(hash, p, lb, false);
                         cert_record!(7, p, lb, false);
                     } else if k_cand >= k_upper {
@@ -3410,15 +3431,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         cert_record!(9, p, used_val, false);
 
                         if used_val > lb {
-                            cost += used_val - lb;
+                            let actual_inc = used_val - lb;
+                            cost += actual_inc;
+                            fast_cost += actual_inc - approx_inc;
                             let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                             let cutoff = beta
                                 .min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                            if cost >= cutoff {
+                            if fast_cost >= cutoff {
                                 self.local_metrics.pruned_by_bounds += 1;
                                 self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
                                     sorted_set;
-                                return cost;
+                                return fast_cost;
                             }
                         }
                     } else {
@@ -3429,6 +3452,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             target_k,
                         );
                         if k >= target_k {
+                            unsafe {
+                                *p_lbs_ptr.add(i) = lb;
+                            }
                             self.cache.insert_set(hash, p, lb, false);
                             cert_record!(8, p, lb, false);
                         } else {
@@ -3445,16 +3471,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             cert_record!(9, p, used_val, false);
 
                             if used_val > lb {
-                                cost += used_val - lb;
+                                let actual_inc = used_val - lb;
+                                cost += actual_inc;
+                                fast_cost += actual_inc - approx_inc;
                                 let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                                 let cutoff = beta.min(
                                     current_global_beta.saturating_sub(self.current_cost_so_far),
                                 );
-                                if cost >= cutoff {
+                                if fast_cost >= cutoff {
                                     self.local_metrics.pruned_by_bounds += 1;
                                     self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
                                         sorted_set;
-                                    return cost;
+                                    return fast_cost;
                                 }
                             }
                         }
