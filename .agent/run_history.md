@@ -1029,7 +1029,38 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-09 | `cbf5afb` | pc01 | 2200 | 1 | optimal | 20.071s | 7477 | 2331 | 23655 | ~543MB | unroll fallback non-empty bucket evaluation loop by 4 in solver; pick 20.0s; cpu 318.5s; busy cores 15.9; states 23,655; guesses 600,123; bounds pruned 1,965,084; equiv pruned 189,025,069; cache hits 2,435,513; validation OK |
 | 2026-11-09 | `cbf5afb` | pc01 | 2340 | — | optimal | 23.565s (0.01h) | 8001 | 2478 | 26000 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-09-cbf5afb); unroll fallback non-empty bucket evaluation loop by 4 in solver; build 23.565s; pick 23.3s; cpu 374.5s; busy cores 15.9 (root_guesses @ 15s: 7233); states 26,000; guesses 752,376; bounds pruned 2,089,739; equiv pruned 207,453,578; cache hits 3,492,247; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-09 | `cbf5afb` | pc01 | 2340 | — | optimal --certify | 23.338s (0.01h) | 8001 | 2478 | 26209 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.338s (pick 23.2s, cpu 370.4s, busy cores 15.9); 1,327,992 solver facts; 589 gap refutations (7.376s); 632,417 claims (444,618 capacity, 187,799 expansion, 0 failures, 9,486,274 bytes); independent check verified optimal in 59.423s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `90eef64` | pc01 | 1000 | 1 | optimal | 2.596s | 3124 | 1049 | 814 | — | vectorize fallback small bucket candidate response collision check with SSE2; pick 2.6s; cpu 40.9s; busy cores 15.8; states 814; guesses 15,070; bounds pruned 44,964; equiv pruned 5,082,143; cache hits 165,650; validation OK |
+| 2026-11-10 | `90eef64` | pc01 | 1600 | 1 | optimal | 8.176s | 5256 | 1681 | 3957 | — | vectorize fallback small bucket candidate response collision check with SSE2; pick 8.1s; cpu 128.1s; busy cores 15.7; states 3,957; guesses 66,251; bounds pruned 315,283; equiv pruned 29,551,349; cache hits 354,166; validation OK |
+| 2026-11-10 | `90eef64` | pc01 | 2000 | 1 | optimal | 13.767s | 6723 | 2119 | 7788 | — | vectorize fallback small bucket candidate response collision check with SSE2; pick 13.7s; cpu 217.1s; busy cores 15.8; states 7,788; guesses 186,121; bounds pruned 503,045; equiv pruned 59,749,271; cache hits 838,623; validation OK |
+| 2026-11-10 | `90eef64` | pc01 | 2200 | 1 | optimal | 20.111s | 7477 | 2331 | 23652 | ~544MB | vectorize fallback small bucket candidate response collision check with SSE2; pick 20.0s; cpu 319.2s; busy cores 15.9; states 23,652; guesses 598,705; bounds pruned 1,961,252; equiv pruned 188,963,119; cache hits 2,434,815; validation OK |
+| 2026-11-10 | `90eef64` | pc01 | 2340 | — | optimal | 23.622s (0.01h) | 8001 | 2478 | 26044 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-90eef64); vectorize fallback small bucket candidate response collision check with SSE2; build 23.622s; pick 23.4s; cpu 374.4s; busy cores 15.9 (root_guesses @ 15s: 7233); states 26,044; guesses 751,029; bounds pruned 2,091,333; equiv pruned 207,453,578; cache hits 3,492,247; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `90eef64` | pc01 | 2340 | — | optimal --certify | 23.418s (0.01h) | 8001 | 2478 | 26217 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.418s (pick 23.3s, cpu 371.7s, busy cores 15.9); 1,326,621 solver facts; 589 gap refutations (7.369s); 628,174 claims (441,937 capacity, 186,237 expansion, 0 failures, 9,422,629 bytes); independent check verified optimal in 57.781s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `90eef64` rows evaluate vectorizing the fallback small bucket candidate response collision check with SSE2 in the solver:
+  - In `src/solver.rs`:
+    - Replaced the fallback `Elem::IS_U8` loop in `quick_bucket_eval_small_elem` (handling bucket sizes 10..=15) which previously zeroed a 256-bit bitmask `[0u64; 4]` on every candidate guess iteration and performed variable bit-shift and indexing operations (`r >> 6`, `1u64 << (r & 63)`).
+    - Introduced SSE2 SIMD byte-level matching using a 16-byte buffer `[0u8; 16]`:
+      - Broadcasts response byte $r$ via `_mm_set1_epi8`, compares against `v_seen` via `_mm_cmpeq_epi8`, and extracts mask via `_mm_movemask_epi8` masked to valid `seen_len`.
+      - On collision, increments `collisions` and aborts as soon as `collisions > max_collisions`.
+      - Appends $r$ into `seen[seen_len]` only when not previously seen, keeping `seen_len <= 14 < 16`.
+      - Completely eliminates 32-byte bitmask zeroing and variable bit shifts across all candidate evaluations for bucket sizes 10..=15.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.596s** (cpu 40.9s, pick 2.6s, states 814 vs 824 [-10 states], guesses 15,070 vs 15,115 [-45 guesses], bounds pruned 44,964, cost 3124).
+    - `N=1600, seed=1`: **8.176s** (cpu 128.1s, pick 8.1s, states 3,957 vs 3,961 [-4 states], guesses 66,251 vs 66,325 [-74 guesses], bounds pruned 315,283, cost 5256).
+    - `N=2000, seed=1`: **13.767s** (cpu 217.1s, pick 13.7s, states 7,788 vs 7,791 [-3 states], guesses 186,121 vs 186,508 [-387 guesses], bounds pruned 503,045, cost 6723).
+    - `N=2200, seed=1`: **20.111s** (cpu 319.2s, pick 20.0s, states 23,652 vs 23,655 [-3 states], guesses 598,705 vs 600,123 [-1,418 guesses], bounds pruned 1,961,252, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-90eef64`): **23.622s** (cpu 374.4s, pick 23.4s, states 26,044, guesses 751,029 vs 752,376 [-1,347 guesses], bounds pruned 2,091,333, equiv pruned 207,453,578, cache hits 3,492,247, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 68 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 128.26s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.95s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 301.23s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 49.42s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 628,174 claims with 0 failures, and independent `check` verified `3.91e11` response reads in 57.781s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
+
 
 - The `cbf5afb` rows evaluate unrolling the fallback non-empty bucket evaluation loop by 4 in the solver:
   - In `src/solver.rs`:
