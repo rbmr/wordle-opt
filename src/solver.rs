@@ -1320,6 +1320,47 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                     let mut collisions = 0;
                     let max_collisions = if has_one_collision { 0 } else { 1 };
 
+                    #[cfg(target_arch = "x86_64")]
+                    if Elem::IS_U8 {
+                        use std::arch::x86_64::*;
+                        let mut seen = [0u8; 16];
+                        let seen_ptr = seen.as_mut_ptr();
+                        let mut seen_len = 0u32;
+                        let mut aborted = false;
+
+                        for j in 0..n {
+                            if i == j {
+                                continue;
+                            }
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { (*g_ptr.add(c2)).to_usize() as u8 };
+
+                            if seen_len > 0 {
+                                unsafe {
+                                    let v_seen = _mm_loadu_si128(seen_ptr as *const __m128i);
+                                    let v_r = _mm_set1_epi8(r as i8);
+                                    let cmp = _mm_cmpeq_epi8(v_r, v_seen);
+                                    let mask = (_mm_movemask_epi8(cmp) as u32) & ((1u32 << seen_len) - 1);
+                                    if mask != 0 {
+                                        collisions += 1;
+                                        if collisions > max_collisions {
+                                            aborted = true;
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            unsafe {
+                                *seen_ptr.add(seen_len as usize) = r;
+                            }
+                            seen_len += 1;
+                        }
+                        if aborted {
+                            continue;
+                        }
+                    }
+                    #[cfg(not(target_arch = "x86_64"))]
                     if Elem::IS_U8 {
                         let mut seen = [0u64; 4];
                         let mut aborted = false;
@@ -1344,14 +1385,20 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                                 collisions += ((*word & bit) != 0) as usize;
                                 *word |= bit;
                                 if collisions > max_collisions {
+                                    aborted = true;
                                     break;
                                 }
                             }
                         }
-                    } else {
+                        if aborted {
+                            continue;
+                        }
+                    }
+                    if !Elem::IS_U8 {
                         let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
                         let seen_ptr = seen.as_mut_ptr() as *mut Elem;
                         let mut seen_len = 0;
+                        let mut aborted = false;
 
                         'inner: for j in 0..n {
                             if i == j {
@@ -1363,6 +1410,7 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                                 if unsafe { *seen_ptr.add(k) == r } {
                                     collisions += 1;
                                     if collisions > max_collisions {
+                                        aborted = true;
                                         break 'inner;
                                     }
                                     continue 'inner;
@@ -1372,6 +1420,9 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                                 *seen_ptr.add(seen_len) = r;
                             }
                             seen_len += 1;
+                        }
+                        if aborted {
+                            continue;
                         }
                     }
 
