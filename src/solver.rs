@@ -2630,6 +2630,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
         let parent_active_ptr = parent_active_guesses.as_ptr();
         let set_ptr = set.as_ptr();
+        let mut r_buf = std::mem::MaybeUninit::<[u16; 256]>::uninit();
+        let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
         phase1_tuples.reserve(c_len);
         for (cand_idx, &cand) in set.iter().enumerate() {
             let g = unsafe { *cand_to_guess_ptr.add(cand) };
@@ -2668,31 +2670,74 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     }};
                 }
-                let mut i = 0;
-                while i + 3 < cand_idx {
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
-                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
-                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
-                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
-                    check_cand_dup!(r0);
-                    check_cand_dup!(r1);
-                    check_cand_dup!(r2);
-                    check_cand_dup!(r3);
-                    i += 4;
-                }
-                while !aborted && i < cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    check_cand_dup!(r);
-                    i += 1;
-                }
-                if !aborted {
-                    let mut i = cand_idx + 1;
-                    while i + 3 < c_len {
+                if c_len <= 256 {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r0 as u16;
+                            *r_buf_ptr.add(i + 1) = r1 as u16;
+                            *r_buf_ptr.add(i + 2) = r2 as u16;
+                            *r_buf_ptr.add(i + 3) = r3 as u16;
+                        }
+                        check_cand_dup!(r0);
+                        check_cand_dup!(r1);
+                        check_cand_dup!(r2);
+                        check_cand_dup!(r3);
+                        i += 4;
+                    }
+                    while !aborted && i < cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r as u16;
+                        }
+                        check_cand_dup!(r);
+                        i += 1;
+                    }
+                    if !aborted {
+                        let mut i = cand_idx + 1;
+                        while i + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(i) };
+                            let c1 = unsafe { *set_ptr.add(i + 1) };
+                            let c2 = unsafe { *set_ptr.add(i + 2) };
+                            let c3 = unsafe { *set_ptr.add(i + 3) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            unsafe {
+                                *r_buf_ptr.add(i) = r0 as u16;
+                                *r_buf_ptr.add(i + 1) = r1 as u16;
+                                *r_buf_ptr.add(i + 2) = r2 as u16;
+                                *r_buf_ptr.add(i + 3) = r3 as u16;
+                            }
+                            check_cand_dup!(r0);
+                            check_cand_dup!(r1);
+                            check_cand_dup!(r2);
+                            check_cand_dup!(r3);
+                            i += 4;
+                        }
+                        while !aborted && i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            unsafe {
+                                *r_buf_ptr.add(i) = r as u16;
+                            }
+                            check_cand_dup!(r);
+                            i += 1;
+                        }
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
                         let c0 = unsafe { *set_ptr.add(i) };
                         let c1 = unsafe { *set_ptr.add(i + 1) };
                         let c2 = unsafe { *set_ptr.add(i + 2) };
@@ -2707,11 +2752,35 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         check_cand_dup!(r3);
                         i += 4;
                     }
-                    while !aborted && i < c_len {
+                    while !aborted && i < cand_idx {
                         let c = unsafe { *set_ptr.add(i) };
                         let r = unsafe { (*g_ptr.add(c)).to_usize() };
                         check_cand_dup!(r);
                         i += 1;
+                    }
+                    if !aborted {
+                        let mut i = cand_idx + 1;
+                        while i + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(i) };
+                            let c1 = unsafe { *set_ptr.add(i + 1) };
+                            let c2 = unsafe { *set_ptr.add(i + 2) };
+                            let c3 = unsafe { *set_ptr.add(i + 3) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            check_cand_dup!(r0);
+                            check_cand_dup!(r1);
+                            check_cand_dup!(r2);
+                            check_cand_dup!(r3);
+                            i += 4;
+                        }
+                        while !aborted && i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            check_cand_dup!(r);
+                            i += 1;
+                        }
                     }
                 }
                 if aborted {
@@ -2760,123 +2829,234 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     continue;
                 }
-                let mut i = 0;
-                while i + 3 < cand_idx {
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
-                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
-                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
-                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
-                    unsafe {
-                        let cnt_ptr0 = counts_ptr.add(r0);
-                        let cnt0 = *cnt_ptr0;
-                        if cnt0 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
-                            num_non_empty += 1;
-                        }
-                        *cnt_ptr0 = cnt0 + 1;
+                if c_len <= 256 {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let r0 = unsafe { *r_buf_ptr.add(i) as usize };
+                        let r1 = unsafe { *r_buf_ptr.add(i + 1) as usize };
+                        let r2 = unsafe { *r_buf_ptr.add(i + 2) as usize };
+                        let r3 = unsafe { *r_buf_ptr.add(i + 3) as usize };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
 
-                        let cnt_ptr1 = counts_ptr.add(r1);
-                        let cnt1 = *cnt_ptr1;
-                        if cnt1 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
-                            num_non_empty += 1;
-                        }
-                        *cnt_ptr1 = cnt1 + 1;
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
 
-                        let cnt_ptr2 = counts_ptr.add(r2);
-                        let cnt2 = *cnt_ptr2;
-                        if cnt2 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
-                            num_non_empty += 1;
-                        }
-                        *cnt_ptr2 = cnt2 + 1;
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
 
-                        let cnt_ptr3 = counts_ptr.add(r3);
-                        let cnt3 = *cnt_ptr3;
-                        if cnt3 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
-                            num_non_empty += 1;
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
                         }
-                        *cnt_ptr3 = cnt3 + 1;
+                        i += 4;
                     }
-                    i += 4;
-                }
-                while i < cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += 1;
+                    while i < cand_idx {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
-                        *cnt_ptr = cnt + 1;
+                        i += 1;
                     }
-                    i += 1;
-                }
-                let mut i = cand_idx + 1;
-                while i + 3 < c_len {
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
-                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
-                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
-                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
-                    unsafe {
-                        let cnt_ptr0 = counts_ptr.add(r0);
-                        let cnt0 = *cnt_ptr0;
-                        if cnt0 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
-                            num_non_empty += 1;
-                        }
-                        *cnt_ptr0 = cnt0 + 1;
+                    let mut i = cand_idx + 1;
+                    while i + 3 < c_len {
+                        let r0 = unsafe { *r_buf_ptr.add(i) as usize };
+                        let r1 = unsafe { *r_buf_ptr.add(i + 1) as usize };
+                        let r2 = unsafe { *r_buf_ptr.add(i + 2) as usize };
+                        let r3 = unsafe { *r_buf_ptr.add(i + 3) as usize };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
 
-                        let cnt_ptr1 = counts_ptr.add(r1);
-                        let cnt1 = *cnt_ptr1;
-                        if cnt1 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
-                            num_non_empty += 1;
-                        }
-                        *cnt_ptr1 = cnt1 + 1;
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
 
-                        let cnt_ptr2 = counts_ptr.add(r2);
-                        let cnt2 = *cnt_ptr2;
-                        if cnt2 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
-                            num_non_empty += 1;
-                        }
-                        *cnt_ptr2 = cnt2 + 1;
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
 
-                        let cnt_ptr3 = counts_ptr.add(r3);
-                        let cnt3 = *cnt_ptr3;
-                        if cnt3 == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
-                            num_non_empty += 1;
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
                         }
-                        *cnt_ptr3 = cnt3 + 1;
+                        i += 4;
                     }
-                    i += 4;
-                }
-                while i < c_len {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                            num_non_empty += 1;
+                    while i < c_len {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
                         }
-                        *cnt_ptr = cnt + 1;
+                        i += 1;
                     }
-                    i += 1;
+                } else {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
+
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
+
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
+
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
+                        }
+                        i += 4;
+                    }
+                    while i < cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                        i += 1;
+                    }
+                    let mut i = cand_idx + 1;
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
+
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
+
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
+
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
+                        }
+                        i += 4;
+                    }
+                    while i < c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                        i += 1;
+                    }
                 }
             } else {
                 let mut aborted = false;
@@ -3261,27 +3441,61 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     }
                                 }};
                             }
-                            let mut c_idx = 0;
-                            while c_idx + 3 < c_len {
-                                let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
-                                let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
-                                let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
-                                let r0 = unsafe { (*c_base0.add(g)).to_usize() };
-                                let r1 = unsafe { (*c_base1.add(g)).to_usize() };
-                                let r2 = unsafe { (*c_base2.add(g)).to_usize() };
-                                let r3 = unsafe { (*c_base3.add(g)).to_usize() };
-                                check_cand_dup!(r0);
-                                check_cand_dup!(r1);
-                                check_cand_dup!(r2);
-                                check_cand_dup!(r3);
-                                c_idx += 4;
-                            }
-                            while !aborted && c_idx < c_len {
-                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let r = unsafe { (*c_base.add(g)).to_usize() };
-                                check_cand_dup!(r);
-                                c_idx += 1;
+                            if c_len <= 256 {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                    let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                    let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                    let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                    let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                    let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                    let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                    unsafe {
+                                        *r_buf_ptr.add(c_idx) = r0 as u16;
+                                        *r_buf_ptr.add(c_idx + 1) = r1 as u16;
+                                        *r_buf_ptr.add(c_idx + 2) = r2 as u16;
+                                        *r_buf_ptr.add(c_idx + 3) = r3 as u16;
+                                    }
+                                    check_cand_dup!(r0);
+                                    check_cand_dup!(r1);
+                                    check_cand_dup!(r2);
+                                    check_cand_dup!(r3);
+                                    c_idx += 4;
+                                }
+                                while !aborted && c_idx < c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        *r_buf_ptr.add(c_idx) = r as u16;
+                                    }
+                                    check_cand_dup!(r);
+                                    c_idx += 1;
+                                }
+                            } else {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                    let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                    let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                    let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                    let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                    let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                    let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                    check_cand_dup!(r0);
+                                    check_cand_dup!(r1);
+                                    check_cand_dup!(r2);
+                                    check_cand_dup!(r3);
+                                    c_idx += 4;
+                                }
+                                while !aborted && c_idx < c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    check_cand_dup!(r);
+                                    c_idx += 1;
+                                }
                             }
                             if aborted {
                                 min_val_found = min_val_found.min(best_val);
@@ -3334,64 +3548,121 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 }
                                 continue;
                             }
-                            let mut c_idx = 0;
-                            while c_idx + 3 < c_len {
-                                let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
-                                let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
-                                let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
-                                let r0 = unsafe { (*c_base0.add(g)).to_usize() };
-                                let r1 = unsafe { (*c_base1.add(g)).to_usize() };
-                                let r2 = unsafe { (*c_base2.add(g)).to_usize() };
-                                let r3 = unsafe { (*c_base3.add(g)).to_usize() };
-                                unsafe {
-                                    let cnt_ptr0 = counts_ptr.add(r0);
-                                    let cnt0 = *cnt_ptr0;
-                                    if cnt0 == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
-                                        num_non_empty += 1;
-                                    }
-                                    *cnt_ptr0 = cnt0 + 1;
+                            if c_len <= 256 {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let r0 = unsafe { *r_buf_ptr.add(c_idx) as usize };
+                                    let r1 = unsafe { *r_buf_ptr.add(c_idx + 1) as usize };
+                                    let r2 = unsafe { *r_buf_ptr.add(c_idx + 2) as usize };
+                                    let r3 = unsafe { *r_buf_ptr.add(c_idx + 3) as usize };
+                                    unsafe {
+                                        let cnt_ptr0 = counts_ptr.add(r0);
+                                        let cnt0 = *cnt_ptr0;
+                                        if cnt0 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr0 = cnt0 + 1;
 
-                                    let cnt_ptr1 = counts_ptr.add(r1);
-                                    let cnt1 = *cnt_ptr1;
-                                    if cnt1 == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
-                                        num_non_empty += 1;
-                                    }
-                                    *cnt_ptr1 = cnt1 + 1;
+                                        let cnt_ptr1 = counts_ptr.add(r1);
+                                        let cnt1 = *cnt_ptr1;
+                                        if cnt1 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr1 = cnt1 + 1;
 
-                                    let cnt_ptr2 = counts_ptr.add(r2);
-                                    let cnt2 = *cnt_ptr2;
-                                    if cnt2 == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
-                                        num_non_empty += 1;
-                                    }
-                                    *cnt_ptr2 = cnt2 + 1;
+                                        let cnt_ptr2 = counts_ptr.add(r2);
+                                        let cnt2 = *cnt_ptr2;
+                                        if cnt2 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr2 = cnt2 + 1;
 
-                                    let cnt_ptr3 = counts_ptr.add(r3);
-                                    let cnt3 = *cnt_ptr3;
-                                    if cnt3 == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
-                                        num_non_empty += 1;
+                                        let cnt_ptr3 = counts_ptr.add(r3);
+                                        let cnt3 = *cnt_ptr3;
+                                        if cnt3 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr3 = cnt3 + 1;
                                     }
-                                    *cnt_ptr3 = cnt3 + 1;
+                                    c_idx += 4;
                                 }
-                                c_idx += 4;
-                            }
-                            while c_idx < c_len {
-                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
-                                let r = unsafe { (*c_base.add(g)).to_usize() };
-                                unsafe {
-                                    let cnt_ptr = counts_ptr.add(r);
-                                    let cnt = *cnt_ptr;
-                                    if cnt == 0 {
-                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
-                                        num_non_empty += 1;
+                                while c_idx < c_len {
+                                    let r = unsafe { *r_buf_ptr.add(c_idx) as usize };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
                                     }
-                                    *cnt_ptr = cnt + 1;
+                                    c_idx += 1;
                                 }
-                                c_idx += 1;
+                            } else {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                    let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                    let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                    let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                    let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                    let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                    let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                    unsafe {
+                                        let cnt_ptr0 = counts_ptr.add(r0);
+                                        let cnt0 = *cnt_ptr0;
+                                        if cnt0 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr0 = cnt0 + 1;
+
+                                        let cnt_ptr1 = counts_ptr.add(r1);
+                                        let cnt1 = *cnt_ptr1;
+                                        if cnt1 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr1 = cnt1 + 1;
+
+                                        let cnt_ptr2 = counts_ptr.add(r2);
+                                        let cnt2 = *cnt_ptr2;
+                                        if cnt2 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr2 = cnt2 + 1;
+
+                                        let cnt_ptr3 = counts_ptr.add(r3);
+                                        let cnt3 = *cnt_ptr3;
+                                        if cnt3 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr3 = cnt3 + 1;
+                                    }
+                                    c_idx += 4;
+                                }
+                                while c_idx < c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
+                                    }
+                                    c_idx += 1;
+                                }
                             }
                         } else {
                             let mut aborted = false;
