@@ -3974,17 +3974,69 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut h0 = 0u64;
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            if ((r_u64) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if ((r_u64 >> 8) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if ((r_u64 >> 16) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if ((r_u64 >> 24) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if ((r_u64 >> 32) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if ((r_u64 >> 40) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if ((r_u64 >> 48) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if ((r_u64 >> 56) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
                             if unsafe { *g_u8_ptr.add(cand_idx) as usize } == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
                             }
+                            cand_idx += 1;
                         }
                     } else {
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            if unsafe { (*g_ptr.add(c0)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if unsafe { (*g_ptr.add(c1)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            if unsafe { (*g_ptr.add(c2)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if unsafe { (*g_ptr.add(c3)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             if unsafe { (*g_ptr.add(c)).to_usize() } == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(c) };
                             }
+                            cand_idx += 1;
                         }
                     }
                     unsafe {
@@ -3997,16 +4049,103 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut h1 = 0u64;
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
                             let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
                             if r == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
                             } else if r == r1 {
                                 h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
                             }
+                            cand_idx += 1;
                         }
                     } else {
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r_2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r_3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            if r_2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if r_3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if r == r0 {
@@ -4014,6 +4153,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r == r1 {
                                 h1 ^= unsafe { *zobrist_ptr.add(c) };
                             }
+                            cand_idx += 1;
                         }
                     }
                     unsafe {
@@ -4029,7 +4169,77 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut h2 = 0u64;
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
                             let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
                             if r == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
@@ -4038,9 +4248,32 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r == r2 {
                                 h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
                             }
+                            cand_idx += 1;
                         }
                     } else {
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 1 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            cand_idx += 2;
+                        }
+                        if cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if r == r0 {
@@ -4068,7 +4301,93 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let mut h3 = 0u64;
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
                             let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
                             if r == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
@@ -4079,9 +4398,36 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r == r3 {
                                 h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
                             }
+                            cand_idx += 1;
                         }
                     } else {
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 1 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            cand_idx += 2;
+                        }
+                        if cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if r == r0 {
@@ -4101,19 +4447,240 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *hashes_ptr.add(r2) = h2;
                         *hashes_ptr.add(r3) = h3;
                     }
+                } else if num_eval == 5 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let r3 = (!unsafe { *eval_entries_ptr.add(3) } & 0xFFFF) as usize;
+                    let r4 = (!unsafe { *eval_entries_ptr.add(4) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    let mut h3 = 0u64;
+                    let mut h4 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else {
+                        for cand_idx in 0..c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                        *hashes_ptr.add(r3) = h3;
+                        *hashes_ptr.add(r4) = h4;
+                    }
                 } else {
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            unsafe {
+                                if *counts_ptr.add(b0) > 2 && b0 != WIN {
+                                    *hashes_ptr.add(b0) ^= *zobrist_ptr.add(cand_idx);
+                                }
+                                if *counts_ptr.add(b1) > 2 && b1 != WIN {
+                                    *hashes_ptr.add(b1) ^= *zobrist_ptr.add(cand_idx + 1);
+                                }
+                                if *counts_ptr.add(b2) > 2 && b2 != WIN {
+                                    *hashes_ptr.add(b2) ^= *zobrist_ptr.add(cand_idx + 2);
+                                }
+                                if *counts_ptr.add(b3) > 2 && b3 != WIN {
+                                    *hashes_ptr.add(b3) ^= *zobrist_ptr.add(cand_idx + 3);
+                                }
+                                if *counts_ptr.add(b4) > 2 && b4 != WIN {
+                                    *hashes_ptr.add(b4) ^= *zobrist_ptr.add(cand_idx + 4);
+                                }
+                                if *counts_ptr.add(b5) > 2 && b5 != WIN {
+                                    *hashes_ptr.add(b5) ^= *zobrist_ptr.add(cand_idx + 5);
+                                }
+                                if *counts_ptr.add(b6) > 2 && b6 != WIN {
+                                    *hashes_ptr.add(b6) ^= *zobrist_ptr.add(cand_idx + 6);
+                                }
+                                if *counts_ptr.add(b7) > 2 && b7 != WIN {
+                                    *hashes_ptr.add(b7) ^= *zobrist_ptr.add(cand_idx + 7);
+                                }
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
                             let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
                             if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
                                 unsafe {
                                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(cand_idx);
                                 }
                             }
+                            cand_idx += 1;
                         }
                     } else {
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 && r0 != WIN {
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 && r1 != WIN {
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 && r2 != WIN {
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 && r3 != WIN {
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
@@ -4121,6 +4688,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
                                 }
                             }
+                            cand_idx += 1;
                         }
                     }
                 }
