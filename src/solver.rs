@@ -4099,6 +4099,141 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 } else {
                     0
                 }
+            } else if num_eval == 5 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k3 {
+                    std::mem::swap(&mut k0, &mut k3);
+                }
+                if k1 < k4 {
+                    std::mem::swap(&mut k1, &mut k4);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 {
+                                if (k4 >> 16) > 15 { 5 } else { 4 }
+                            } else {
+                                3
+                            }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 6 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 {
+                                if (k4 >> 16) > 15 {
+                                    if (k5 >> 16) > 15 { 6 } else { 5 }
+                                } else {
+                                    4
+                                }
+                            } else {
+                                3
+                            }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
             } else if num_eval <= 16 {
                 for j in 1..num_eval {
                     let key = unsafe { *eval_entries_ptr.add(j) };
