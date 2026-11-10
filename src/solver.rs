@@ -4790,6 +4790,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let set_ptr = set.as_ptr();
+            let mut r_buf = std::mem::MaybeUninit::<[u16; 256]>::uninit();
+            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+            let can_buffer = c_len <= 256 && !is_contiguous_root;
             let mut i = 0;
             if is_contiguous_root {
                 let g_u8_ptr = g_ptr as *const u8;
@@ -4867,6 +4870,124 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 while i < c_len {
                     let r = unsafe { *g_u8_ptr.add(i) as usize };
+                    unsafe {
+                        *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                        let cnt = *counts_ptr.add(r) + 1;
+                        *counts_ptr.add(r) = cnt;
+                        if cnt == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                        }
+                    }
+                    i += 1;
+                }
+            } else if can_buffer {
+                while i + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_u16() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_u16() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_u16() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_u16() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_u16() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_u16() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_u16() };
+
+                    unsafe {
+                        *r_buf_ptr.add(i) = r0;
+                        *r_buf_ptr.add(i + 1) = r1;
+                        *r_buf_ptr.add(i + 2) = r2;
+                        *r_buf_ptr.add(i + 3) = r3;
+                        *r_buf_ptr.add(i + 4) = r4;
+                        *r_buf_ptr.add(i + 5) = r5;
+                        *r_buf_ptr.add(i + 6) = r6;
+                        *r_buf_ptr.add(i + 7) = r7;
+                    }
+
+                    let r0 = r0 as usize;
+                    let r1 = r1 as usize;
+                    let r2 = r2 as usize;
+                    let r3 = r3 as usize;
+                    let r4 = r4 as usize;
+                    let r5 = r5 as usize;
+                    let r6 = r6 as usize;
+                    let r7 = r7 as usize;
+
+                    unsafe {
+                        *seen.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+                        *seen.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
+                        *seen.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
+                        *seen.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
+                        *seen.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
+                        *seen.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
+                        *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
+                        *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
+
+                        let cnt0 = *counts_ptr.add(r0) + 1;
+                        *counts_ptr.add(r0) = cnt0;
+                        if cnt0 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+                        }
+                        let cnt1 = *counts_ptr.add(r1) + 1;
+                        *counts_ptr.add(r1) = cnt1;
+                        if cnt1 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
+                        }
+                        let cnt2 = *counts_ptr.add(r2) + 1;
+                        *counts_ptr.add(r2) = cnt2;
+                        if cnt2 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
+                        }
+                        let cnt3 = *counts_ptr.add(r3) + 1;
+                        *counts_ptr.add(r3) = cnt3;
+                        if cnt3 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
+                        }
+                        let cnt4 = *counts_ptr.add(r4) + 1;
+                        *counts_ptr.add(r4) = cnt4;
+                        if cnt4 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
+                        }
+                        let cnt5 = *counts_ptr.add(r5) + 1;
+                        *counts_ptr.add(r5) = cnt5;
+                        if cnt5 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
+                        }
+                        let cnt6 = *counts_ptr.add(r6) + 1;
+                        *counts_ptr.add(r6) = cnt6;
+                        if cnt6 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
+                        }
+                        let cnt7 = *counts_ptr.add(r7) + 1;
+                        *counts_ptr.add(r7) = cnt7;
+                        if cnt7 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
+                        }
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                    unsafe {
+                        *r_buf_ptr.add(i) = r;
+                    }
+                    let r = r as usize;
                     unsafe {
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         let cnt = *counts_ptr.add(r) + 1;
@@ -5501,6 +5622,42 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            macro_rules! match_bucket_buf {
+                ($b:expr, $idx:expr, $r0:ident, $h0:ident $(, $r:ident, $h:ident)*) => {
+                    if $b == $r0 {
+                        $h0 ^= unsafe { *zobrist_ptr.add(*set_ptr.add($idx)) };
+                    }
+                    $(
+                        else if $b == $r {
+                            $h ^= unsafe { *zobrist_ptr.add(*set_ptr.add($idx)) };
+                        }
+                    )*
+                };
+            }
+
+            macro_rules! scan_buf_hashes {
+                ($($r:ident, $h:ident),*) => {
+                    let mut cand_idx = 0;
+                    while cand_idx + 3 < c_len {
+                        let r_u64 = unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                        let b0 = (r_u64 & 0xFFFF) as usize;
+                        let b1 = ((r_u64 >> 16) & 0xFFFF) as usize;
+                        let b2 = ((r_u64 >> 32) & 0xFFFF) as usize;
+                        let b3 = (r_u64 >> 48) as usize;
+                        match_bucket_buf!(b0, cand_idx, $($r, $h),*);
+                        match_bucket_buf!(b1, cand_idx + 1, $($r, $h),*);
+                        match_bucket_buf!(b2, cand_idx + 2, $($r, $h),*);
+                        match_bucket_buf!(b3, cand_idx + 3, $($r, $h),*);
+                        cand_idx += 4;
+                    }
+                    while cand_idx < c_len {
+                        let r = unsafe { *r_buf_ptr.add(cand_idx) as usize };
+                        match_bucket_buf!(r, cand_idx, $($r, $h),*);
+                        cand_idx += 1;
+                    }
+                };
+            }
+
             let _eval_hash_cleanup = {
                 if num_eval == 1 {
                     let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
@@ -5543,6 +5700,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             cand_idx += 1;
                         }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0);
                     } else {
                         let mut cand_idx = 0;
                         while cand_idx + 3 < c_len {
@@ -5645,6 +5804,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             cand_idx += 1;
                         }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1);
                     } else {
                         let mut cand_idx = 0;
                         while cand_idx + 3 < c_len {
@@ -5783,6 +5944,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             cand_idx += 1;
                         }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2);
                     } else {
                         let mut cand_idx = 0;
                         while cand_idx + 3 < c_len {
@@ -5952,6 +6115,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             cand_idx += 1;
                         }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2, r3, h3);
                     } else {
                         let mut cand_idx = 0;
                         while cand_idx + 3 < c_len {
@@ -6152,6 +6317,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             cand_idx += 1;
                         }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2, r3, h3, r4, h4);
                     } else {
                         let mut cand_idx = 0;
                         while cand_idx + 1 < c_len {
@@ -6365,6 +6532,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             cand_idx += 1;
                         }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2, r3, h3, r4, h4, r5, h5);
                     } else {
                         let mut cand_idx = 0;
                         while cand_idx + 1 < c_len {
@@ -6474,6 +6643,45 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
                                 unsafe {
                                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(cand_idx);
+                                }
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let r_u64 =
+                                unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let r0 = (r_u64 & 0xFFFF) as usize;
+                            let r1 = ((r_u64 >> 16) & 0xFFFF) as usize;
+                            let r2 = ((r_u64 >> 32) & 0xFFFF) as usize;
+                            let r3 = (r_u64 >> 48) as usize;
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 && r0 != WIN {
+                                    let c0 = *set_ptr.add(cand_idx);
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 && r1 != WIN {
+                                    let c1 = *set_ptr.add(cand_idx + 1);
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 && r2 != WIN {
+                                    let c2 = *set_ptr.add(cand_idx + 2);
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 && r3 != WIN {
+                                    let c3 = *set_ptr.add(cand_idx + 3);
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *r_buf_ptr.add(cand_idx) as usize };
+                            if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
+                                let c = unsafe { *set_ptr.add(cand_idx) };
+                                unsafe {
+                                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
                                 }
                             }
                             cand_idx += 1;
@@ -6718,6 +6926,117 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let pos = unsafe { *pos_ptr as usize };
                     unsafe {
                         *sorted_set_ptr.add(pos) = i;
+                        *pos_ptr += 1;
+                    }
+                    i += 1;
+                }
+            } else if can_buffer {
+                while i + 7 < c_len {
+                    let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
+                    let r0 = (r_u64_0 & 0xFFFF) as usize;
+                    let r1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
+                    let r2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
+                    let r3 = (r_u64_0 >> 48) as usize;
+                    let r4 = (r_u64_1 & 0xFFFF) as usize;
+                    let r5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
+                    let r6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
+                    let r7 = (r_u64_1 >> 48) as usize;
+
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+
+                    unsafe {
+                        let pos_ptr0 = current_offsets_ptr.add(r0);
+                        let pos0 = *pos_ptr0 as usize;
+                        *sorted_set_ptr.add(pos0) = c0;
+                        *pos_ptr0 += 1;
+
+                        let pos_ptr1 = current_offsets_ptr.add(r1);
+                        let pos1 = *pos_ptr1 as usize;
+                        *sorted_set_ptr.add(pos1) = c1;
+                        *pos_ptr1 += 1;
+
+                        let pos_ptr2 = current_offsets_ptr.add(r2);
+                        let pos2 = *pos_ptr2 as usize;
+                        *sorted_set_ptr.add(pos2) = c2;
+                        *pos_ptr2 += 1;
+
+                        let pos_ptr3 = current_offsets_ptr.add(r3);
+                        let pos3 = *pos_ptr3 as usize;
+                        *sorted_set_ptr.add(pos3) = c3;
+                        *pos_ptr3 += 1;
+
+                        let pos_ptr4 = current_offsets_ptr.add(r4);
+                        let pos4 = *pos_ptr4 as usize;
+                        *sorted_set_ptr.add(pos4) = c4;
+                        *pos_ptr4 += 1;
+
+                        let pos_ptr5 = current_offsets_ptr.add(r5);
+                        let pos5 = *pos_ptr5 as usize;
+                        *sorted_set_ptr.add(pos5) = c5;
+                        *pos_ptr5 += 1;
+
+                        let pos_ptr6 = current_offsets_ptr.add(r6);
+                        let pos6 = *pos_ptr6 as usize;
+                        *sorted_set_ptr.add(pos6) = c6;
+                        *pos_ptr6 += 1;
+
+                        let pos_ptr7 = current_offsets_ptr.add(r7);
+                        let pos7 = *pos_ptr7 as usize;
+                        *sorted_set_ptr.add(pos7) = c7;
+                        *pos_ptr7 += 1;
+                    }
+                    i += 8;
+                }
+                while i + 3 < c_len {
+                    let r_u64 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                    let r0 = (r_u64 & 0xFFFF) as usize;
+                    let r1 = ((r_u64 >> 16) & 0xFFFF) as usize;
+                    let r2 = ((r_u64 >> 32) & 0xFFFF) as usize;
+                    let r3 = (r_u64 >> 48) as usize;
+
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+
+                    unsafe {
+                        let pos_ptr0 = current_offsets_ptr.add(r0);
+                        let pos0 = *pos_ptr0 as usize;
+                        *sorted_set_ptr.add(pos0) = c0;
+                        *pos_ptr0 += 1;
+
+                        let pos_ptr1 = current_offsets_ptr.add(r1);
+                        let pos1 = *pos_ptr1 as usize;
+                        *sorted_set_ptr.add(pos1) = c1;
+                        *pos_ptr1 += 1;
+
+                        let pos_ptr2 = current_offsets_ptr.add(r2);
+                        let pos2 = *pos_ptr2 as usize;
+                        *sorted_set_ptr.add(pos2) = c2;
+                        *pos_ptr2 += 1;
+
+                        let pos_ptr3 = current_offsets_ptr.add(r3);
+                        let pos3 = *pos_ptr3 as usize;
+                        *sorted_set_ptr.add(pos3) = c3;
+                        *pos_ptr3 += 1;
+                    }
+                    i += 4;
+                }
+                while i < c_len {
+                    let r_idx = unsafe { *r_buf_ptr.add(i) as usize };
+                    let c = unsafe { *set_ptr.add(i) };
+                    let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
+                    let pos = unsafe { *pos_ptr as usize };
+                    unsafe {
+                        *sorted_set_ptr.add(pos) = c;
                         *pos_ptr += 1;
                     }
                     i += 1;
