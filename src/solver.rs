@@ -2402,32 +2402,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut seen2 = [0u64; M];
                 let mut has_size_ge_3 = false;
                 let mut aborted = false;
-                for i in 0..cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                    let word_idx = r >> 6;
-                    let bit = 1u64 << (r & 63);
-                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
-                    if (*word & bit) != 0 {
-                        duplicates += 1;
-                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                        if (*word2 & bit) != 0 {
-                            has_size_ge_3 = true;
-                        } else {
-                            *word2 |= bit;
-                        }
-                        if duplicates > max_allowed_duplicates {
-                            aborted = true;
-                            break;
-                        }
-                    } else {
-                        *word |= bit;
-                    }
-                }
-                if !aborted {
-                    for i in (cand_idx + 1)..c_len {
-                        let c = unsafe { *set_ptr.add(i) };
-                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                macro_rules! check_cand_dup {
+                    ($r:expr) => {{
+                        let r = $r;
                         let word_idx = r >> 6;
                         let bit = 1u64 << (r & 63);
                         let word = unsafe { seen.get_unchecked_mut(word_idx) };
@@ -2446,6 +2423,52 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         } else {
                             *word |= bit;
                         }
+                    }};
+                }
+                let mut i = 0;
+                while i + 3 < cand_idx {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    check_cand_dup!(r0);
+                    check_cand_dup!(r1);
+                    check_cand_dup!(r2);
+                    check_cand_dup!(r3);
+                    i += 4;
+                }
+                while !aborted && i < cand_idx {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    check_cand_dup!(r);
+                    i += 1;
+                }
+                if !aborted {
+                    let mut i = cand_idx + 1;
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        check_cand_dup!(r0);
+                        check_cand_dup!(r1);
+                        check_cand_dup!(r2);
+                        check_cand_dup!(r3);
+                        i += 4;
+                    }
+                    while !aborted && i < c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        check_cand_dup!(r);
+                        i += 1;
                     }
                 }
                 if aborted {
@@ -2959,27 +2982,50 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let mut seen2 = [0u64; M];
                             let mut has_size_ge_3 = false;
                             let mut aborted = false;
-                            for c_idx in 0..c_len {
+                            macro_rules! check_cand_dup {
+                                ($r:expr) => {{
+                                    let r = $r;
+                                    let word_idx = r >> 6;
+                                    let bit = 1u64 << (r & 63);
+                                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                                    if (*word & bit) != 0 {
+                                        duplicates += 1;
+                                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                        if (*word2 & bit) != 0 {
+                                            has_size_ge_3 = true;
+                                        } else {
+                                            *word2 |= bit;
+                                        }
+                                        if duplicates > max_allowed_duplicates {
+                                            aborted = true;
+                                            break;
+                                        }
+                                    } else {
+                                        *word |= bit;
+                                    }
+                                }};
+                            }
+                            let mut c_idx = 0;
+                            while c_idx + 3 < c_len {
+                                let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                check_cand_dup!(r0);
+                                check_cand_dup!(r1);
+                                check_cand_dup!(r2);
+                                check_cand_dup!(r3);
+                                c_idx += 4;
+                            }
+                            while !aborted && c_idx < c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
-                                let word_idx = r >> 6;
-                                let bit = 1u64 << (r & 63);
-                                let word = unsafe { seen.get_unchecked_mut(word_idx) };
-                                if (*word & bit) != 0 {
-                                    duplicates += 1;
-                                    let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
-                                    if (*word2 & bit) != 0 {
-                                        has_size_ge_3 = true;
-                                    } else {
-                                        *word2 |= bit;
-                                    }
-                                    if duplicates > max_allowed_duplicates {
-                                        aborted = true;
-                                        break;
-                                    }
-                                } else {
-                                    *word |= bit;
-                                }
+                                check_cand_dup!(r);
+                                c_idx += 1;
                             }
                             if aborted {
                                 min_val_found = min_val_found.min(best_val);
