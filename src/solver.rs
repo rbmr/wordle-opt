@@ -3718,6 +3718,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut seen = [0u64; M];
             let mut seen2 = [0u64; M];
+            let mut seen3 = [0u64; M];
             let mut has_size_ge_3 = false;
 
             let mut cand_idx = 0;
@@ -3737,6 +3738,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let word2_0 = unsafe { seen2.get_unchecked_mut(w0) };
                     if (*word2_0 & b0) != 0 {
                         has_size_ge_3 = true;
+                        let word3_0 = unsafe { seen3.get_unchecked_mut(w0) };
+                        *word3_0 |= b0;
                     } else {
                         *word2_0 |= b0;
                     }
@@ -3750,6 +3753,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let word2_1 = unsafe { seen2.get_unchecked_mut(w1) };
                     if (*word2_1 & b1) != 0 {
                         has_size_ge_3 = true;
+                        let word3_1 = unsafe { seen3.get_unchecked_mut(w1) };
+                        *word3_1 |= b1;
                     } else {
                         *word2_1 |= b1;
                     }
@@ -3771,6 +3776,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let word2 = unsafe { seen2.get_unchecked_mut(w) };
                     if (*word2 & b) != 0 {
                         has_size_ge_3 = true;
+                        let word3 = unsafe { seen3.get_unchecked_mut(w) };
+                        *word3 |= b;
                     } else {
                         *word2 |= b;
                     }
@@ -3804,33 +3811,44 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
 
             for m in 0..M {
-                let mut word2 = unsafe { *seen2.get_unchecked(m) };
-                while word2 != 0 {
-                    let bit_idx = word2.trailing_zeros() as usize;
+                let mut word3 = unsafe { *seen3.get_unchecked(m) };
+                while word3 != 0 {
+                    let bit_idx = word3.trailing_zeros() as usize;
                     let r = ((m << 6) | bit_idx) as u16;
-                    word2 &= word2 - 1;
+                    word3 &= word3 - 1;
 
                     let mut count = 0u16;
-                    for cand_idx in 0..c_len {
+                    let mut cand_idx = 0;
+                    while cand_idx + 3 < c_len {
+                        let r0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                        let r1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                        let r2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                        let r3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                        count += (r0 == r) as u16
+                            + (r1 == r) as u16
+                            + (r2 == r) as u16
+                            + (r3 == r) as u16;
+                        cand_idx += 4;
+                    }
+                    while cand_idx < c_len {
                         if unsafe { *r_buf_ptr.add(cand_idx) } == r {
                             count += 1;
                         }
+                        cand_idx += 1;
                     }
-                    if count > 2 {
-                        let p_len = count as usize;
-                        let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                        cost += lb - (2 * p_len - 1) as u32;
-                        unsafe {
-                            *eval_entries_ptr.add(num_eval) = EvalEntry {
-                                hash: 0,
-                                used_val: 0,
-                                r,
-                                count,
-                                is_exact: false,
-                            };
-                        }
-                        num_eval += 1;
+                    let p_len = count as usize;
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    cost += lb - (2 * p_len - 1) as u32;
+                    unsafe {
+                        *eval_entries_ptr.add(num_eval) = EvalEntry {
+                            hash: 0,
+                            used_val: 0,
+                            r,
+                            count,
+                            is_exact: false,
+                        };
                     }
+                    num_eval += 1;
                 }
             }
 
@@ -3843,11 +3861,36 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let entry = unsafe { &mut *eval_entries_ptr };
                 let target_r = entry.r;
                 let mut hash = 0u64;
-                for cand_idx in 0..c_len {
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r0 == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r1 == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r2 == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r3 == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
+                }
+                while cand_idx < c_len {
                     if unsafe { *r_buf_ptr.add(cand_idx) } == target_r {
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         hash ^= unsafe { *zobrist_ptr.add(c) };
                     }
+                    cand_idx += 1;
                 }
                 entry.hash = hash;
             } else if num_eval == 2 {
@@ -3857,7 +3900,43 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
                 let r1 = e1.r;
                 let mut h1 = 0u64;
-                for cand_idx in 0..c_len {
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r_1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r_0 == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_1 == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_2 == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_3 == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
+                }
+                while cand_idx < c_len {
                     let r = unsafe { *r_buf_ptr.add(cand_idx) };
                     if r == r0 {
                         let c = unsafe { *set_ptr.add(cand_idx) };
@@ -3866,6 +3945,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         h1 ^= unsafe { *zobrist_ptr.add(c) };
                     }
+                    cand_idx += 1;
                 }
                 e0.hash = h0;
                 e1.hash = h1;
