@@ -2747,6 +2747,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     continue;
                 }
+                let min_lb_cost = (2 * c_len - 1 + duplicates) as u32;
+                if min_lb_cost >= best_val && min_val_found <= min_lb_cost {
+                    let total_non_empty = c_len - duplicates;
+                    if total_non_empty > local_max_k {
+                        local_max_k = total_non_empty;
+                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                    }
+                    if min_k_needed > c_len {
+                        break;
+                    }
+                    continue;
+                }
                 let mut i = 0;
                 while i + 3 < cand_idx {
                     let c0 = unsafe { *set_ptr.add(i) };
@@ -5213,11 +5226,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     } else {
                         let mut cand_idx = 0;
-                        while cand_idx + 1 < c_len {
+                        while cand_idx + 3 < c_len {
                             let c0 = unsafe { *set_ptr.add(cand_idx) };
                             let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
                             let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
                             let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r_2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r_3 = unsafe { (*g_ptr.add(c3)).to_usize() };
                             if r_0 == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(c0) };
                             } else if r_0 == r1 {
@@ -5232,9 +5249,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r_1 == r2 {
                                 h2 ^= unsafe { *zobrist_ptr.add(c1) };
                             }
-                            cand_idx += 2;
+                            if r_2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if r_3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
                         }
-                        if cand_idx < c_len {
+                        while cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if r == r0 {
@@ -5244,6 +5275,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r == r2 {
                                 h2 ^= unsafe { *zobrist_ptr.add(c) };
                             }
+                            cand_idx += 1;
                         }
                     }
                     unsafe {
@@ -5363,11 +5395,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     } else {
                         let mut cand_idx = 0;
-                        while cand_idx + 1 < c_len {
+                        while cand_idx + 3 < c_len {
                             let c0 = unsafe { *set_ptr.add(cand_idx) };
                             let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
                             let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
                             let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r_2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r_3 = unsafe { (*g_ptr.add(c3)).to_usize() };
                             if r_0 == r0 {
                                 h0 ^= unsafe { *zobrist_ptr.add(c0) };
                             } else if r_0 == r1 {
@@ -5386,9 +5422,27 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r_1 == r3 {
                                 h3 ^= unsafe { *zobrist_ptr.add(c1) };
                             }
-                            cand_idx += 2;
+                            if r_2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if r_3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
                         }
-                        if cand_idx < c_len {
+                        while cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if r == r0 {
@@ -5400,6 +5454,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             } else if r == r3 {
                                 h3 ^= unsafe { *zobrist_ptr.add(c) };
                             }
+                            cand_idx += 1;
                         }
                     }
                     unsafe {
