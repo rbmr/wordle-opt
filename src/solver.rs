@@ -1340,7 +1340,8 @@ fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
                                     let v_seen = _mm_loadu_si128(seen_ptr as *const __m128i);
                                     let v_r = _mm_set1_epi8(r as i8);
                                     let cmp = _mm_cmpeq_epi8(v_r, v_seen);
-                                    let mask = (_mm_movemask_epi8(cmp) as u32) & ((1u32 << seen_len) - 1);
+                                    let mask =
+                                        (_mm_movemask_epi8(cmp) as u32) & ((1u32 << seen_len) - 1);
                                     if mask != 0 {
                                         collisions += 1;
                                         if collisions > max_collisions {
