@@ -1101,7 +1101,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `212073e` | pc01 | 2200 | 1 | optimal | 20.047s | 7477 | 2331 | 23617 | ~543MB | unroll candidate loops and add six-bucket evaluation branch in solver; pick 20.0s; cpu 318.3s; busy cores 15.9; states 23,617; guesses 598,989 (down from 599,801: -812 guesses); bounds pruned 1,961,574; equiv pruned 188,893,787; cache hits 2,430,158; validation OK |
 | 2026-11-10 | `212073e` | pc01 | 2340 | — | optimal | 23.495s (0.01h) | 8001 | 2478 | 26007 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-212073e); unroll candidate loops and add six-bucket evaluation branch in solver; build 23.495s; pick 23.3s; cpu 373.3s; busy cores 15.9 (root_guesses @ 15s: 7257); states 26,007 (down from 26,035: -28 states); guesses 751,327 (down from 753,611: -2,284 guesses); bounds pruned 2,086,876; equiv pruned 207,447,494; cache hits 3,485,717; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `212073e` | pc01 | 2340 | — | optimal --certify | 23.461s (0.01h) | 8001 | 2478 | 26155 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.461s (pick 23.4s, cpu 372.2s, busy cores 15.9); 1,326,101 solver facts; 591 gap refutations (7.329s); 633,421 claims (444,892 capacity, 188,529 expansion, 0 failures, 9,501,334 bytes); independent check verified optimal in 69.845s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `a225a24` | pc01 | 1000 | 1 | optimal | 2.597s | 3124 | 1049 | 820 | — | unroll candidate duplicate loops by four in solver phase one and two; pick 2.6s; cpu 41.0s; busy cores 15.8; states 820 (down from 824); guesses 15,086 (down from 15,097); bounds pruned 49,648; equiv pruned 5,044,598; cache hits 165,556; validation OK |
+| 2026-11-10 | `a225a24` | pc01 | 1600 | 1 | optimal | 8.185s | 5256 | 1681 | 3960 | — | unroll candidate duplicate loops by four in solver phase one and two; pick 8.1s; cpu 128.2s; busy cores 15.7; states 3,960; guesses 66,310; bounds pruned 314,088; equiv pruned 29,612,814; cache hits 354,058; validation OK |
+| 2026-11-10 | `a225a24` | pc01 | 2000 | 1 | optimal | 13.699s | 6723 | 2119 | 7761 | — | unroll candidate duplicate loops by four in solver phase one and two; pick 13.6s; cpu 215.9s (down from 217.3s); busy cores 15.8; states 7,761 (down from 7,789: -28 states); guesses 185,681 (down from 185,783: -102 guesses); bounds pruned 502,924; equiv pruned 59,540,511; cache hits 838,289; validation OK |
+| 2026-11-10 | `a225a24` | pc01 | 2200 | 1 | optimal | 19.904s | 7477 | 2331 | 23639 | ~543MB | unroll candidate duplicate loops by four in solver phase one and two; build 19.904s (down from 20.047s); pick 19.8s; cpu 315.8s (down from 318.3s); busy cores 15.9; states 23,639; guesses 600,196; bounds pruned 1,958,492; equiv pruned 188,939,363; cache hits 2,438,255; validation OK |
+| 2026-11-10 | `a225a24` | pc01 | 2340 | — | optimal | 23.319s (0.01h) | 8001 | 2478 | 26013 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-a225a24); unroll candidate duplicate loops by four in solver phase one and two; build 23.319s (down from 23.495s); pick 23.1s (down from 23.3s); cpu 370.5s (down from 373.3s); busy cores 15.9 (root_guesses @ 15s: 7417); states 26,013; guesses 751,811; bounds pruned 2,082,422; equiv pruned 207,754,845; cache hits 3,488,872; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `a225a24` | pc01 | 2340 | — | optimal --certify | 23.284s (0.01h) | 8001 | 2478 | 26202 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.284s (pick 23.2s, cpu 369.4s, busy cores 15.9); 1,327,484 solver facts; 590 gap refutations (7.322s); 632,473 claims (444,733 capacity, 187,740 expansion, 0 failures, 9,487,114 bytes); independent check verified optimal in 58.687s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `a225a24` rows evaluate unrolling candidate duplicate checking loops by four in solver Phase 1 and Phase 2:
+  - In `src/solver.rs` (`min_state_val_with_hash`):
+    - In Phase 1 candidate duplicate check when `M <= 4`, unrolled `0..cand_idx` and `(cand_idx + 1)..c_len` by 4 candidates per iteration with scoped `check_cand_dup!` macro, dispatching 4 independent memory loads before bitmask updates.
+    - In Phase 2 candidate duplicate check when `M <= 4`, unrolled `0..c_len` by 4 candidates per iteration across row pointers `c_ptrs_ptr` with scoped `check_cand_dup!` macro.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.597s** (cpu 41.0s, pick 2.6s, states 820 vs 824, guesses 15,086 vs 15,097, bounds pruned 49,648, cost 3124).
+    - `N=1600, seed=1`: **8.185s** (cpu 128.2s, pick 8.1s, states 3,960, guesses 66,310, bounds pruned 314,088, cost 5256).
+    - `N=2000, seed=1`: **13.699s** (cpu 215.9s down from 217.3s, pick 13.6s, states 7,761 vs 7,789 [-28 states], guesses 185,681 vs 185,783 [-102 guesses], bounds pruned 502,924, cost 6723).
+    - `N=2200, seed=1`: **19.904s** (cpu 315.8s down from 318.3s, pick 19.8s, states 23,639, guesses 600,196, bounds pruned 1,958,492, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-a225a24`): **23.319s** (cpu 370.5s down from 373.3s, pick 23.1s down from 23.3s, states 26,013, guesses 751,811, bounds pruned 2,082,422, equiv pruned 207,754,845, cache hits 3,488,872, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 125.24s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.88s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 297.22s (`test published_optimum_3158 ... ok`, `test published_optima ... ok`)
+      - `tt_audit` (`--features tt-audit`): 51.71s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 632,473 claims with 0 failures in 23.284s (cpu 369.4s), and independent `check` verified `3.93e11` response reads in 58.687s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `212073e` rows evaluate unrolling candidate loops and adding a six-bucket evaluation branch in solver:
   - In `src/solver.rs` (`min_state_val_with_hash`):
