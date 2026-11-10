@@ -252,7 +252,158 @@ fn sort_guess_tuples(tuples: &mut [GuessTuple]) {
         tuples[3] = t3;
         tuples[4] = t4;
         tuples[5] = t5;
-    } else if len > 6 && len <= 32 {
+    } else if len == 7 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        let mut t4 = tuples[4];
+        let mut t5 = tuples[5];
+        let mut t6 = tuples[6];
+
+        if t0 > t6 {
+            std::mem::swap(&mut t0, &mut t6);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t1 > t4 {
+            std::mem::swap(&mut t1, &mut t4);
+        }
+        if t3 > t6 {
+            std::mem::swap(&mut t3, &mut t6);
+        }
+
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t5 {
+            std::mem::swap(&mut t2, &mut t5);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t4 > t6 {
+            std::mem::swap(&mut t4, &mut t6);
+        }
+
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+        if t5 > t6 {
+            std::mem::swap(&mut t5, &mut t6);
+        }
+
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+        tuples[4] = t4;
+        tuples[5] = t5;
+        tuples[6] = t6;
+    } else if len == 8 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        let mut t4 = tuples[4];
+        let mut t5 = tuples[5];
+        let mut t6 = tuples[6];
+        let mut t7 = tuples[7];
+
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+        if t6 > t7 {
+            std::mem::swap(&mut t6, &mut t7);
+        }
+
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t1 > t3 {
+            std::mem::swap(&mut t1, &mut t3);
+        }
+        if t4 > t6 {
+            std::mem::swap(&mut t4, &mut t6);
+        }
+        if t5 > t7 {
+            std::mem::swap(&mut t5, &mut t7);
+        }
+
+        if t0 > t4 {
+            std::mem::swap(&mut t0, &mut t4);
+        }
+        if t1 > t5 {
+            std::mem::swap(&mut t1, &mut t5);
+        }
+        if t2 > t6 {
+            std::mem::swap(&mut t2, &mut t6);
+        }
+        if t3 > t7 {
+            std::mem::swap(&mut t3, &mut t7);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t5 > t6 {
+            std::mem::swap(&mut t5, &mut t6);
+        }
+
+        if t2 > t4 {
+            std::mem::swap(&mut t2, &mut t4);
+        }
+        if t3 > t5 {
+            std::mem::swap(&mut t3, &mut t5);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+        if t5 > t6 {
+            std::mem::swap(&mut t5, &mut t6);
+        }
+
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+        tuples[4] = t4;
+        tuples[5] = t5;
+        tuples[6] = t6;
+        tuples[7] = t7;
+    } else if len > 8 && len <= 32 {
         let ptr = tuples.as_mut_ptr();
         for j in 1..len {
             let key = unsafe { *ptr.add(j) };
@@ -7028,6 +7179,45 @@ mod solver_cache_tests {
                         q_val,
                         true_cost,
                         bucket
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_sort_guess_tuples_networks() {
+        fn permute(arr: &mut [usize], l: usize, r: usize, results: &mut Vec<Vec<usize>>) {
+            if l == r {
+                results.push(arr.to_vec());
+            } else {
+                for i in l..=r {
+                    arr.swap(l, i);
+                    permute(arr, l + 1, r, results);
+                    arr.swap(l, i);
+                }
+            }
+        }
+
+        for n in 2..=8 {
+            let mut base: Vec<usize> = (0..n).collect();
+            let mut perms = Vec::new();
+            permute(&mut base, 0, n - 1, &mut perms);
+            for p in perms {
+                let mut tuples: Vec<GuessTuple> = p
+                    .iter()
+                    .map(|&val| GuessTuple {
+                        lb: val as u32,
+                        exp: 0,
+                        g: 0,
+                    })
+                    .collect();
+                sort_guess_tuples(&mut tuples);
+                for i in 0..n {
+                    assert_eq!(
+                        tuples[i].lb, i as u32,
+                        "Sorting network failed for len {}",
+                        n
                     );
                 }
             }
