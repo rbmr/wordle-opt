@@ -3224,20 +3224,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let p_len = entry.count as usize;
                     let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
                     cost += lb - (2 * p_len - 1) as u32;
-                    if cost >= cutoff {
-                        self.local_metrics.pruned_by_bounds += 1;
-                        return cost;
-                    }
-                    let mut hash = 0u64;
-                    for cand_idx in 0..c_len {
-                        if unsafe { *r_buf_ptr.add(cand_idx) } == entry.r {
-                            let c = unsafe { *set_ptr.add(cand_idx) };
-                            hash ^= unsafe { *zobrist_ptr.add(c) };
-                        }
-                    }
                     unsafe {
                         *eval_entries_ptr.add(num_eval) = EvalEntry {
-                            hash,
+                            hash: 0,
                             used_val: 0,
                             r: entry.r,
                             count: entry.count,
@@ -3248,8 +3237,58 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+
             if num_eval == 0 {
                 return cost;
+            }
+
+            if num_eval == 1 {
+                let entry = unsafe { &mut *eval_entries_ptr };
+                let target_r = entry.r;
+                let mut hash = 0u64;
+                for cand_idx in 0..c_len {
+                    if unsafe { *r_buf_ptr.add(cand_idx) } == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                entry.hash = hash;
+            } else if num_eval == 2 {
+                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
+                let r0 = e0.r;
+                let mut h0 = 0u64;
+                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
+                let r1 = e1.r;
+                let mut h1 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                e0.hash = h0;
+                e1.hash = h1;
+            } else {
+                for i in 0..num_eval {
+                    let entry = unsafe { &mut *eval_entries_ptr.add(i) };
+                    let target_r = entry.r;
+                    let mut hash = 0u64;
+                    for cand_idx in 0..c_len {
+                        if unsafe { *r_buf_ptr.add(cand_idx) } == target_r {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            hash ^= unsafe { *zobrist_ptr.add(c) };
+                        }
+                    }
+                    entry.hash = hash;
+                }
             }
 
             if num_eval == 2 {
