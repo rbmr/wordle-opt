@@ -41,10 +41,10 @@ use crate::matrix::ResponseMatrix;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// The total number of ternary responses (`3^5`).
+/// The total number of ternary responses for 5-letter words (`3^5`).
 pub const NUM_RESPONSES: usize = 243;
-/// The index of the all-green ("win") response.
-pub const WIN_RESPONSE: u8 = Response::WIN.0;
+/// The index of the all-green ("win") response for 5-letter words.
+pub const WIN_RESPONSE: u16 = Response::WIN.0;
 
 /// Format tags written into the JSON headers, and checked on load.
 pub const FORMAT_READABLE: &str = "wordle-policy-tree";
@@ -83,12 +83,12 @@ pub fn dictionary_hash(dict: &Dictionary) -> u64 {
     feed(b"wordle-opt/policy-dictionary/v1\n");
     feed(format!("guesses={}\n", dict.guesses.len()).as_bytes());
     for w in &dict.guesses {
-        feed(&w.0);
+        feed(w.as_bytes());
         feed(b"\n");
     }
     feed(format!("candidates={}\n", dict.candidates.len()).as_bytes());
     for w in &dict.candidates {
-        feed(&w.0);
+        feed(w.as_bytes());
         feed(b"\n");
     }
     h
@@ -114,12 +114,12 @@ pub fn parse_hash_hex(s: &str) -> Result<u64, PolicyError> {
 // Response <-> string
 // ---------------------------------------------------------------------------
 
-/// Renders a response index as its 5-character `b`/`g`/`y` string (position 0
+/// Renders a response index as its `len`-character `b`/`g`/`y` string (position 0
 /// first). `b`=black, `g`=green, `y`=yellow.
-pub fn response_to_string(r: u8) -> String {
+pub fn response_to_string_len(r: u16, len: usize) -> String {
     let mut v = r;
-    let mut s = String::with_capacity(5);
-    for _ in 0..5 {
+    let mut s = String::with_capacity(len);
+    for _ in 0..len {
         s.push(match v % 3 {
             0 => 'b',
             1 => 'g',
@@ -130,23 +130,26 @@ pub fn response_to_string(r: u8) -> String {
     s
 }
 
+/// Renders a response index as its 5-character `b`/`g`/`y` string (position 0
+/// first). `b`=black, `g`=green, `y`=yellow.
+pub fn response_to_string(r: u16) -> String {
+    response_to_string_len(r, 5)
+}
+
 /// Inverse of [`response_to_string`].
-pub fn response_from_string(s: &str) -> Option<u8> {
+pub fn response_from_string(s: &str) -> Option<u16> {
     let bytes = s.as_bytes();
-    if bytes.len() != 5 {
-        return None;
-    }
-    let mut r = 0u8;
-    let mut mul = 1u8;
+    let mut r = 0u16;
+    let mut mul = 1u16;
     for &b in bytes {
-        let d = match b {
+        let d: u16 = match b {
             b'b' | b'B' => 0,
             b'g' | b'G' => 1,
             b'y' | b'Y' => 2,
             _ => return None,
         };
-        r += d * mul;
-        mul *= 3;
+        r = r.checked_add(d.checked_mul(mul)?)?;
+        mul = mul.checked_mul(3)?;
     }
     Some(r)
 }
@@ -169,7 +172,7 @@ pub struct PolicyNode {
 /// One edge: a possible non-win response and the child it leads to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PolicyEdge {
-    pub response: u8,
+    pub response: u16,
     pub child: u32,
 }
 
@@ -180,6 +183,7 @@ pub struct PolicyTree {
     pub dictionary_hash: u64,
     pub num_guesses: u32,
     pub num_candidates: u32,
+    pub word_len: usize,
     /// Always 0 in the current builder, but stored explicitly so the format
     /// doesn't assume it.
     pub root: u32,
@@ -195,6 +199,7 @@ impl PolicyTree {
             dictionary_hash,
             num_guesses: dict.guesses.len() as u32,
             num_candidates: dict.candidates.len() as u32,
+            word_len: dict.word_len,
             root: 0,
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -239,6 +244,7 @@ impl PolicyTree {
                     self.edges.len()
                 )));
             }
+            let win = Response::win_for_len(self.word_len).0;
             for e in &self.edges[n.edge_start as usize..end] {
                 if e.child as usize >= self.nodes.len() {
                     return Err(PolicyError::Shape(format!(
@@ -246,7 +252,7 @@ impl PolicyTree {
                         e.child
                     )));
                 }
-                if e.response == WIN_RESPONSE {
+                if e.response == win {
                     return Err(PolicyError::Shape(format!(
                         "node {i}: the win response must be a leaf, never an edge"
                     )));
@@ -303,7 +309,7 @@ impl PolicyTree {
         for e in &self.edges[n.edge_start as usize..(n.edge_start as usize + n.edge_count as usize)]
         {
             children.insert(
-                response_to_string(e.response),
+                response_to_string_len(e.response, dict.word_len),
                 self.readable_node(e.child, dict, depth + 1)?,
             );
         }
@@ -374,17 +380,23 @@ impl ReadableTreeFile {
     /// Reconstructs a `Dictionary` from the embedded word lists. The lists are
     /// stored sorted, so the resulting indices are the tree's indices.
     ///
-    /// The engine only supports 5-letter Wordle words (`core::Word` is
-    /// `[u8; 5]`), so a tree whose words have another length is rejected with a
-    /// clear error rather than panicking.
+    /// Reconstructs a `Dictionary` from the embedded word lists. The lists are
+    /// stored sorted, so the resulting indices are the tree's indices.
     pub fn embedded_dictionary(&self) -> Result<Dictionary, PolicyError> {
+        let mut expected_len = None;
         for w in self.guesses.iter().chain(self.candidates.iter()) {
-            if w.len() != 5 {
-                return Err(PolicyError::BadHeader(format!(
-                    "this build only supports 5-letter dictionaries; tree contains a {}-letter word {:?}",
-                    w.len(),
-                    w
-                )));
+            match expected_len {
+                None => expected_len = Some(w.len()),
+                Some(exp) => {
+                    if w.len() != exp {
+                        return Err(PolicyError::BadHeader(format!(
+                            "inconsistent word length in embedded dictionary: expected {}, got {} in {:?}",
+                            exp,
+                            w.len(),
+                            w
+                        )));
+                    }
+                }
             }
         }
         let guesses = self
@@ -432,7 +444,7 @@ impl ReadableTreeFile {
 
         // `children[id]` collects (response, child) pairs, kept in ascending
         // response order because we iterate the BTreeMap in key order.
-        let mut children: Vec<Vec<(u8, u32)>> = Vec::new();
+        let mut children: Vec<Vec<(u16, u32)>> = Vec::new();
         tree.nodes.push(PolicyNode {
             guess: lookup(&self.root)?,
             edge_start: 0,
@@ -446,7 +458,7 @@ impl ReadableTreeFile {
             // so lexicographic); the arena orders by response *index* (the
             // little-endian base-3 value). Re-sort to the numeric order the
             // builder uses so the two round-trip to identical bytes.
-            let mut kids: Vec<(u8, &ReadableNode)> = Vec::with_capacity(node.children.len());
+            let mut kids: Vec<(u16, &ReadableNode)> = Vec::with_capacity(node.children.len());
             for (k, child) in node.children.iter() {
                 let r = response_from_string(k)
                     .ok_or_else(|| PolicyError::Shape(format!("bad response key {k:?}")))?;
@@ -645,21 +657,25 @@ impl PolicyTree {
                 )));
             }
 
+            let word_len = dict.word_len;
+            let win = Response::win_for_len(word_len).0;
+            let num_responses = 3usize.pow(word_len as u32);
+
             // Possible non-win responses, and the candidate set for each.
-            let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); NUM_RESPONSES];
+            let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); num_responses];
             for &c in &candidates {
                 buckets[matrix.get(guess, c).0 as usize].push(c);
             }
-            let mut possible: Vec<u8> = Vec::new();
-            for r in 0..NUM_RESPONSES {
-                if r != WIN_RESPONSE as usize && !buckets[r].is_empty() {
-                    possible.push(r as u8);
+            let mut possible: Vec<u16> = Vec::new();
+            for r in 0..num_responses {
+                if r != win as usize && !buckets[r].is_empty() {
+                    possible.push(r as u16);
                 }
             }
 
             let actual_edges = &self.edges
                 [node.edge_start as usize..(node.edge_start as usize + node.edge_count as usize)];
-            let mut actual: Vec<u8> = actual_edges.iter().map(|e| e.response).collect();
+            let mut actual: Vec<u16> = actual_edges.iter().map(|e| e.response).collect();
             actual.sort_unstable();
 
             if actual != possible {
@@ -667,12 +683,12 @@ impl PolicyTree {
                 let missing: Vec<String> = possible
                     .iter()
                     .filter(|r| !actual.contains(r))
-                    .map(|r| response_to_string(*r))
+                    .map(|r| response_to_string_len(*r, word_len))
                     .collect();
                 let extra: Vec<String> = actual
                     .iter()
                     .filter(|r| !possible.contains(r))
-                    .map(|r| response_to_string(*r))
+                    .map(|r| response_to_string_len(*r, word_len))
                     .collect();
                 return Err(PolicyError::Shape(format!(
                     "node {idx} (guess {:?}, {} candidates): edge/response mismatch - missing {:?}, impossible/duplicate {:?}",
@@ -686,7 +702,7 @@ impl PolicyTree {
             // A node wins the candidate equal to its guess, if still present.
             // This can happen at an internal node, so it is counted separately
             // from structural leaves.
-            let wins_here = buckets[WIN_RESPONSE as usize].len() as u64;
+            let wins_here = buckets[win as usize].len() as u64;
             report.wins += wins_here;
             if wins_here > 0 {
                 report.total_cost += wins_here * (depth as u64 + 1);

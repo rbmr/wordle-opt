@@ -24,6 +24,7 @@ const VALUE_BITS: u32 = 18;
 const VALUE_MASK: u64 = (1 << VALUE_BITS) - 1; // 0x3FFFF
 const EXACT_BIT: u64 = 1 << VALUE_BITS; // bit 18
 const HASH_SHIFT: u32 = VALUE_BITS + 1; // 19
+const VALID_HASH_BIT: u64 = 1 << (63 - HASH_SHIFT); // bit 44 of hash45 (bit 63 of packed entry)
 
 impl GlobalCache {
     pub fn new(size: usize) -> Self {
@@ -32,8 +33,41 @@ impl GlobalCache {
             "GlobalCache size must be a power of two, got {}",
             size
         );
-        let mut entries = Vec::with_capacity(size * 2);
-        entries.resize_with(size * 2, || AtomicU64::new(0));
+        let len = size * 2;
+        let mut entries: Vec<std::mem::MaybeUninit<AtomicU64>> = Vec::with_capacity(len);
+        // SAFETY: `MaybeUninit<AtomicU64>` does not require initialization before `set_len`.
+        unsafe {
+            entries.set_len(len);
+        }
+        // Fault and zero pages in parallel across Rayon threads in contiguous 2 MB
+        // (262,144 AtomicU64) chunks so the OS backs large tables with Transparent Huge
+        // Pages (THP) up front without single-threaded page-faulting latency or runtime
+        // mmap_lock contention during the tree search.
+        const CHUNK_ELEMS: usize = 262_144;
+        if len >= CHUNK_ELEMS * 2 {
+            use rayon::prelude::*;
+            entries.par_chunks_mut(CHUNK_ELEMS).for_each(|chunk| {
+                // SAFETY: `chunk` is a valid mutable slice of `MaybeUninit<AtomicU64>`, and
+                // all-zero bytes is a valid representation of `AtomicU64::new(0)`.
+                unsafe {
+                    std::ptr::write_bytes(chunk.as_mut_ptr(), 0, chunk.len());
+                }
+            });
+        } else {
+            unsafe {
+                std::ptr::write_bytes(entries.as_mut_ptr(), 0, len);
+            }
+        }
+        let mut entries = std::mem::ManuallyDrop::new(entries);
+        // SAFETY: Every element of `entries` has been initialized to zero, and
+        // `MaybeUninit<AtomicU64>` has the exact same layout as `AtomicU64`.
+        let entries = unsafe {
+            Vec::from_raw_parts(
+                entries.as_mut_ptr() as *mut AtomicU64,
+                entries.len(),
+                entries.capacity(),
+            )
+        };
         let mask = size - 1;
         Self { entries, mask }
     }
@@ -47,7 +81,7 @@ impl GlobalCache {
             VALUE_BITS
         );
         let base_index = (full_hash as usize & self.mask) << 1;
-        let hash45 = full_hash >> HASH_SHIFT;
+        let hash45 = (full_hash >> HASH_SHIFT) | VALID_HASH_BIT;
         let mut packed = (hash45 << HASH_SHIFT) | (value as u64 & VALUE_MASK);
         if is_exact {
             packed |= EXACT_BIT;
@@ -125,14 +159,29 @@ impl GlobalCache {
         self.insert(full_hash, value, is_exact);
     }
 
+    /// Prefetch the transposition table bucket corresponding to `full_hash` into CPU cache.
+    #[inline(always)]
+    pub fn prefetch(&self, full_hash: u64) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let base_index = (full_hash as usize & self.mask) << 1;
+            let ptr = self.entries.as_ptr().add(base_index) as *const i8;
+            core::arch::x86_64::_mm_prefetch(ptr, core::arch::x86_64::_MM_HINT_T0);
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let _ = full_hash;
+        }
+    }
+
     #[inline]
     pub fn get(&self, full_hash: u64) -> Option<(u32, bool)> {
         let base_index = (full_hash as usize & self.mask) << 1;
-        let hash45 = full_hash >> HASH_SHIFT;
+        let hash45 = (full_hash >> HASH_SHIFT) | VALID_HASH_BIT;
 
         // Check slot 1 (depth-preferred) first, since harder subtrees are queried more often.
         let packed1 = unsafe { self.entries.get_unchecked(base_index + 1) }.load(Ordering::Relaxed);
-        if packed1 != 0 && (packed1 >> HASH_SHIFT) == hash45 {
+        if (packed1 >> HASH_SHIFT) == hash45 {
             let is_exact = (packed1 & EXACT_BIT) != 0;
             let value = (packed1 & VALUE_MASK) as u32;
             return Some((value, is_exact));
@@ -140,7 +189,7 @@ impl GlobalCache {
 
         // Check slot 0 (always-replace)
         let packed0 = unsafe { self.entries.get_unchecked(base_index) }.load(Ordering::Relaxed);
-        if packed0 != 0 && (packed0 >> HASH_SHIFT) == hash45 {
+        if (packed0 >> HASH_SHIFT) == hash45 {
             let is_exact = (packed0 & EXACT_BIT) != 0;
             let value = (packed0 & VALUE_MASK) as u32;
             return Some((value, is_exact));

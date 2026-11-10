@@ -1,5 +1,5 @@
 #![allow(clippy::needless_range_loop)]
-use crate::core::Response;
+use crate::core::{Response, ResponseElem};
 use crate::dict::Dictionary;
 use crate::heuristic;
 use crate::matrix::ResponseMatrix;
@@ -13,8 +13,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 /// The hash key represents the `set_hash` (a 64-bit Zobrist hash of the exact candidate set).
 /// The mapped value is the exact deduplicated projection of all valid guesses,
 /// deduplicated by a Zobrist hash of the responses they produce.
-pub type EquivCache =
-    [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<Vec<u64>>>>; 1024];
+pub type EquivCache = [std::sync::RwLock<rustc_hash::FxHashMap<u64, std::sync::Arc<[u64]>>>; 1024];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CandidateSet(pub Vec<usize>);
@@ -43,6 +42,19 @@ pub struct Metrics {
     /// (root or per-node, for progress reporting). In a policy-tree build this
     /// makes the dominant root scan's progress readable as a fraction.
     pub root_guesses_done: AtomicUsize,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct LocalMetrics {
+    pub states_evaluated: usize,
+    pub max_depth: usize,
+    pub guesses_evaluated: usize,
+    pub pruned_by_bounds: usize,
+    pub pruned_by_equivalence: usize,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub equiv_cache_hits: usize,
+    pub equiv_cache_misses: usize,
 }
 
 impl Default for Metrics {
@@ -84,210 +96,7390 @@ pub fn set_equiv_cache_cap(entries_per_shard: usize) {
     EQUIV_CACHE_CAP.store(entries_per_shard.max(1024), Ordering::Relaxed);
 }
 
-pub struct SolverScratch {
-    pub scratch_is_in_set: [Vec<u64>; 32],
-    pub scratch_sorted_sets: [Vec<usize>; 32],
-    pub scratch_phase1_tuples: [Vec<(usize, u32, u32, usize)>; 32],
-    pub scratch_phase2_tuples: [Vec<(usize, u32, u32, usize)>; 32],
-    pub scratch_hash_table: [Vec<u64>; 32],
-    pub scratch_added_indices: [Vec<usize>; 32],
-    pub scratch_projs: [Vec<u64>; 32],
-    pub scratch_active_bits: [Vec<u64>; 32],
-    pub scratch_guess_counts: [[u16; 243]; 32],
-    pub scratch_guess_hashes: [[u64; 243]; 32],
-    pub scratch_guess_p_lbs: [[u32; 243]; 32],
-    pub scratch_guess_child_max_ks: [[u16; 243]; 32],
+/// Maximum number of ternary responses supported (3^7 = 2187).
+pub const MAX_RESPONSES: usize = 2187;
+
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GuessTuple {
+    pub lb: u32,
+    pub exp: u32,
+    pub g: u32,
 }
 
-impl SolverScratch {
-    /// Grows the guess-indexed buffers to fit a dictionary of `num_guesses`.
-    ///
-    /// The scratch is pooled per thread and outlives any one solve, so a thread
-    /// can meet a dictionary with more guesses than the one the scratch was
-    /// first sized for (several solves in one process, or a guess list larger
-    /// than the bundled 14,855). These buffers are written through unchecked
-    /// indexing, so they must be sized here, before any use. Buffers are only
-    /// ever grown, and each is all-zero between uses, so growing with zeros
-    /// keeps that invariant.
-    fn fit_dictionary(&mut self, num_guesses: usize) {
-        let words = num_guesses.div_ceil(64);
-        // The projection table holds at most 243 useless-guess sentinels plus
-        // one entry per guess, and is kept at most half full.
-        let table_len = ((num_guesses + 243) * 2).next_power_of_two().max(32768);
-        for d in 0..32 {
-            if self.scratch_is_in_set[d].len() < words {
-                self.scratch_is_in_set[d].resize(words, 0);
+#[derive(Clone, Copy)]
+struct EvalEntry {
+    hash: u64,
+    used_val: u32,
+    r: u16,
+    count: u16,
+    is_exact: bool,
+}
+
+#[inline]
+fn sort_guess_tuples(tuples: &mut [GuessTuple]) {
+    let len = tuples.len();
+    if len == 2 {
+        let t0 = tuples[0];
+        let t1 = tuples[1];
+        if t0 > t1 {
+            tuples[0] = t1;
+            tuples[1] = t0;
+        }
+    } else if len == 3 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+    } else if len == 4 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t1 > t3 {
+            std::mem::swap(&mut t1, &mut t3);
+        }
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+    } else if len == 5 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        let mut t4 = tuples[4];
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+        if t2 > t4 {
+            std::mem::swap(&mut t2, &mut t4);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t1 > t4 {
+            std::mem::swap(&mut t1, &mut t4);
+        }
+        if t0 > t3 {
+            std::mem::swap(&mut t0, &mut t3);
+        }
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t1 > t3 {
+            std::mem::swap(&mut t1, &mut t3);
+        }
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+        tuples[4] = t4;
+    } else if len == 6 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        let mut t4 = tuples[4];
+        let mut t5 = tuples[5];
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t3 > t5 {
+            std::mem::swap(&mut t3, &mut t5);
+        }
+        if t1 > t4 {
+            std::mem::swap(&mut t1, &mut t4);
+        }
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+        tuples[4] = t4;
+        tuples[5] = t5;
+    } else if len == 7 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        let mut t4 = tuples[4];
+        let mut t5 = tuples[5];
+        let mut t6 = tuples[6];
+
+        if t0 > t6 {
+            std::mem::swap(&mut t0, &mut t6);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t1 > t4 {
+            std::mem::swap(&mut t1, &mut t4);
+        }
+        if t3 > t6 {
+            std::mem::swap(&mut t3, &mut t6);
+        }
+
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t5 {
+            std::mem::swap(&mut t2, &mut t5);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t4 > t6 {
+            std::mem::swap(&mut t4, &mut t6);
+        }
+
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+        if t5 > t6 {
+            std::mem::swap(&mut t5, &mut t6);
+        }
+
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+        tuples[4] = t4;
+        tuples[5] = t5;
+        tuples[6] = t6;
+    } else if len == 8 {
+        let mut t0 = tuples[0];
+        let mut t1 = tuples[1];
+        let mut t2 = tuples[2];
+        let mut t3 = tuples[3];
+        let mut t4 = tuples[4];
+        let mut t5 = tuples[5];
+        let mut t6 = tuples[6];
+        let mut t7 = tuples[7];
+
+        if t0 > t1 {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+        if t2 > t3 {
+            std::mem::swap(&mut t2, &mut t3);
+        }
+        if t4 > t5 {
+            std::mem::swap(&mut t4, &mut t5);
+        }
+        if t6 > t7 {
+            std::mem::swap(&mut t6, &mut t7);
+        }
+
+        if t0 > t2 {
+            std::mem::swap(&mut t0, &mut t2);
+        }
+        if t1 > t3 {
+            std::mem::swap(&mut t1, &mut t3);
+        }
+        if t4 > t6 {
+            std::mem::swap(&mut t4, &mut t6);
+        }
+        if t5 > t7 {
+            std::mem::swap(&mut t5, &mut t7);
+        }
+
+        if t0 > t4 {
+            std::mem::swap(&mut t0, &mut t4);
+        }
+        if t1 > t5 {
+            std::mem::swap(&mut t1, &mut t5);
+        }
+        if t2 > t6 {
+            std::mem::swap(&mut t2, &mut t6);
+        }
+        if t3 > t7 {
+            std::mem::swap(&mut t3, &mut t7);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t5 > t6 {
+            std::mem::swap(&mut t5, &mut t6);
+        }
+
+        if t2 > t4 {
+            std::mem::swap(&mut t2, &mut t4);
+        }
+        if t3 > t5 {
+            std::mem::swap(&mut t3, &mut t5);
+        }
+
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        if t3 > t4 {
+            std::mem::swap(&mut t3, &mut t4);
+        }
+        if t5 > t6 {
+            std::mem::swap(&mut t5, &mut t6);
+        }
+
+        tuples[0] = t0;
+        tuples[1] = t1;
+        tuples[2] = t2;
+        tuples[3] = t3;
+        tuples[4] = t4;
+        tuples[5] = t5;
+        tuples[6] = t6;
+        tuples[7] = t7;
+    } else if len > 8 && len <= 32 {
+        let ptr = tuples.as_mut_ptr();
+        for j in 1..len {
+            let key = unsafe { *ptr.add(j) };
+            let mut k = j;
+            while k > 0 {
+                let prev = unsafe { *ptr.add(k - 1) };
+                if prev > key {
+                    unsafe {
+                        *ptr.add(k) = prev;
+                    }
+                    k -= 1;
+                } else {
+                    break;
+                }
             }
-            if self.scratch_projs[d].len() < num_guesses {
-                self.scratch_projs[d].resize(num_guesses, 0);
+            unsafe {
+                *ptr.add(k) = key;
             }
-            if self.scratch_hash_table[d].len() < table_len {
-                self.scratch_hash_table[d].resize(table_len, 0);
+        }
+    } else if len > 32 {
+        tuples.sort_unstable();
+    }
+}
+
+macro_rules! eval_buckets_n {
+    ($c_len:expr, $rem_total:expr, $base_exp:expr, $idx_ptr:expr, $cnt_ptr:expr, $cap_ptr:expr, $last:literal, [$($i:literal : $r:ident : $c:ident),+]) => {{
+        $(
+            let $r = *$idx_ptr.add($i) as usize;
+            let $c = *$cnt_ptr.add($r) as u32;
+        )+
+        let r_last = *$idx_ptr.add($last) as usize;
+        $(
+            *$cnt_ptr.add($r) = 0;
+        )+
+        *$cnt_ptr.add(r_last) = 0;
+        let c_last = $rem_total $( - $c )+;
+        (
+            $base_exp $( + $c * $c )+ + c_last * c_last,
+            $c_len $( + *$cap_ptr.add($c as usize) )+ + *$cap_ptr.add(c_last as usize),
+        )
+    }};
+}
+
+unsafe fn eval_non_empty_buckets_5_plus(
+    c_len: u32,
+    rem_total: u32,
+    base_exp: u32,
+    num_non_empty: usize,
+    non_empty_indices_ptr: *const u16,
+    counts_ptr: *mut u16,
+    parent_cap_bounds_ptr: *const u32,
+) -> (u32, u32) {
+    unsafe {
+        match num_non_empty {
+            5 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 4, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3])
+            }
+            6 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 5, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4])
+            }
+            7 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 6, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5])
+            }
+            8 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 7, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6])
+            }
+            9 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 8, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7])
+            }
+            10 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 9, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8])
+            }
+            11 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 10, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9])
+            }
+            12 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 11, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10])
+            }
+            13 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 12, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10, 11:r11:c11])
+            }
+            14 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 13, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10, 11:r11:c11, 12:r12:c12])
+            }
+            15 => {
+                eval_buckets_n!(c_len, rem_total, base_exp, non_empty_indices_ptr, counts_ptr, parent_cap_bounds_ptr, 14, [0:r0:c0, 1:r1:c1, 2:r2:c2, 3:r3:c3, 4:r4:c4, 5:r5:c5, 6:r6:c6, 7:r7:c7, 8:r8:c8, 9:r9:c9, 10:r10:c10, 11:r11:c11, 12:r12:c12, 13:r13:c13])
+            }
+            _ => {
+                let mut exp = base_exp;
+                let mut lb = c_len;
+                let mut i = 0usize;
+                while i + 3 < num_non_empty {
+                    let r0 = *non_empty_indices_ptr.add(i) as usize;
+                    let r1 = *non_empty_indices_ptr.add(i + 1) as usize;
+                    let r2 = *non_empty_indices_ptr.add(i + 2) as usize;
+                    let r3 = *non_empty_indices_ptr.add(i + 3) as usize;
+                    let c0 = *counts_ptr.add(r0) as u32;
+                    let c1 = *counts_ptr.add(r1) as u32;
+                    let c2 = *counts_ptr.add(r2) as u32;
+                    let c3 = *counts_ptr.add(r3) as u32;
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                    exp += c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3;
+                    lb += *parent_cap_bounds_ptr.add(c0 as usize)
+                        + *parent_cap_bounds_ptr.add(c1 as usize)
+                        + *parent_cap_bounds_ptr.add(c2 as usize)
+                        + *parent_cap_bounds_ptr.add(c3 as usize);
+                    i += 4;
+                }
+                while i < num_non_empty {
+                    let r_idx = *non_empty_indices_ptr.add(i) as usize;
+                    let count = *counts_ptr.add(r_idx) as u32;
+                    *counts_ptr.add(r_idx) = 0;
+                    exp += count * count;
+                    lb += *parent_cap_bounds_ptr.add(count as usize);
+                    i += 1;
+                }
+                (exp, lb)
             }
         }
     }
 }
 
-thread_local! {
-    static THREAD_SCRATCH:std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
+pub struct SolverScratch {
+    pub scratch_is_in_set: [Vec<u64>; 32],
+    pub scratch_sorted_sets: [Vec<usize>; 32],
+    pub scratch_phase1_tuples: [Vec<GuessTuple>; 32],
+    pub scratch_phase2_tuples: [Vec<GuessTuple>; 32],
+    pub scratch_hash_table: [Vec<u64>; 32],
+    pub scratch_added_indices: [Vec<usize>; 32],
+    pub scratch_active_bits: [Vec<u64>; 32],
+    pub scratch_guess_counts: [Vec<u16>; 32],
+    pub scratch_guess_hashes: [Vec<u64>; 32],
+    pub scratch_guess_p_lbs: [Vec<u32>; 32],
+    pub scratch_guess_child_max_ks: [Vec<u16>; 32],
+    pub scratch_state_counts: Vec<u16>,
 }
 
-/// The optimal Wordle solver using Branch and Bound.
-///
-/// Implements aggressive search space pruning through:
-/// - Exact capacity lower bounds (see `heuristic::capacity_bound`)
-/// - Expected-remaining-candidate guess ordering heuristic
-/// - Equivalence-class guess projection (skips guesses that are
-///   indistinguishable given the current candidate set)
-/// - A lock-free atomic transposition table (`GlobalCache`) for subtree memoization
-pub struct Solver<'a> {
+impl SolverScratch {
+    pub fn new(num_guesses: usize, num_responses: usize) -> Self {
+        let mut s = Self {
+            scratch_is_in_set: std::array::from_fn(|_| Vec::new()),
+            scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
+            scratch_phase1_tuples: std::array::from_fn(|_| Vec::with_capacity(40)),
+            scratch_phase2_tuples: std::array::from_fn(|_| Vec::with_capacity(num_guesses)),
+            scratch_hash_table: std::array::from_fn(|_| Vec::new()),
+            scratch_added_indices: std::array::from_fn(|_| Vec::new()),
+            scratch_active_bits: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_counts: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_hashes: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_p_lbs: std::array::from_fn(|_| Vec::new()),
+            scratch_guess_child_max_ks: std::array::from_fn(|_| Vec::new()),
+            scratch_state_counts: Vec::new(),
+        };
+        s.fit_dictionary(num_guesses, num_responses);
+        s
+    }
+
+    /// Grows the buffers to fit a dictionary of `num_guesses` and response domain `num_responses`.
+    fn fit_dictionary(&mut self, num_guesses: usize, num_responses: usize) {
+        let words = num_guesses.div_ceil(64);
+        let table_len = ((num_guesses + num_responses) * 2)
+            .next_power_of_two()
+            .max(32768);
+        for d in 0..32 {
+            if self.scratch_phase1_tuples[d].capacity() < 40 {
+                self.scratch_phase1_tuples[d].reserve(40);
+            }
+            if self.scratch_phase2_tuples[d].capacity() < num_guesses {
+                self.scratch_phase2_tuples[d].reserve(num_guesses);
+            }
+            if self.scratch_is_in_set[d].len() < words {
+                self.scratch_is_in_set[d].resize(words, 0);
+            }
+            if self.scratch_sorted_sets[d].len() < num_guesses {
+                self.scratch_sorted_sets[d].resize(num_guesses, 0);
+            }
+            if self.scratch_hash_table[d].len() < table_len {
+                self.scratch_hash_table[d].resize(table_len, 0);
+            }
+            if self.scratch_added_indices[d].len() < num_guesses + num_responses {
+                self.scratch_added_indices[d].resize(num_guesses + num_responses, 0);
+            }
+            if self.scratch_active_bits[d].len() < words {
+                self.scratch_active_bits[d].resize(words, 0);
+            }
+            if self.scratch_guess_counts[d].len() < num_responses {
+                self.scratch_guess_counts[d].resize(num_responses, 0);
+            }
+            if self.scratch_guess_hashes[d].len() < num_responses {
+                self.scratch_guess_hashes[d].resize(num_responses, 0);
+            }
+            if self.scratch_guess_p_lbs[d].len() < num_responses {
+                self.scratch_guess_p_lbs[d].resize(num_responses, 0);
+            }
+            if self.scratch_guess_child_max_ks[d].len() < num_responses {
+                self.scratch_guess_child_max_ks[d].resize(num_responses, 0);
+            }
+        }
+        if self.scratch_state_counts.len() < num_responses {
+            self.scratch_state_counts.resize(num_responses, 0);
+        }
+    }
+}
+
+thread_local! {
+    static THREAD_SCRATCH: std::cell::RefCell<Option<Box<SolverScratch>>> = const { std::cell::RefCell::new(None) };
+}
+
+enum EquivState {
+    Uncomputed {
+        set_hash: u64,
+        parent_ptr: *const [u64],
+    },
+    Ready(*const [u64]),
+    Cached(std::sync::Arc<[u64]>),
+}
+
+/// Specialized solver for a concrete word length with compile-time response parameters:
+/// - `R`: Total response count (3^word_len)
+/// - `M`: Bitmask u64 words count (div_ceil(R, 64))
+/// - `WIN`: Response code for the all-green win response
+/// - `Elem`: Storage element type (`u8` for len <= 5, `Response` for len > 5)
+pub struct SpecializedSolver<
+    'a,
+    const R: usize,
+    const M: usize,
+    const WIN: usize,
+    Elem: ResponseElem,
+> {
     pub metrics: &'a Metrics,
+    pub local_metrics: LocalMetrics,
     pub max_k: usize,
     pub matrix: &'a ResponseMatrix,
     pub dict: &'a crate::dict::Dictionary,
     capacity_bounds_2d: &'a [Vec<u32>],
-
     pub cache: &'a crate::cache::GlobalCache,
-    /// Shared global upper bound across all parallel root-level tasks.
-    /// When a thread improves beta, others see it immediately and can abort early.
     global_beta: &'a AtomicU32,
     equiv_cache: &'a EquivCache,
     pub current_cost_so_far: u32,
     pub scratch: Option<Box<SolverScratch>>,
+    _phantom: std::marker::PhantomData<Elem>,
 }
 
-impl<'a> Drop for Solver<'a> {
+impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem> Drop
+    for SpecializedSolver<'a, R, M, WIN, Elem>
+{
     fn drop(&mut self) {
+        self.flush_metrics();
         if let Some(scratch) = self.scratch.take() {
             THREAD_SCRATCH.with(|ts| *ts.borrow_mut() = Some(scratch));
         }
     }
 }
 
-impl<'a> Solver<'a> {
-    /// A fast, non-optimal greedy solver used exclusively to seed the initial `beta` upper bound.
-    /// It recursively selects the guess with the lowest Expected Remaining Candidates heuristic,
-    /// generating a highly efficient (though mathematically suboptimal) decision tree.
-    pub fn greedy_solve(
-        matrix: &ResponseMatrix,
+impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
+    SpecializedSolver<'a, R, M, WIN, Elem>
+{
+    #[inline]
+    pub fn flush_metrics(&mut self) {
+        if self.local_metrics.guesses_evaluated != 0 {
+            self.metrics
+                .guesses_evaluated
+                .fetch_add(self.local_metrics.guesses_evaluated, Ordering::Relaxed);
+            self.local_metrics.guesses_evaluated = 0;
+        }
+        if self.local_metrics.states_evaluated != 0 {
+            self.metrics
+                .states_evaluated
+                .fetch_add(self.local_metrics.states_evaluated, Ordering::Relaxed);
+            self.local_metrics.states_evaluated = 0;
+        }
+        if self.local_metrics.pruned_by_bounds != 0 {
+            self.metrics
+                .pruned_by_bounds
+                .fetch_add(self.local_metrics.pruned_by_bounds, Ordering::Relaxed);
+            self.local_metrics.pruned_by_bounds = 0;
+        }
+        if self.local_metrics.pruned_by_equivalence != 0 {
+            self.metrics
+                .pruned_by_equivalence
+                .fetch_add(self.local_metrics.pruned_by_equivalence, Ordering::Relaxed);
+            self.local_metrics.pruned_by_equivalence = 0;
+        }
+        if self.local_metrics.cache_hits != 0 {
+            self.metrics
+                .cache_hits
+                .fetch_add(self.local_metrics.cache_hits, Ordering::Relaxed);
+            self.local_metrics.cache_hits = 0;
+        }
+        if self.local_metrics.cache_misses != 0 {
+            self.metrics
+                .cache_misses
+                .fetch_add(self.local_metrics.cache_misses, Ordering::Relaxed);
+            self.local_metrics.cache_misses = 0;
+        }
+        if self.local_metrics.equiv_cache_hits != 0 {
+            self.metrics
+                .equiv_cache_hits
+                .fetch_add(self.local_metrics.equiv_cache_hits, Ordering::Relaxed);
+            self.local_metrics.equiv_cache_hits = 0;
+        }
+        if self.local_metrics.equiv_cache_misses != 0 {
+            self.metrics
+                .equiv_cache_misses
+                .fetch_add(self.local_metrics.equiv_cache_misses, Ordering::Relaxed);
+            self.local_metrics.equiv_cache_misses = 0;
+        }
+        if self.local_metrics.max_depth != 0 {
+            self.metrics
+                .max_depth
+                .fetch_max(self.local_metrics.max_depth, Ordering::Relaxed);
+            self.local_metrics.max_depth = 0;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_global_beta(
+        matrix: &'a ResponseMatrix,
+        max_k: usize,
         dict: &'a crate::dict::Dictionary,
+        metrics: &'a Metrics,
+        capacity_bounds_2d: &'a [Vec<u32>],
+        cache: &'a crate::cache::GlobalCache,
+        global_beta: &'a AtomicU32,
+        equiv_cache: &'a EquivCache,
+    ) -> Self {
+        let mut scratch = THREAD_SCRATCH
+            .with(|ts| ts.borrow_mut().take())
+            .unwrap_or_else(|| Box::new(SolverScratch::new(dict.guesses.len(), R)));
+        scratch.fit_dictionary(dict.guesses.len(), R);
+
+        Self {
+            matrix,
+            max_k,
+            dict,
+            metrics,
+            local_metrics: LocalMetrics::default(),
+            capacity_bounds_2d,
+            cache,
+            global_beta,
+            equiv_cache,
+            current_cost_so_far: 0,
+            scratch: Some(scratch),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+#[inline(always)]
+pub fn quick_bucket_eval_elem<Elem: ResponseElem>(
+    matrix: &ResponseMatrix,
+    dict: &Dictionary,
+    bucket: &[usize],
+) -> (u32, bool) {
+    let n = bucket.len();
+    if n > 15 {
+        return (2 * n as u32, false);
+    }
+    if n <= 2 {
+        return match n {
+            0 => (0, true),
+            1 => (1, true),
+            _ => (3, true),
+        };
+    }
+    quick_bucket_eval_small_elem::<Elem>(matrix, dict, bucket)
+}
+
+fn quick_bucket_eval_small_elem<Elem: ResponseElem>(
+    matrix: &ResponseMatrix,
+    dict: &Dictionary,
+    bucket: &[usize],
+) -> (u32, bool) {
+    {
+        match bucket.len() {
+            3 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let g0 = unsafe { *cand_to_guess_ptr.add(c0) };
+                let g0_ptr = unsafe { data_ptr.add(g0 * num_cand) };
+                if unsafe { *g0_ptr.add(c1) != *g0_ptr.add(c2) } {
+                    return (5, true);
+                }
+
+                let g1 = unsafe { *cand_to_guess_ptr.add(c1) };
+                let g1_ptr = unsafe { data_ptr.add(g1 * num_cand) };
+                if unsafe { *g1_ptr.add(c0) != *g1_ptr.add(c2) } {
+                    return (5, true);
+                }
+
+                let g2 = unsafe { *cand_to_guess_ptr.add(c2) };
+                let g2_ptr = unsafe { data_ptr.add(g2 * num_cand) };
+                if unsafe { *g2_ptr.add(c0) != *g2_ptr.add(c1) } {
+                    return (5, true);
+                }
+
+                (6, true)
+            }
+            4 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand4 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    return (7, true);
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if ra == rb {
+                                if rc != ra {
+                                    has_one_collision = true;
+                                }
+                            } else if rc != ra && rc != rb {
+                                return (7, true);
+                            } else {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand4!(c0, c1, c2, c3);
+                eval_cand4!(c1, c0, c2, c3);
+                eval_cand4!(c2, c0, c1, c3);
+                eval_cand4!(c3, c0, c1, c2);
+
+                (8, has_one_collision)
+            }
+            5 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand5 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        return (9, true);
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            let rd = unsafe { *gi_ptr.add($cd) };
+                            if ra == rb {
+                                if rc != ra && rd != ra && rc != rd {
+                                    has_one_collision = true;
+                                }
+                            } else if rc == ra {
+                                if rd != ra && rd != rb {
+                                    has_one_collision = true;
+                                }
+                            } else if rc == rb {
+                                if rd != rb && rd != ra {
+                                    has_one_collision = true;
+                                }
+                            } else if rd != ra && rd != rb && rd != rc {
+                                return (9, true);
+                            } else {
+                                has_one_collision = true;
+                            }
+                        }
+                    };
+                }
+
+                eval_cand5!(c0, c1, c2, c3, c4);
+                eval_cand5!(c1, c0, c2, c3, c4);
+                eval_cand5!(c2, c0, c1, c3, c4);
+                eval_cand5!(c3, c0, c1, c2, c4);
+                eval_cand5!(c4, c0, c1, c2, c3);
+
+                (10, has_one_collision)
+            }
+            6 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand6 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        let re = unsafe { *gi_ptr.add($ce) };
+                                        if re != ra && re != rb && re != rc && re != rd {
+                                            return (11, true);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ra == rb {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc != ra {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rc && re != rd {
+                                        has_one_collision = true;
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc == ra || rc == rb {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rb {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rd {
+                                        has_one_collision = true;
+                                    }
+                                }
+                            } else {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd == ra || rd == rb || rd == rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc {
+                                        has_one_collision = true;
+                                    }
+                                } else {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc && re != rd {
+                                        return (11, true);
+                                    } else {
+                                        has_one_collision = true;
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                eval_cand6!(c0, c1, c2, c3, c4, c5);
+                eval_cand6!(c1, c0, c2, c3, c4, c5);
+                eval_cand6!(c2, c0, c1, c3, c4, c5);
+                eval_cand6!(c3, c0, c1, c2, c4, c5);
+                eval_cand6!(c4, c0, c1, c2, c3, c5);
+                eval_cand6!(c5, c0, c1, c2, c3, c4);
+
+                (12, has_one_collision)
+            }
+            7 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand7 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        let re = unsafe { *gi_ptr.add($ce) };
+                                        if re != ra && re != rb && re != rc && re != rd {
+                                            let rf = unsafe { *gi_ptr.add($cf) };
+                                            if rf != ra
+                                                && rf != rb
+                                                && rf != rc
+                                                && rf != rd
+                                                && rf != re
+                                            {
+                                                return (13, true);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ra == rb {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc != ra {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rc && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rc && rf != rd && rf != re {
+                                            has_one_collision = true;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc == ra || rc == rb {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rb {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rd && rf != re {
+                                            has_one_collision = true;
+                                        }
+                                    }
+                                }
+                            } else {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd == ra || rd == rb || rd == rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != re {
+                                            has_one_collision = true;
+                                        }
+                                    }
+                                } else {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re == ra || re == rb || re == rc || re == rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != rd {
+                                            has_one_collision = true;
+                                        }
+                                    } else {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != rd && rf != re
+                                        {
+                                            return (13, true);
+                                        } else {
+                                            has_one_collision = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                eval_cand7!(c0, c1, c2, c3, c4, c5, c6);
+                eval_cand7!(c1, c0, c2, c3, c4, c5, c6);
+                eval_cand7!(c2, c0, c1, c3, c4, c5, c6);
+                eval_cand7!(c3, c0, c1, c2, c4, c5, c6);
+                eval_cand7!(c4, c0, c1, c2, c3, c5, c6);
+                eval_cand7!(c5, c0, c1, c2, c3, c4, c6);
+                eval_cand7!(c6, c0, c1, c2, c3, c4, c5);
+
+                (14, has_one_collision)
+            }
+            8 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand8 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident, $cg:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        let re = unsafe { *gi_ptr.add($ce) };
+                                        if re != ra && re != rb && re != rc && re != rd {
+                                            let rf = unsafe { *gi_ptr.add($cf) };
+                                            if rf != ra
+                                                && rf != rb
+                                                && rf != rc
+                                                && rf != rd
+                                                && rf != re
+                                            {
+                                                let rg = unsafe { *gi_ptr.add($cg) };
+                                                if rg != ra
+                                                    && rg != rb
+                                                    && rg != rc
+                                                    && rg != rd
+                                                    && rg != re
+                                                    && rg != rf
+                                                {
+                                                    return (15, true);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ra == rb {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc != ra {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rc && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rc && rf != rd && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                has_one_collision = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc == ra || rc == rb {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rb {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rd && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                has_one_collision = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd == ra || rd == rb || rd == rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                has_one_collision = true;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re == ra || re == rb || re == rc || re == rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != rd {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != rf
+                                            {
+                                                has_one_collision = true;
+                                            }
+                                        }
+                                    } else {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf == ra || rf == rb || rf == rc || rf == rd || rf == re
+                                        {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                            {
+                                                has_one_collision = true;
+                                            }
+                                        } else {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                return (15, true);
+                                            } else {
+                                                has_one_collision = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                eval_cand8!(c0, c1, c2, c3, c4, c5, c6, c7);
+                eval_cand8!(c1, c0, c2, c3, c4, c5, c6, c7);
+                eval_cand8!(c2, c0, c1, c3, c4, c5, c6, c7);
+                eval_cand8!(c3, c0, c1, c2, c4, c5, c6, c7);
+                eval_cand8!(c4, c0, c1, c2, c3, c5, c6, c7);
+                eval_cand8!(c5, c0, c1, c2, c3, c4, c6, c7);
+                eval_cand8!(c6, c0, c1, c2, c3, c4, c5, c7);
+                eval_cand8!(c7, c0, c1, c2, c3, c4, c5, c6);
+
+                (16, has_one_collision)
+            }
+            9 => {
+                let bucket_ptr = bucket.as_ptr();
+                let c0 = unsafe { *bucket_ptr };
+                let c1 = unsafe { *bucket_ptr.add(1) };
+                let c2 = unsafe { *bucket_ptr.add(2) };
+                let c3 = unsafe { *bucket_ptr.add(3) };
+                let c4 = unsafe { *bucket_ptr.add(4) };
+                let c5 = unsafe { *bucket_ptr.add(5) };
+                let c6 = unsafe { *bucket_ptr.add(6) };
+                let c7 = unsafe { *bucket_ptr.add(7) };
+                let c8 = unsafe { *bucket_ptr.add(8) };
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+
+                let mut has_one_collision = false;
+
+                macro_rules! eval_cand9 {
+                    ($ci:ident, $ca:ident, $cb:ident, $cc:ident, $cd:ident, $ce:ident, $cf:ident, $cg:ident, $ch:ident) => {
+                        let gi = unsafe { *cand_to_guess_ptr.add($ci) };
+                        let gi_ptr = unsafe { data_ptr.add(gi * num_cand) };
+                        let ra = unsafe { *gi_ptr.add($ca) };
+                        let rb = unsafe { *gi_ptr.add($cb) };
+
+                        if has_one_collision {
+                            if ra != rb {
+                                let rc = unsafe { *gi_ptr.add($cc) };
+                                if rc != ra && rc != rb {
+                                    let rd = unsafe { *gi_ptr.add($cd) };
+                                    if rd != ra && rd != rb && rd != rc {
+                                        let re = unsafe { *gi_ptr.add($ce) };
+                                        if re != ra && re != rb && re != rc && re != rd {
+                                            let rf = unsafe { *gi_ptr.add($cf) };
+                                            if rf != ra
+                                                && rf != rb
+                                                && rf != rc
+                                                && rf != rd
+                                                && rf != re
+                                            {
+                                                let rg = unsafe { *gi_ptr.add($cg) };
+                                                if rg != ra
+                                                    && rg != rb
+                                                    && rg != rc
+                                                    && rg != rd
+                                                    && rg != re
+                                                    && rg != rf
+                                                {
+                                                    let rh = unsafe { *gi_ptr.add($ch) };
+                                                    if rh != ra
+                                                        && rh != rb
+                                                        && rh != rc
+                                                        && rh != rd
+                                                        && rh != re
+                                                        && rh != rf
+                                                        && rh != rg
+                                                    {
+                                                        return (17, true);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ra == rb {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc != ra {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rc && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rc && rf != rd && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let rc = unsafe { *gi_ptr.add($cc) };
+                            if rc == ra || rc == rb {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd != ra && rd != rb {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rd && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rd
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                let rd = unsafe { *gi_ptr.add($cd) };
+                                if rd == ra || rd == rb || rd == rc {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re != ra && re != rb && re != rc {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != re {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != re
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let re = unsafe { *gi_ptr.add($ce) };
+                                    if re == ra || re == rb || re == rc || re == rd {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf != ra && rf != rb && rf != rc && rf != rd {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        let rf = unsafe { *gi_ptr.add($cf) };
+                                        if rf == ra || rf == rb || rf == rc || rf == rd || rf == re
+                                        {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg != ra
+                                                && rg != rb
+                                                && rg != rc
+                                                && rg != rd
+                                                && rg != re
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rg
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        } else {
+                                            let rg = unsafe { *gi_ptr.add($cg) };
+                                            if rg == ra
+                                                || rg == rb
+                                                || rg == rc
+                                                || rg == rd
+                                                || rg == re
+                                                || rg == rf
+                                            {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                {
+                                                    has_one_collision = true;
+                                                }
+                                            } else {
+                                                let rh = unsafe { *gi_ptr.add($ch) };
+                                                if rh != ra
+                                                    && rh != rb
+                                                    && rh != rc
+                                                    && rh != rd
+                                                    && rh != re
+                                                    && rh != rf
+                                                    && rh != rg
+                                                {
+                                                    return (17, true);
+                                                } else {
+                                                    has_one_collision = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                eval_cand9!(c0, c1, c2, c3, c4, c5, c6, c7, c8);
+                eval_cand9!(c1, c0, c2, c3, c4, c5, c6, c7, c8);
+                eval_cand9!(c2, c0, c1, c3, c4, c5, c6, c7, c8);
+                eval_cand9!(c3, c0, c1, c2, c4, c5, c6, c7, c8);
+                eval_cand9!(c4, c0, c1, c2, c3, c5, c6, c7, c8);
+                eval_cand9!(c5, c0, c1, c2, c3, c4, c6, c7, c8);
+                eval_cand9!(c6, c0, c1, c2, c3, c4, c5, c7, c8);
+                eval_cand9!(c7, c0, c1, c2, c3, c4, c5, c6, c8);
+                eval_cand9!(c8, c0, c1, c2, c3, c4, c5, c6, c7);
+
+                (18, has_one_collision)
+            }
+            _ => {
+                let n = bucket.len();
+                let mut has_one_collision = false;
+                let num_cand = matrix.num_candidates;
+                let data_ptr = matrix.data_ptr::<Elem>();
+                let cand_to_guess_ptr = dict.candidate_to_guess.as_ptr();
+                let bucket_ptr = bucket.as_ptr();
+
+                for i in 0..n {
+                    let cand = unsafe { *bucket_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(cand) };
+                    let g_ptr = unsafe { data_ptr.add(g * num_cand) };
+                    let mut collisions = 0;
+                    let max_collisions = if has_one_collision { 0 } else { 1 };
+
+                    #[cfg(target_arch = "x86_64")]
+                    if Elem::IS_U8 {
+                        use std::arch::x86_64::*;
+                        let mut seen = [0u8; 16];
+                        let seen_ptr = seen.as_mut_ptr();
+                        let mut seen_len = 0u32;
+                        let mut aborted = false;
+
+                        for j in 0..n {
+                            if i == j {
+                                continue;
+                            }
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { (*g_ptr.add(c2)).to_usize() as u8 };
+
+                            if seen_len > 0 {
+                                unsafe {
+                                    let v_seen = _mm_loadu_si128(seen_ptr as *const __m128i);
+                                    let v_r = _mm_set1_epi8(r as i8);
+                                    let cmp = _mm_cmpeq_epi8(v_r, v_seen);
+                                    let mask =
+                                        (_mm_movemask_epi8(cmp) as u32) & ((1u32 << seen_len) - 1);
+                                    if mask != 0 {
+                                        collisions += 1;
+                                        if collisions > max_collisions {
+                                            aborted = true;
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            unsafe {
+                                *seen_ptr.add(seen_len as usize) = r;
+                            }
+                            seen_len += 1;
+                        }
+                        if aborted {
+                            continue;
+                        }
+                    }
+                    #[cfg(not(target_arch = "x86_64"))]
+                    if Elem::IS_U8 {
+                        let mut seen = [0u64; 4];
+                        let mut aborted = false;
+                        for j in 0..i {
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                            let bit = 1u64 << (r & 63);
+                            collisions += ((*word & bit) != 0) as usize;
+                            *word |= bit;
+                            if collisions > max_collisions {
+                                aborted = true;
+                                break;
+                            }
+                        }
+                        if !aborted {
+                            for j in (i + 1)..n {
+                                let c2 = unsafe { *bucket_ptr.add(j) };
+                                let r = unsafe { (*g_ptr.add(c2)).to_usize() };
+                                let word = unsafe { seen.get_unchecked_mut(r >> 6) };
+                                let bit = 1u64 << (r & 63);
+                                collisions += ((*word & bit) != 0) as usize;
+                                *word |= bit;
+                                if collisions > max_collisions {
+                                    aborted = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if aborted {
+                            continue;
+                        }
+                    }
+                    if !Elem::IS_U8 {
+                        let mut seen = std::mem::MaybeUninit::<[Elem; 16]>::uninit();
+                        let seen_ptr = seen.as_mut_ptr() as *mut Elem;
+                        let mut seen_len = 0;
+                        let mut aborted = false;
+
+                        'inner: for j in 0..n {
+                            if i == j {
+                                continue;
+                            }
+                            let c2 = unsafe { *bucket_ptr.add(j) };
+                            let r = unsafe { *g_ptr.add(c2) };
+                            for k in 0..seen_len {
+                                if unsafe { *seen_ptr.add(k) == r } {
+                                    collisions += 1;
+                                    if collisions > max_collisions {
+                                        aborted = true;
+                                        break 'inner;
+                                    }
+                                    continue 'inner;
+                                }
+                            }
+                            unsafe {
+                                *seen_ptr.add(seen_len) = r;
+                            }
+                            seen_len += 1;
+                        }
+                        if aborted {
+                            continue;
+                        }
+                    }
+
+                    if collisions == 0 {
+                        return ((2 * n - 1) as u32, true);
+                    } else if collisions == 1 {
+                        has_one_collision = true;
+                    }
+                }
+
+                if has_one_collision {
+                    return ((2 * n) as u32, true);
+                }
+
+                (2 * n as u32, false)
+            }
+        }
+    }
+}
+
+impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
+    SpecializedSolver<'a, R, M, WIN, Elem>
+{
+    #[inline(always)]
+    pub fn min_state_val(
+        &mut self,
         set: &[usize],
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
     ) -> u32 {
-        if set.len() <= 2 {
-            return (set.len() * (set.len() + 1) / 2) as u32;
-        }
-
-        let mut c_mask = 0u32;
+        let mut hash = 0;
+        let zobrist_ptr = self.matrix.zobrist.as_ptr();
         for &c in set {
-            c_mask |= matrix.candidate_masks[c];
+            hash ^= unsafe { *zobrist_ptr.add(c) };
         }
+        self.min_state_val_with_hash(
+            set,
+            hash,
+            parent_active_guesses,
+            beta,
+            depth,
+            parent_max_k,
+            0,
+        )
+    }
 
-        let mut best_guess = usize::MAX;
-        let mut min_expected_rem = u32::MAX;
-
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
-
-        let skip_projections = c_mask.count_ones() >= 26;
-        let mut seen_projections = if skip_projections {
-            rustc_hash::FxHashSet::default()
-        } else {
-            rustc_hash::FxHashSet::with_capacity_and_hasher(
-                dict.guesses.len().min(4096),
-                Default::default(),
-            )
+    #[inline(always)]
+    fn get_or_compute_active_guesses(
+        &mut self,
+        set: &[usize],
+        depth: usize,
+        equiv_state: &mut EquivState,
+    ) -> *const [u64] {
+        let (set_hash, parent_ptr) = match *equiv_state {
+            EquivState::Ready(ptr) => return ptr,
+            EquivState::Cached(ref arc) => return arc.as_ref() as *const [u64],
+            EquivState::Uncomputed {
+                set_hash,
+                parent_ptr,
+            } => (set_hash, parent_ptr),
         };
 
-        let matrix_data_ptr = matrix.data.as_ptr();
-        for g in 0..dict.guesses.len() {
-            if !skip_projections {
-                let chars = &dict.guess_chars[g];
-                let mut proj = 0u32;
-                let l0 = chars[0] as u32;
-                proj |= (l0 + 1) * ((c_mask >> l0) & 1);
-                let l1 = chars[1] as u32;
-                proj |= ((l1 + 1) * ((c_mask >> l1) & 1)) << 5;
-                let l2 = chars[2] as u32;
-                proj |= ((l2 + 1) * ((c_mask >> l2) & 1)) << 10;
-                let l3 = chars[3] as u32;
-                proj |= ((l3 + 1) * ((c_mask >> l3) & 1)) << 15;
-                let l4 = chars[4] as u32;
-                proj |= ((l4 + 1) * ((c_mask >> l4) & 1)) << 20;
-                if !seen_projections.insert(proj) {
+        let parent_active_guesses = unsafe { &*parent_ptr };
+        let c_len = set.len();
+        let should_cache_equiv = c_len >= 10;
+        let shard_idx = ((set_hash ^ (set_hash >> 32)) as usize) & 1023;
+        if should_cache_equiv {
+            let cache = self.equiv_cache[shard_idx].read().unwrap();
+            if let Some(cached) = cache.get(&set_hash) {
+                self.local_metrics.equiv_cache_hits += 1;
+                let rc = std::sync::Arc::clone(cached);
+                let ptr = rc.as_ref() as *const [u64];
+                *equiv_state = EquivState::Cached(rc);
+                return ptr;
+            }
+        }
+
+        let mut bits =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
+        let num_u64s = parent_active_guesses.len();
+        if bits.len() != num_u64s {
+            bits.resize(num_u64s, 0);
+        }
+
+        let num_guesses = self.dict.guesses.len();
+        let num_candidates = self.matrix.num_candidates;
+        let data_cg_ptr = self.matrix.data_cg_ptr::<Elem>();
+        let matrix_data_ptr = self.matrix.data_ptr::<Elem>();
+        let set_ptr = set.as_ptr();
+
+        let (table_ptr, mask, shift, added_ptr) = {
+            let scratch_ref = self.scratch.as_mut().unwrap();
+            let table = &mut scratch_ref.scratch_hash_table[depth];
+            let m = table.len() - 1;
+            let s = 64 - table.len().trailing_zeros();
+            (
+                table.as_mut_ptr(),
+                m,
+                s,
+                scratch_ref.scratch_added_indices[depth].as_mut_ptr(),
+            )
+        };
+        let mut added_len = 0usize;
+
+        let mut stack_c_cg_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
+        let mut stack_c_table_ptrs = std::mem::MaybeUninit::<[*const u64; 256]>::uninit();
+        let mut heap_c_cg_ptrs;
+        let mut heap_c_table_ptrs;
+        let (c_cg_ptrs_ptr, c_table_ptrs_ptr): (*mut *const Elem, *mut *const u64) = if c_len <= 256
+        {
+            (
+                stack_c_cg_ptrs.as_mut_ptr() as *mut *const Elem,
+                stack_c_table_ptrs.as_mut_ptr() as *mut *const u64,
+            )
+        } else {
+            heap_c_cg_ptrs = Vec::with_capacity(c_len);
+            heap_c_table_ptrs = Vec::with_capacity(c_len);
+            (heap_c_cg_ptrs.as_mut_ptr(), heap_c_table_ptrs.as_mut_ptr())
+        };
+        let matrix_z_tables_ptr = self.matrix.z_tables.as_ptr();
+        let mut c_idx = 0usize;
+        while c_idx + 3 < c_len {
+            unsafe {
+                let c0 = *set_ptr.add(c_idx);
+                let c1 = *set_ptr.add(c_idx + 1);
+                let c2 = *set_ptr.add(c_idx + 2);
+                let c3 = *set_ptr.add(c_idx + 3);
+                *c_cg_ptrs_ptr.add(c_idx) = data_cg_ptr.add(c0 * num_guesses);
+                *c_cg_ptrs_ptr.add(c_idx + 1) = data_cg_ptr.add(c1 * num_guesses);
+                *c_cg_ptrs_ptr.add(c_idx + 2) = data_cg_ptr.add(c2 * num_guesses);
+                *c_cg_ptrs_ptr.add(c_idx + 3) = data_cg_ptr.add(c3 * num_guesses);
+                *c_table_ptrs_ptr.add(c_idx) = matrix_z_tables_ptr.add(c0 * R);
+                *c_table_ptrs_ptr.add(c_idx + 1) = matrix_z_tables_ptr.add(c1 * R);
+                *c_table_ptrs_ptr.add(c_idx + 2) = matrix_z_tables_ptr.add(c2 * R);
+                *c_table_ptrs_ptr.add(c_idx + 3) = matrix_z_tables_ptr.add(c3 * R);
+            }
+            c_idx += 4;
+        }
+        while c_idx < c_len {
+            unsafe {
+                let c = *set_ptr.add(c_idx);
+                *c_cg_ptrs_ptr.add(c_idx) = data_cg_ptr.add(c * num_guesses);
+                *c_table_ptrs_ptr.add(c_idx) = matrix_z_tables_ptr.add(c * R);
+            }
+            c_idx += 1;
+        }
+
+        let mut dummy_projs = std::mem::MaybeUninit::<[u64; R]>::uninit();
+        let dummy_ptr = dummy_projs.as_mut_ptr() as *mut u64;
+        let c_tab0 = unsafe { *c_table_ptrs_ptr };
+        unsafe {
+            std::ptr::copy_nonoverlapping(c_tab0, dummy_ptr, R);
+        }
+        #[inline(always)]
+        #[allow(dead_code)]
+        unsafe fn accumulate_dummy_projs_scalar(
+            dummy_ptr: *mut u64,
+            c_table_ptrs_ptr: *const *const u64,
+            c_len: usize,
+            len: usize,
+        ) {
+            for c_idx in 1..c_len {
+                let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                let mut r = 0;
+                while r + 15 < len {
+                    unsafe {
+                        *dummy_ptr.add(r) ^= *c_tab.add(r);
+                        *dummy_ptr.add(r + 1) ^= *c_tab.add(r + 1);
+                        *dummy_ptr.add(r + 2) ^= *c_tab.add(r + 2);
+                        *dummy_ptr.add(r + 3) ^= *c_tab.add(r + 3);
+                        *dummy_ptr.add(r + 4) ^= *c_tab.add(r + 4);
+                        *dummy_ptr.add(r + 5) ^= *c_tab.add(r + 5);
+                        *dummy_ptr.add(r + 6) ^= *c_tab.add(r + 6);
+                        *dummy_ptr.add(r + 7) ^= *c_tab.add(r + 7);
+                        *dummy_ptr.add(r + 8) ^= *c_tab.add(r + 8);
+                        *dummy_ptr.add(r + 9) ^= *c_tab.add(r + 9);
+                        *dummy_ptr.add(r + 10) ^= *c_tab.add(r + 10);
+                        *dummy_ptr.add(r + 11) ^= *c_tab.add(r + 11);
+                        *dummy_ptr.add(r + 12) ^= *c_tab.add(r + 12);
+                        *dummy_ptr.add(r + 13) ^= *c_tab.add(r + 13);
+                        *dummy_ptr.add(r + 14) ^= *c_tab.add(r + 14);
+                        *dummy_ptr.add(r + 15) ^= *c_tab.add(r + 15);
+                    }
+                    r += 16;
+                }
+                while r < len {
+                    unsafe {
+                        *dummy_ptr.add(r) ^= *c_tab.add(r);
+                    }
+                    r += 1;
+                }
+            }
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            #[target_feature(enable = "avx2")]
+            unsafe fn accumulate_dummy_projs_avx2(
+                dummy_ptr: *mut u64,
+                c_table_ptrs_ptr: *const *const u64,
+                c_len: usize,
+                len: usize,
+            ) {
+                use std::arch::x86_64::*;
+                for c_idx in 1..c_len {
+                    let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let mut r = 0;
+                    while r + 15 < len {
+                        unsafe {
+                            let d0 = _mm256_loadu_si256(dummy_ptr.add(r) as *const __m256i);
+                            let t0 = _mm256_loadu_si256(c_tab.add(r) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r) as *mut __m256i,
+                                _mm256_xor_si256(d0, t0),
+                            );
+
+                            let d1 = _mm256_loadu_si256(dummy_ptr.add(r + 4) as *const __m256i);
+                            let t1 = _mm256_loadu_si256(c_tab.add(r + 4) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r + 4) as *mut __m256i,
+                                _mm256_xor_si256(d1, t1),
+                            );
+
+                            let d2 = _mm256_loadu_si256(dummy_ptr.add(r + 8) as *const __m256i);
+                            let t2 = _mm256_loadu_si256(c_tab.add(r + 8) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r + 8) as *mut __m256i,
+                                _mm256_xor_si256(d2, t2),
+                            );
+
+                            let d3 = _mm256_loadu_si256(dummy_ptr.add(r + 12) as *const __m256i);
+                            let t3 = _mm256_loadu_si256(c_tab.add(r + 12) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r + 12) as *mut __m256i,
+                                _mm256_xor_si256(d3, t3),
+                            );
+                        }
+
+                        r += 16;
+                    }
+                    while r + 3 < len {
+                        unsafe {
+                            let d = _mm256_loadu_si256(dummy_ptr.add(r) as *const __m256i);
+                            let t = _mm256_loadu_si256(c_tab.add(r) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r) as *mut __m256i,
+                                _mm256_xor_si256(d, t),
+                            );
+                        }
+                        r += 4;
+                    }
+                    while r < len {
+                        unsafe {
+                            *dummy_ptr.add(r) ^= *c_tab.add(r);
+                        }
+                        r += 1;
+                    }
+                }
+            }
+
+            #[cfg(target_feature = "avx2")]
+            {
+                unsafe {
+                    accumulate_dummy_projs_avx2(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+                }
+            }
+            #[cfg(not(target_feature = "avx2"))]
+            {
+                if is_x86_feature_detected!("avx2") {
+                    unsafe {
+                        accumulate_dummy_projs_avx2(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+                    }
+                } else {
+                    unsafe {
+                        accumulate_dummy_projs_scalar(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            unsafe {
+                accumulate_dummy_projs_scalar(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+            }
+        }
+
+        for r in 0..R {
+            let mut proj = unsafe { *dummy_ptr.add(r) };
+            if proj == 0 {
+                proj = 1;
+            }
+            let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+            loop {
+                let slot = unsafe { *table_ptr.add(idx) };
+                if slot == 0 {
+                    unsafe {
+                        *table_ptr.add(idx) = proj;
+                        *added_ptr.add(added_len) = idx;
+                    }
+                    added_len += 1;
+                    break;
+                }
+                if slot == proj {
+                    break;
+                }
+                idx = (idx + 1) & mask;
+            }
+        }
+
+        let bits_ptr = bits.as_mut_ptr();
+        let mut kept_count = 0usize;
+        let mut projs_block = std::mem::MaybeUninit::<[u64; 64]>::uninit();
+        let projs_ptr = projs_block.as_mut_ptr() as *mut u64;
+
+        for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
+            if block == 0 {
+                unsafe {
+                    *bits_ptr.add(block_idx) = 0;
+                }
+                continue;
+            }
+            let block_start = block_idx << 6;
+
+            if (block & (block - 1)) == 0 {
+                let tz = block.trailing_zeros() as usize;
+                let g_idx = block_start + tz;
+                let g_ptr = unsafe { matrix_data_ptr.add(g_idx * num_candidates) };
+                let mut proj = 0u64;
+                let mut c_idx = 0usize;
+                while c_idx + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(c_idx) };
+                    let c1 = unsafe { *set_ptr.add(c_idx + 1) };
+                    let c2 = unsafe { *set_ptr.add(c_idx + 2) };
+                    let c3 = unsafe { *set_ptr.add(c_idx + 3) };
+                    let c4 = unsafe { *set_ptr.add(c_idx + 4) };
+                    let c5 = unsafe { *set_ptr.add(c_idx + 5) };
+                    let c6 = unsafe { *set_ptr.add(c_idx + 6) };
+                    let c7 = unsafe { *set_ptr.add(c_idx + 7) };
+                    let c_tab0 = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_tab1 = unsafe { *c_table_ptrs_ptr.add(c_idx + 1) };
+                    let c_tab2 = unsafe { *c_table_ptrs_ptr.add(c_idx + 2) };
+                    let c_tab3 = unsafe { *c_table_ptrs_ptr.add(c_idx + 3) };
+                    let c_tab4 = unsafe { *c_table_ptrs_ptr.add(c_idx + 4) };
+                    let c_tab5 = unsafe { *c_table_ptrs_ptr.add(c_idx + 5) };
+                    let c_tab6 = unsafe { *c_table_ptrs_ptr.add(c_idx + 6) };
+                    let c_tab7 = unsafe { *c_table_ptrs_ptr.add(c_idx + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+                    unsafe {
+                        proj ^= (*c_tab0.add(r0) ^ *c_tab1.add(r1))
+                            ^ (*c_tab2.add(r2) ^ *c_tab3.add(r3))
+                            ^ (*c_tab4.add(r4) ^ *c_tab5.add(r5))
+                            ^ (*c_tab6.add(r6) ^ *c_tab7.add(r7));
+                    }
+                    c_idx += 8;
+                }
+                while c_idx + 3 < c_len {
+                    let c0 = unsafe { *set_ptr.add(c_idx) };
+                    let c1 = unsafe { *set_ptr.add(c_idx + 1) };
+                    let c2 = unsafe { *set_ptr.add(c_idx + 2) };
+                    let c3 = unsafe { *set_ptr.add(c_idx + 3) };
+                    let c_tab0 = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_tab1 = unsafe { *c_table_ptrs_ptr.add(c_idx + 1) };
+                    let c_tab2 = unsafe { *c_table_ptrs_ptr.add(c_idx + 2) };
+                    let c_tab3 = unsafe { *c_table_ptrs_ptr.add(c_idx + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    unsafe {
+                        proj ^= (*c_tab0.add(r0) ^ *c_tab1.add(r1))
+                            ^ (*c_tab2.add(r2) ^ *c_tab3.add(r3));
+                    }
+                    c_idx += 4;
+                }
+                while c_idx < c_len {
+                    let c = unsafe { *set_ptr.add(c_idx) };
+                    let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    proj ^= unsafe { *c_tab.add(r) };
+                    c_idx += 1;
+                }
+                if proj == 0 {
+                    proj = 1;
+                }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                let mut kept_mask = 0u64;
+                loop {
+                    let slot = unsafe { *table_ptr.add(idx) };
+                    if slot == 0 {
+                        unsafe {
+                            *table_ptr.add(idx) = proj;
+                            *added_ptr.add(added_len) = idx;
+                        }
+                        added_len += 1;
+                        kept_mask = block;
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
+                }
+                unsafe {
+                    *bits_ptr.add(block_idx) = kept_mask;
+                }
+                kept_count += (kept_mask != 0) as usize;
+                continue;
+            }
+
+            let ones = block.count_ones() as usize;
+            if ones <= 16 {
+                let mut active_offsets = std::mem::MaybeUninit::<[u8; 16]>::uninit();
+                let offsets_mut_ptr = active_offsets.as_mut_ptr() as *mut u8;
+                let mut sparse_projs = std::mem::MaybeUninit::<[u64; 16]>::uninit();
+                let mut b = block;
+                let mut k = 0usize;
+                while b != 0 {
+                    unsafe {
+                        *offsets_mut_ptr.add(k) = b.trailing_zeros() as u8;
+                    }
+                    b &= b - 1;
+                    k += 1;
+                }
+                let sparse_ptr = sparse_projs.as_mut_ptr() as *mut u64;
+                let offsets_ptr = offsets_mut_ptr as *const u8;
+                {
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) };
+                    let mut j = 0usize;
+                    while j + 7 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                        let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                        let off4 = unsafe { *offsets_ptr.add(j + 4) as usize };
+                        let off5 = unsafe { *offsets_ptr.add(j + 5) as usize };
+                        let off6 = unsafe { *offsets_ptr.add(j + 6) as usize };
+                        let off7 = unsafe { *offsets_ptr.add(j + 7) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(off4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(off5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(off6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(off7)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) = *c_table_ptr.add(r1);
+                            *sparse_ptr.add(j + 2) = *c_table_ptr.add(r2);
+                            *sparse_ptr.add(j + 3) = *c_table_ptr.add(r3);
+                            *sparse_ptr.add(j + 4) = *c_table_ptr.add(r4);
+                            *sparse_ptr.add(j + 5) = *c_table_ptr.add(r5);
+                            *sparse_ptr.add(j + 6) = *c_table_ptr.add(r6);
+                            *sparse_ptr.add(j + 7) = *c_table_ptr.add(r7);
+                        }
+                        j += 8;
+                    }
+                    while j + 3 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                        let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) = *c_table_ptr.add(r1);
+                            *sparse_ptr.add(j + 2) = *c_table_ptr.add(r2);
+                            *sparse_ptr.add(j + 3) = *c_table_ptr.add(r3);
+                        }
+                        j += 4;
+                    }
+                    while j + 1 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) = *c_table_ptr.add(r1);
+                        }
+                        j += 2;
+                    }
+                    if j < ones {
+                        let off = unsafe { *offsets_ptr.add(j) as usize };
+                        let r = unsafe { (*c_ptr.add(off)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) = *c_table_ptr.add(r);
+                        }
+                    }
+                }
+                for c_idx in 1..c_len {
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) };
+                    let mut j = 0usize;
+                    while j + 7 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                        let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                        let off4 = unsafe { *offsets_ptr.add(j + 4) as usize };
+                        let off5 = unsafe { *offsets_ptr.add(j + 5) as usize };
+                        let off6 = unsafe { *offsets_ptr.add(j + 6) as usize };
+                        let off7 = unsafe { *offsets_ptr.add(j + 7) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(off4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(off5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(off6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(off7)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
+                            *sparse_ptr.add(j + 2) ^= *c_table_ptr.add(r2);
+                            *sparse_ptr.add(j + 3) ^= *c_table_ptr.add(r3);
+                            *sparse_ptr.add(j + 4) ^= *c_table_ptr.add(r4);
+                            *sparse_ptr.add(j + 5) ^= *c_table_ptr.add(r5);
+                            *sparse_ptr.add(j + 6) ^= *c_table_ptr.add(r6);
+                            *sparse_ptr.add(j + 7) ^= *c_table_ptr.add(r7);
+                        }
+                        j += 8;
+                    }
+                    while j + 3 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let off2 = unsafe { *offsets_ptr.add(j + 2) as usize };
+                        let off3 = unsafe { *offsets_ptr.add(j + 3) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(off2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(off3)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
+                            *sparse_ptr.add(j + 2) ^= *c_table_ptr.add(r2);
+                            *sparse_ptr.add(j + 3) ^= *c_table_ptr.add(r3);
+                        }
+                        j += 4;
+                    }
+                    while j + 1 < ones {
+                        let off0 = unsafe { *offsets_ptr.add(j) as usize };
+                        let off1 = unsafe { *offsets_ptr.add(j + 1) as usize };
+                        let r0 = unsafe { (*c_ptr.add(off0)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(off1)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r0);
+                            *sparse_ptr.add(j + 1) ^= *c_table_ptr.add(r1);
+                        }
+                        j += 2;
+                    }
+                    if j < ones {
+                        let off = unsafe { *offsets_ptr.add(j) as usize };
+                        let r = unsafe { (*c_ptr.add(off)).to_usize() };
+                        unsafe {
+                            *sparse_ptr.add(j) ^= *c_table_ptr.add(r);
+                        }
+                    }
+                }
+                let mut kept_mask = 0u64;
+                for j in 0..ones {
+                    let tz = unsafe { *offsets_ptr.add(j) };
+                    let bit = 1u64 << tz;
+                    let mut proj = unsafe { *sparse_ptr.add(j) };
+                    if proj == 0 {
+                        proj = 1;
+                    }
+                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                    loop {
+                        let slot = unsafe { *table_ptr.add(idx) };
+                        if slot == 0 {
+                            unsafe {
+                                *table_ptr.add(idx) = proj;
+                                *added_ptr.add(added_len) = idx;
+                            }
+                            added_len += 1;
+                            kept_mask |= bit;
+                            break;
+                        }
+                        if slot == proj {
+                            break;
+                        }
+                        idx = (idx + 1) & mask;
+                    }
+                }
+                unsafe {
+                    *bits_ptr.add(block_idx) = kept_mask;
+                }
+                kept_count += kept_mask.count_ones() as usize;
+                continue;
+            }
+
+            let chunk_len = (block_start + 64).min(num_guesses) - block_start;
+            if Elem::IS_U8 {
+                {
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
+                    let c_u8_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) as *const u8 };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r0 = (r_u64 & 0xFF) as usize;
+                        let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let r7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) = *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) = *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) = *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) = *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) = *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) = *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) = *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { *c_u8_ptr.add(i) as usize };
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                }
+                for c_idx in 1..c_len {
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_u8_ptr =
+                        unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) as *const u8 };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r_u64 = unsafe { (c_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r0 = (r_u64 & 0xFF) as usize;
+                        let r1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let r2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let r3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let r4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let r5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let r6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let r7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { *c_u8_ptr.add(i) as usize };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                }
+            } else {
+                {
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(0) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(0)).add(block_start) };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(i + 4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(i + 5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(i + 6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(i + 7)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) = *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) = *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) = *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) = *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) = *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) = *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) = *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) = *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                }
+                for c_idx in 1..c_len {
+                    let c_table_ptr = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let c_ptr = unsafe { (*c_cg_ptrs_ptr.add(c_idx)).add(block_start) };
+                    let mut i = 0;
+                    while i + 7 < chunk_len {
+                        let r0 = unsafe { (*c_ptr.add(i)).to_usize() };
+                        let r1 = unsafe { (*c_ptr.add(i + 1)).to_usize() };
+                        let r2 = unsafe { (*c_ptr.add(i + 2)).to_usize() };
+                        let r3 = unsafe { (*c_ptr.add(i + 3)).to_usize() };
+                        let r4 = unsafe { (*c_ptr.add(i + 4)).to_usize() };
+                        let r5 = unsafe { (*c_ptr.add(i + 5)).to_usize() };
+                        let r6 = unsafe { (*c_ptr.add(i + 6)).to_usize() };
+                        let r7 = unsafe { (*c_ptr.add(i + 7)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r0);
+                            *projs_ptr.add(i + 1) ^= *c_table_ptr.add(r1);
+                            *projs_ptr.add(i + 2) ^= *c_table_ptr.add(r2);
+                            *projs_ptr.add(i + 3) ^= *c_table_ptr.add(r3);
+                            *projs_ptr.add(i + 4) ^= *c_table_ptr.add(r4);
+                            *projs_ptr.add(i + 5) ^= *c_table_ptr.add(r5);
+                            *projs_ptr.add(i + 6) ^= *c_table_ptr.add(r6);
+                            *projs_ptr.add(i + 7) ^= *c_table_ptr.add(r7);
+                        }
+                        i += 8;
+                    }
+                    while i < chunk_len {
+                        let r = unsafe { (*c_ptr.add(i)).to_usize() };
+                        unsafe {
+                            *projs_ptr.add(i) ^= *c_table_ptr.add(r);
+                        }
+                        i += 1;
+                    }
+                }
+            }
+
+            let mut b = block;
+            let mut kept_mask = 0u64;
+            while b != 0 {
+                let tz = b.trailing_zeros();
+                let bit = b.isolate_lowest_one();
+                b &= b - 1;
+
+                let mut proj = unsafe { *projs_ptr.add(tz as usize) };
+                if proj == 0 {
+                    proj = 1;
+                }
+                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                loop {
+                    let slot = unsafe { *table_ptr.add(idx) };
+                    if slot == 0 {
+                        unsafe {
+                            *table_ptr.add(idx) = proj;
+                            *added_ptr.add(added_len) = idx;
+                        }
+                        added_len += 1;
+                        kept_mask |= bit;
+                        break;
+                    }
+                    if slot == proj {
+                        break;
+                    }
+                    idx = (idx + 1) & mask;
+                }
+            }
+            unsafe {
+                *bits_ptr.add(block_idx) = kept_mask;
+            }
+            kept_count += kept_mask.count_ones() as usize;
+        }
+
+        let mut i = 0usize;
+        while i + 7 < added_len {
+            unsafe {
+                let idx0 = *added_ptr.add(i);
+                let idx1 = *added_ptr.add(i + 1);
+                let idx2 = *added_ptr.add(i + 2);
+                let idx3 = *added_ptr.add(i + 3);
+                let idx4 = *added_ptr.add(i + 4);
+                let idx5 = *added_ptr.add(i + 5);
+                let idx6 = *added_ptr.add(i + 6);
+                let idx7 = *added_ptr.add(i + 7);
+                *table_ptr.add(idx0) = 0;
+                *table_ptr.add(idx1) = 0;
+                *table_ptr.add(idx2) = 0;
+                *table_ptr.add(idx3) = 0;
+                *table_ptr.add(idx4) = 0;
+                *table_ptr.add(idx5) = 0;
+                *table_ptr.add(idx6) = 0;
+                *table_ptr.add(idx7) = 0;
+            }
+            i += 8;
+        }
+        while i + 3 < added_len {
+            unsafe {
+                let idx0 = *added_ptr.add(i);
+                let idx1 = *added_ptr.add(i + 1);
+                let idx2 = *added_ptr.add(i + 2);
+                let idx3 = *added_ptr.add(i + 3);
+                *table_ptr.add(idx0) = 0;
+                *table_ptr.add(idx1) = 0;
+                *table_ptr.add(idx2) = 0;
+                *table_ptr.add(idx3) = 0;
+            }
+            i += 4;
+        }
+        while i < added_len {
+            unsafe {
+                let idx = *added_ptr.add(i);
+                *table_ptr.add(idx) = 0;
+            }
+            i += 1;
+        }
+
+        if should_cache_equiv {
+            let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
+            if let Some(cached) = cache_mut.get(&set_hash) {
+                self.local_metrics.equiv_cache_hits += 1;
+                let rc = std::sync::Arc::clone(cached);
+                self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+                let ptr = rc.as_ref() as *const [u64];
+                *equiv_state = EquivState::Cached(rc);
+                ptr
+            } else {
+                let rc: std::sync::Arc<[u64]> = std::sync::Arc::from(bits.as_slice());
+                self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+                self.local_metrics.equiv_cache_misses += 1;
+                self.local_metrics.pruned_by_equivalence += num_guesses - kept_count;
+                let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
+                if cache_mut.len() > cap {
+                    let evict = (cap / 4).max(1);
+                    let keys_to_remove: Vec<_> = cache_mut.keys().take(evict).copied().collect();
+                    for k in keys_to_remove {
+                        cache_mut.remove(&k);
+                    }
+                }
+                cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
+                let ptr = rc.as_ref() as *const [u64];
+                *equiv_state = EquivState::Cached(rc);
+                ptr
+            }
+        } else {
+            self.local_metrics.equiv_cache_misses += 1;
+            self.local_metrics.pruned_by_equivalence += num_guesses - kept_count;
+            self.scratch.as_mut().unwrap().scratch_active_bits[depth] = bits;
+            let ptr = self.scratch.as_ref().unwrap().scratch_active_bits[depth].as_slice()
+                as *const [u64];
+            *equiv_state = EquivState::Ready(ptr);
+            ptr
+        }
+    }
+
+    #[inline(always)]
+    fn mask_low_bits(n: usize) -> u64 {
+        if n >= 64 { !0u64 } else { (1u64 << n) - 1 }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn min_state_val_with_hash(
+        &mut self,
+        set: &[usize],
+        hash: u64,
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+        known_quick_lb: u32,
+    ) -> u32 {
+        let c_len = set.len();
+        if c_len <= 2 {
+            return match c_len {
+                0 => 0,
+                1 => 1,
+                _ => 3,
+            };
+        }
+
+        self.local_metrics.max_depth = self.local_metrics.max_depth.max(depth);
+
+        let mut cached_lower_bound = 0;
+        if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+            self.local_metrics.cache_hits += 1;
+            if is_exact {
+                return cached_val;
+            } else {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cached_val >= cutoff {
+                    return cached_val;
+                }
+                cached_lower_bound = cached_val;
+            }
+        }
+
+        self.local_metrics.states_evaluated += 1;
+        if known_quick_lb != 0 {
+            cached_lower_bound = cached_lower_bound.max(known_quick_lb);
+        } else if cached_lower_bound == 0 && c_len <= 15 {
+            let (val, is_exact) = quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, set);
+            if is_exact {
+                self.cache.insert_set(hash, set, val, true);
+                cert_record!(1, set, val, true);
+                return val;
+            }
+            cached_lower_bound = cached_lower_bound.max(val);
+        }
+
+        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
+        let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
+        cached_lower_bound = cached_lower_bound.max(parent_lb);
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+        if cached_lower_bound >= cutoff {
+            self.cache.insert_set(hash, set, cached_lower_bound, false);
+            cert_record!(2, set, cached_lower_bound, false);
+            return cached_lower_bound;
+        }
+
+        let mut best_val = beta;
+        let mut cut_by_global = false;
+        let mut equiv_state = if c_len >= 40 {
+            EquivState::Ready(parent_active_guesses as *const [u64])
+        } else {
+            EquivState::Uncomputed {
+                set_hash: hash,
+                parent_ptr: parent_active_guesses as *const [u64],
+            }
+        };
+
+        let mut local_lb = parent_lb.max(cached_lower_bound);
+        let counts_ptr = self
+            .scratch
+            .as_mut()
+            .unwrap()
+            .scratch_state_counts
+            .as_mut_ptr();
+        let mut non_empty_indices = std::mem::MaybeUninit::<[u16; R]>::uninit();
+        let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+
+        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
+        let matrix_data_ptr = self.matrix.data_ptr::<Elem>();
+
+        let mut phase1_tuples =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth]);
+        phase1_tuples.clear();
+        let mut phase2_tuples =
+            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth]);
+        phase2_tuples.clear();
+
+        let mut local_max_k = 0;
+        let mut valid_phase1_k = 0;
+        let mut min_val_found = u32::MAX;
+        let mut k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+        let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+        let mut max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+
+        let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+        let parent_active_ptr = parent_active_guesses.as_ptr();
+        let set_ptr = set.as_ptr();
+        let mut r_buf = std::mem::MaybeUninit::<[u16; 256]>::uninit();
+        let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+        phase1_tuples.reserve(c_len);
+        for (cand_idx, &cand) in set.iter().enumerate() {
+            let g = unsafe { *cand_to_guess_ptr.add(cand) };
+            if (unsafe { *parent_active_ptr.add(g >> 6) } & (1u64 << (g & 63))) == 0 {
+                continue;
+            }
+            let g_off = g * self.matrix.num_candidates;
+            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
+            let mut num_non_empty = 0;
+            let mut duplicates = 0;
+            if M <= 4 {
+                let mut seen = [0u64; M];
+                let mut seen2 = [0u64; M];
+                let mut has_size_ge_3 = false;
+                let mut aborted = false;
+                macro_rules! check_cand_dup {
+                    ($r:expr) => {{
+                        let r = $r;
+                        let word_idx = r >> 6;
+                        let bit = 1u64 << (r & 63);
+                        let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                        if (*word & bit) != 0 {
+                            duplicates += 1;
+                            let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                            if (*word2 & bit) != 0 {
+                                has_size_ge_3 = true;
+                            } else {
+                                *word2 |= bit;
+                            }
+                            if duplicates > max_allowed_duplicates {
+                                aborted = true;
+                                break;
+                            }
+                        } else {
+                            *word |= bit;
+                        }
+                    }};
+                }
+                if c_len <= 256 {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r0 as u16;
+                            *r_buf_ptr.add(i + 1) = r1 as u16;
+                            *r_buf_ptr.add(i + 2) = r2 as u16;
+                            *r_buf_ptr.add(i + 3) = r3 as u16;
+                        }
+                        check_cand_dup!(r0);
+                        check_cand_dup!(r1);
+                        check_cand_dup!(r2);
+                        check_cand_dup!(r3);
+                        i += 4;
+                    }
+                    while !aborted && i < cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            *r_buf_ptr.add(i) = r as u16;
+                        }
+                        check_cand_dup!(r);
+                        i += 1;
+                    }
+                    if !aborted {
+                        let mut i = cand_idx + 1;
+                        while i + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(i) };
+                            let c1 = unsafe { *set_ptr.add(i + 1) };
+                            let c2 = unsafe { *set_ptr.add(i + 2) };
+                            let c3 = unsafe { *set_ptr.add(i + 3) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            unsafe {
+                                *r_buf_ptr.add(i) = r0 as u16;
+                                *r_buf_ptr.add(i + 1) = r1 as u16;
+                                *r_buf_ptr.add(i + 2) = r2 as u16;
+                                *r_buf_ptr.add(i + 3) = r3 as u16;
+                            }
+                            check_cand_dup!(r0);
+                            check_cand_dup!(r1);
+                            check_cand_dup!(r2);
+                            check_cand_dup!(r3);
+                            i += 4;
+                        }
+                        while !aborted && i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            unsafe {
+                                *r_buf_ptr.add(i) = r as u16;
+                            }
+                            check_cand_dup!(r);
+                            i += 1;
+                        }
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        check_cand_dup!(r0);
+                        check_cand_dup!(r1);
+                        check_cand_dup!(r2);
+                        check_cand_dup!(r3);
+                        i += 4;
+                    }
+                    while !aborted && i < cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        check_cand_dup!(r);
+                        i += 1;
+                    }
+                    if !aborted {
+                        let mut i = cand_idx + 1;
+                        while i + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(i) };
+                            let c1 = unsafe { *set_ptr.add(i + 1) };
+                            let c2 = unsafe { *set_ptr.add(i + 2) };
+                            let c3 = unsafe { *set_ptr.add(i + 3) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            check_cand_dup!(r0);
+                            check_cand_dup!(r1);
+                            check_cand_dup!(r2);
+                            check_cand_dup!(r3);
+                            i += 4;
+                        }
+                        while !aborted && i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            check_cand_dup!(r);
+                            i += 1;
+                        }
+                    }
+                }
+                if aborted {
+                    min_val_found = min_val_found.min(best_val);
+                    continue;
+                }
+                if !has_size_ge_3 {
+                    let total_non_empty = c_len - duplicates;
+                    if total_non_empty > local_max_k {
+                        local_max_k = total_non_empty;
+                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                    }
+                    let lb_cost = (2 * c_len - 1 + duplicates) as u32;
+                    if lb_cost < best_val {
+                        if total_non_empty > valid_phase1_k {
+                            valid_phase1_k = total_non_empty;
+                        }
+                        self.local_metrics.guesses_evaluated += 1;
+                        min_val_found = min_val_found.min(lb_cost);
+                        best_val = lb_cost;
+                        if duplicates == 0 {
+                            break;
+                        }
+                        k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                    } else {
+                        min_val_found = min_val_found.min(lb_cost);
+                    }
+                    if min_k_needed > c_len {
+                        break;
+                    }
+                    continue;
+                }
+                let min_lb_cost = (2 * c_len - 1 + duplicates) as u32;
+                if min_lb_cost >= best_val && min_val_found <= min_lb_cost {
+                    let total_non_empty = c_len - duplicates;
+                    if total_non_empty > local_max_k {
+                        local_max_k = total_non_empty;
+                        min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                        max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                    }
+                    if min_k_needed > c_len {
+                        break;
+                    }
+                    continue;
+                }
+                if c_len <= 256 {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let r0 = unsafe { *r_buf_ptr.add(i) as usize };
+                        let r1 = unsafe { *r_buf_ptr.add(i + 1) as usize };
+                        let r2 = unsafe { *r_buf_ptr.add(i + 2) as usize };
+                        let r3 = unsafe { *r_buf_ptr.add(i + 3) as usize };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
+
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
+
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
+
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
+                        }
+                        i += 4;
+                    }
+                    while i < cand_idx {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                        i += 1;
+                    }
+                    let mut i = cand_idx + 1;
+                    while i + 3 < c_len {
+                        let r0 = unsafe { *r_buf_ptr.add(i) as usize };
+                        let r1 = unsafe { *r_buf_ptr.add(i + 1) as usize };
+                        let r2 = unsafe { *r_buf_ptr.add(i + 2) as usize };
+                        let r3 = unsafe { *r_buf_ptr.add(i + 3) as usize };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
+
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
+
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
+
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
+                        }
+                        i += 4;
+                    }
+                    while i < c_len {
+                        let r = unsafe { *r_buf_ptr.add(i) as usize };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                        i += 1;
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 3 < cand_idx {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
+
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
+
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
+
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
+                        }
+                        i += 4;
+                    }
+                    while i < cand_idx {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                        i += 1;
+                    }
+                    let mut i = cand_idx + 1;
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            let cnt_ptr0 = counts_ptr.add(r0);
+                            let cnt0 = *cnt_ptr0;
+                            if cnt0 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr0 = cnt0 + 1;
+
+                            let cnt_ptr1 = counts_ptr.add(r1);
+                            let cnt1 = *cnt_ptr1;
+                            if cnt1 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr1 = cnt1 + 1;
+
+                            let cnt_ptr2 = counts_ptr.add(r2);
+                            let cnt2 = *cnt_ptr2;
+                            if cnt2 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr2 = cnt2 + 1;
+
+                            let cnt_ptr3 = counts_ptr.add(r3);
+                            let cnt3 = *cnt_ptr3;
+                            if cnt3 == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr3 = cnt3 + 1;
+                        }
+                        i += 4;
+                    }
+                    while i < c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                        i += 1;
+                    }
+                }
+            } else {
+                let mut aborted = false;
+                for i in 0..cand_idx {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
+                        } else {
+                            duplicates += 1;
+                            if duplicates > max_allowed_duplicates {
+                                for j in 0..num_non_empty {
+                                    let r_idx = *non_empty_indices_ptr.add(j) as usize;
+                                    *counts_ptr.add(r_idx) = 0;
+                                }
+                                aborted = true;
+                                break;
+                            }
+                        }
+                        *cnt_ptr = cnt + 1;
+                    }
+                }
+                if !aborted {
+                    for i in (cand_idx + 1)..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            let cnt_ptr = counts_ptr.add(r);
+                            let cnt = *cnt_ptr;
+                            if cnt == 0 {
+                                *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                num_non_empty += 1;
+                            } else {
+                                duplicates += 1;
+                                if duplicates > max_allowed_duplicates {
+                                    for j in 0..num_non_empty {
+                                        let r_idx = *non_empty_indices_ptr.add(j) as usize;
+                                        *counts_ptr.add(r_idx) = 0;
+                                    }
+                                    aborted = true;
+                                    break;
+                                }
+                            }
+                            *cnt_ptr = cnt + 1;
+                        }
+                    }
+                }
+                if aborted {
+                    min_val_found = min_val_found.min(best_val);
                     continue;
                 }
             }
+            let total_non_empty = num_non_empty + 1;
+            if total_non_empty > local_max_k {
+                local_max_k = total_non_empty;
+                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+            }
+            if duplicates == 0 {
+                for j in 0..num_non_empty {
+                    unsafe {
+                        let r_idx = *non_empty_indices_ptr.add(j) as usize;
+                        *counts_ptr.add(r_idx) = 0;
+                    }
+                }
+                let lb_cost = (2 * c_len - 1) as u32;
+                if lb_cost < best_val {
+                    if total_non_empty > valid_phase1_k {
+                        valid_phase1_k = total_non_empty;
+                    }
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                } else {
+                    min_val_found = min_val_found.min(lb_cost);
+                }
+                break;
+            } else if duplicates == 1 {
+                for j in 0..num_non_empty {
+                    unsafe {
+                        let r_idx = *non_empty_indices_ptr.add(j) as usize;
+                        *counts_ptr.add(r_idx) = 0;
+                    }
+                }
+                let lb_cost = (2 * c_len) as u32;
+                if lb_cost < best_val {
+                    if total_non_empty > valid_phase1_k {
+                        valid_phase1_k = total_non_empty;
+                    }
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                    k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                } else {
+                    min_val_found = min_val_found.min(lb_cost);
+                }
+                if min_k_needed > c_len {
+                    break;
+                }
+                continue;
+            }
+            let (expected_rem, lb_cost) = if num_non_empty == 1 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                }
+                let rem_c = (c_len as u32) - 1;
+                (
+                    1 + rem_c * rem_c,
+                    (c_len as u32) + unsafe { *parent_cap_bounds_ptr.add(rem_c as usize) },
+                )
+            } else if num_non_empty == 2 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                }
+                let count1 = (c_len as u32 - 1) - count0;
+                (
+                    1 + count0 * count0 + count1 * count1,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) },
+                )
+            } else if num_non_empty == 3 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                }
+                let count2 = (c_len as u32 - 1) - count0 - count1;
+                (
+                    1 + count0 * count0 + count1 * count1 + count2 * count2,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) },
+                )
+            } else if num_non_empty == 4 {
+                let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                let count0 = unsafe { *counts_ptr.add(r0) } as u32;
+                let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                let count1 = unsafe { *counts_ptr.add(r1) } as u32;
+                let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                let count2 = unsafe { *counts_ptr.add(r2) } as u32;
+                let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                unsafe {
+                    *counts_ptr.add(r0) = 0;
+                    *counts_ptr.add(r1) = 0;
+                    *counts_ptr.add(r2) = 0;
+                    *counts_ptr.add(r3) = 0;
+                }
+                let count3 = (c_len as u32 - 1) - count0 - count1 - count2;
+                (
+                    1 + count0 * count0 + count1 * count1 + count2 * count2 + count3 * count3,
+                    (c_len as u32)
+                        + unsafe { *parent_cap_bounds_ptr.add(count0 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count1 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count2 as usize) }
+                        + unsafe { *parent_cap_bounds_ptr.add(count3 as usize) },
+                )
+            } else {
+                unsafe {
+                    eval_non_empty_buckets_5_plus(
+                        c_len as u32,
+                        c_len as u32 - 1,
+                        1,
+                        num_non_empty,
+                        non_empty_indices_ptr,
+                        counts_ptr,
+                        parent_cap_bounds_ptr,
+                    )
+                }
+            };
+            if lb_cost < best_val {
+                if total_non_empty > valid_phase1_k {
+                    valid_phase1_k = total_non_empty;
+                }
+                if expected_rem == (c_len + 2 * duplicates) as u32 {
+                    self.local_metrics.guesses_evaluated += 1;
+                    min_val_found = min_val_found.min(lb_cost);
+                    best_val = lb_cost;
+                    k_to_beat_best = (3 * c_len as u32).saturating_sub(best_val) as usize;
+                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                } else {
+                    phase1_tuples.push(GuessTuple {
+                        lb: lb_cost,
+                        exp: expected_rem,
+                        g: g as u32,
+                    });
+                }
+            } else {
+                min_val_found = min_val_found.min(lb_cost);
+            }
+            if min_k_needed > c_len {
+                break;
+            }
+        }
+        if best_val > local_lb && !phase1_tuples.is_empty() {
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if self.current_cost_so_far + local_lb >= current_global_beta {
+                cut_by_global = true;
+            } else {
+                sort_guess_tuples(&mut phase1_tuples);
 
-            let g_offset = g * matrix.num_candidates;
-            let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
-            let mut num_non_empty = 0;
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                if counts[r] == 0 {
-                    non_empty_indices[num_non_empty] = r as u8;
+                for (idx, &tuple) in phase1_tuples.iter().enumerate() {
+                    if idx + 1 < phase1_tuples.len() {
+                        let next_g = unsafe { phase1_tuples.get_unchecked(idx + 1).g as usize };
+                        let first_cand = unsafe { *set.get_unchecked(0) };
+                        #[cfg(target_arch = "x86_64")]
+                        unsafe {
+                            let next_ptr = self
+                                .matrix
+                                .data_ptr::<Elem>()
+                                .add(next_g * self.matrix.num_candidates + first_cand)
+                                as *const i8;
+                            core::arch::x86_64::_mm_prefetch(
+                                next_ptr,
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+                    }
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    if self.current_cost_so_far + local_lb >= current_global_beta {
+                        cut_by_global = true;
+                        break;
+                    }
+                    if self.current_cost_so_far + tuple.lb >= current_global_beta {
+                        cut_by_global = true;
+                        min_val_found = min_val_found.min(tuple.lb);
+                        self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                        break;
+                    }
+                    if tuple.lb >= best_val {
+                        min_val_found = min_val_found.min(tuple.lb);
+                        self.local_metrics.pruned_by_bounds += phase1_tuples.len() - idx;
+                        break;
+                    }
+                    let val = self.min_guess_val_inner(
+                        set,
+                        &mut equiv_state,
+                        tuple.g as usize,
+                        best_val,
+                        depth,
+                        parent_max_k,
+                    );
+                    min_val_found = min_val_found.min(val);
+                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
+                        cut_by_global = true;
+                    }
+                    if val < best_val {
+                        best_val = val;
+                        if best_val <= local_lb {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        let phase2_min_lb = heuristic::phase2_capacity_bound(c_len, parent_max_k, parent_max_k);
+        let phase2_effective_lb = local_lb.max(phase2_min_lb);
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        if best_val > phase2_effective_lb
+            && self.current_cost_so_far + phase2_effective_lb < current_global_beta
+        {
+            let mut valid_phase2_k = 0;
+            let mut k_to_beat_best =
+                (3 * c_len as u32).saturating_sub(best_val.saturating_sub(1)) as usize;
+            let mut min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+            if c_len >= min_k_needed {
+                let active_guesses_slice =
+                    unsafe { &*self.get_or_compute_active_guesses(set, depth, &mut equiv_state) };
+                let num_guesses = self.dict.guesses.len();
+                phase2_tuples.reserve(num_guesses);
+
+                let mut max_allowed_duplicates = c_len - min_k_needed;
+                let mut is_in_set =
+                    std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
+                let is_in_set_ptr = is_in_set.as_mut_ptr();
+                let cand_to_guess_ptr = self.dict.candidate_to_guess.as_ptr();
+                let cand_masks_ptr = self.matrix.candidate_masks.as_ptr();
+                let set_ptr = set.as_ptr();
+                let data_c_g_ptr = self.matrix.data_cg_ptr::<Elem>();
+                let mut stack_c_ptrs = std::mem::MaybeUninit::<[*const Elem; 256]>::uninit();
+                let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const Elem;
+                let heap_c_ptrs = if c_len > 256 {
+                    let mut v = Vec::with_capacity(c_len);
+                    for i in 0..c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        v.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
+                    }
+                    Some(v)
+                } else {
+                    None
+                };
+
+                let mut c_mask = 0u32;
+                let mut multi_c_mask = 0u32;
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    let m = unsafe { *cand_masks_ptr.add(c) };
+                    multi_c_mask |= c_mask & m;
+                    c_mask |= m;
+                    unsafe {
+                        *is_in_set_ptr.add(g >> 6) |= 1u64 << (g & 63);
+                        if c_len <= 256 {
+                            *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                        }
+                    }
+                }
+                let guess_masks_ptr = self.matrix.guess_masks.as_ptr();
+                let c_ptrs: &[*const Elem] = if c_len <= 256 {
+                    unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, c_len) }
+                } else {
+                    heap_c_ptrs.as_ref().unwrap()
+                };
+
+                let c_ptrs_ptr = c_ptrs.as_ptr();
+                'guess_loop: for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
+                    if block == 0 {
+                        continue;
+                    }
+                    let mut b = block & !unsafe { *is_in_set_ptr.add(block_idx) };
+                    if b == 0 {
+                        continue;
+                    }
+                    let block_base = block_idx << 6;
+                    while b != 0 {
+                        let tz = b.trailing_zeros();
+                        let g = block_base | (tz as usize);
+                        b &= b - 1;
+
+                        let g_mask = unsafe { *guess_masks_ptr.add(g) };
+                        let shared = g_mask & c_mask;
+                        if (shared & shared.wrapping_sub(1)) == 0 && (shared & multi_c_mask) == 0 {
+                            continue;
+                        }
+
+                        let mut num_non_empty = 0;
+                        let mut duplicates = 0;
+                        if M <= 4 {
+                            let mut seen = [0u64; M];
+                            let mut seen2 = [0u64; M];
+                            let mut has_size_ge_3 = false;
+                            let mut aborted = false;
+                            macro_rules! check_cand_dup {
+                                ($r:expr) => {{
+                                    let r = $r;
+                                    let word_idx = r >> 6;
+                                    let bit = 1u64 << (r & 63);
+                                    let word = unsafe { seen.get_unchecked_mut(word_idx) };
+                                    if (*word & bit) != 0 {
+                                        duplicates += 1;
+                                        let word2 = unsafe { seen2.get_unchecked_mut(word_idx) };
+                                        if (*word2 & bit) != 0 {
+                                            has_size_ge_3 = true;
+                                        } else {
+                                            *word2 |= bit;
+                                        }
+                                        if duplicates > max_allowed_duplicates {
+                                            aborted = true;
+                                            break;
+                                        }
+                                    } else {
+                                        *word |= bit;
+                                    }
+                                }};
+                            }
+                            if c_len <= 256 {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                    let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                    let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                    let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                    let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                    let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                    let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                    unsafe {
+                                        *r_buf_ptr.add(c_idx) = r0 as u16;
+                                        *r_buf_ptr.add(c_idx + 1) = r1 as u16;
+                                        *r_buf_ptr.add(c_idx + 2) = r2 as u16;
+                                        *r_buf_ptr.add(c_idx + 3) = r3 as u16;
+                                    }
+                                    check_cand_dup!(r0);
+                                    check_cand_dup!(r1);
+                                    check_cand_dup!(r2);
+                                    check_cand_dup!(r3);
+                                    c_idx += 4;
+                                }
+                                while !aborted && c_idx < c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        *r_buf_ptr.add(c_idx) = r as u16;
+                                    }
+                                    check_cand_dup!(r);
+                                    c_idx += 1;
+                                }
+                            } else {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                    let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                    let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                    let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                    let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                    let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                    let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                    check_cand_dup!(r0);
+                                    check_cand_dup!(r1);
+                                    check_cand_dup!(r2);
+                                    check_cand_dup!(r3);
+                                    c_idx += 4;
+                                }
+                                while !aborted && c_idx < c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    check_cand_dup!(r);
+                                    c_idx += 1;
+                                }
+                            }
+                            if aborted {
+                                min_val_found = min_val_found.min(best_val);
+                                continue;
+                            }
+                            if !has_size_ge_3 {
+                                num_non_empty = c_len - duplicates;
+                                if num_non_empty > local_max_k {
+                                    local_max_k = num_non_empty;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                                }
+                                let lb_cost = (2 * c_len + duplicates) as u32;
+                                if lb_cost < best_val {
+                                    if num_non_empty > valid_phase2_k {
+                                        valid_phase2_k = num_non_empty;
+                                    }
+                                    self.local_metrics.guesses_evaluated += 1;
+                                    min_val_found = min_val_found.min(lb_cost);
+                                    best_val = lb_cost;
+                                    if duplicates == 0 {
+                                        break 'guess_loop;
+                                    }
+                                    k_to_beat_best = (3 * c_len as u32)
+                                        .saturating_sub(best_val.saturating_sub(1))
+                                        as usize;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                                } else {
+                                    min_val_found = min_val_found.min(lb_cost);
+                                }
+                                if min_k_needed > c_len {
+                                    break 'guess_loop;
+                                }
+                                continue;
+                            }
+                            let min_lb_cost = (2 * c_len + duplicates) as u32;
+                            if c_len - duplicates >= 3
+                                && min_lb_cost >= best_val
+                                && min_val_found <= min_lb_cost
+                            {
+                                num_non_empty = c_len - duplicates;
+                                if num_non_empty > local_max_k {
+                                    local_max_k = num_non_empty;
+                                    min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                    max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                                }
+                                if min_k_needed > c_len {
+                                    break 'guess_loop;
+                                }
+                                continue;
+                            }
+                            if c_len <= 256 {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let r0 = unsafe { *r_buf_ptr.add(c_idx) as usize };
+                                    let r1 = unsafe { *r_buf_ptr.add(c_idx + 1) as usize };
+                                    let r2 = unsafe { *r_buf_ptr.add(c_idx + 2) as usize };
+                                    let r3 = unsafe { *r_buf_ptr.add(c_idx + 3) as usize };
+                                    unsafe {
+                                        let cnt_ptr0 = counts_ptr.add(r0);
+                                        let cnt0 = *cnt_ptr0;
+                                        if cnt0 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr0 = cnt0 + 1;
+
+                                        let cnt_ptr1 = counts_ptr.add(r1);
+                                        let cnt1 = *cnt_ptr1;
+                                        if cnt1 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr1 = cnt1 + 1;
+
+                                        let cnt_ptr2 = counts_ptr.add(r2);
+                                        let cnt2 = *cnt_ptr2;
+                                        if cnt2 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr2 = cnt2 + 1;
+
+                                        let cnt_ptr3 = counts_ptr.add(r3);
+                                        let cnt3 = *cnt_ptr3;
+                                        if cnt3 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr3 = cnt3 + 1;
+                                    }
+                                    c_idx += 4;
+                                }
+                                while c_idx < c_len {
+                                    let r = unsafe { *r_buf_ptr.add(c_idx) as usize };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
+                                    }
+                                    c_idx += 1;
+                                }
+                            } else {
+                                let mut c_idx = 0;
+                                while c_idx + 3 < c_len {
+                                    let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                    let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                    let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                    let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                    let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                    let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                    let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                    unsafe {
+                                        let cnt_ptr0 = counts_ptr.add(r0);
+                                        let cnt0 = *cnt_ptr0;
+                                        if cnt0 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr0 = cnt0 + 1;
+
+                                        let cnt_ptr1 = counts_ptr.add(r1);
+                                        let cnt1 = *cnt_ptr1;
+                                        if cnt1 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr1 = cnt1 + 1;
+
+                                        let cnt_ptr2 = counts_ptr.add(r2);
+                                        let cnt2 = *cnt_ptr2;
+                                        if cnt2 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr2 = cnt2 + 1;
+
+                                        let cnt_ptr3 = counts_ptr.add(r3);
+                                        let cnt3 = *cnt_ptr3;
+                                        if cnt3 == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr3 = cnt3 + 1;
+                                    }
+                                    c_idx += 4;
+                                }
+                                while c_idx < c_len {
+                                    let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                    let r = unsafe { (*c_base.add(g)).to_usize() };
+                                    unsafe {
+                                        let cnt_ptr = counts_ptr.add(r);
+                                        let cnt = *cnt_ptr;
+                                        if cnt == 0 {
+                                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                            num_non_empty += 1;
+                                        }
+                                        *cnt_ptr = cnt + 1;
+                                    }
+                                    c_idx += 1;
+                                }
+                            }
+                        } else {
+                            let mut aborted = false;
+                            for c_idx in 0..c_len {
+                                let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let r = unsafe { (*c_base.add(g)).to_usize() };
+                                unsafe {
+                                    let cnt_ptr = counts_ptr.add(r);
+                                    let cnt = *cnt_ptr;
+                                    if cnt == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                        num_non_empty += 1;
+                                    } else {
+                                        duplicates += 1;
+                                        if duplicates > max_allowed_duplicates {
+                                            for i in 0..num_non_empty {
+                                                let r_idx = *non_empty_indices_ptr.add(i) as usize;
+                                                *counts_ptr.add(r_idx) = 0;
+                                            }
+                                            aborted = true;
+                                            break;
+                                        }
+                                    }
+                                    *cnt_ptr = cnt + 1;
+                                }
+                            }
+                            if aborted {
+                                min_val_found = min_val_found.min(best_val);
+                                continue;
+                            }
+                        }
+                        if num_non_empty == 1 {
+                            unsafe {
+                                let r_idx = *non_empty_indices_ptr.add(0) as usize;
+                                *counts_ptr.add(r_idx) = 0;
+                            }
+                            continue;
+                        }
+                        let (expected_rem, lb_cost) = if num_non_empty == 2 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                            }
+                            if count0 == 1 || count0 == (c_len as u16 - 1) {
+                                continue;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = (c_len as u32) - c0;
+                            (
+                                c0 * c0 + c1 * c1,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) },
+                            )
+                        } else if num_non_empty == 3 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = (c_len as u32) - c0 - c1;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) },
+                            )
+                        } else if num_non_empty == 4 {
+                            let r0 = unsafe { *non_empty_indices_ptr.add(0) as usize };
+                            let count0 = unsafe { *counts_ptr.add(r0) };
+                            let r1 = unsafe { *non_empty_indices_ptr.add(1) as usize };
+                            let count1 = unsafe { *counts_ptr.add(r1) };
+                            let r2 = unsafe { *non_empty_indices_ptr.add(2) as usize };
+                            let count2 = unsafe { *counts_ptr.add(r2) };
+                            let r3 = unsafe { *non_empty_indices_ptr.add(3) as usize };
+                            unsafe {
+                                *counts_ptr.add(r0) = 0;
+                                *counts_ptr.add(r1) = 0;
+                                *counts_ptr.add(r2) = 0;
+                                *counts_ptr.add(r3) = 0;
+                            }
+                            let c0 = count0 as u32;
+                            let c1 = count1 as u32;
+                            let c2 = count2 as u32;
+                            let c3 = (c_len as u32) - c0 - c1 - c2;
+                            (
+                                c0 * c0 + c1 * c1 + c2 * c2 + c3 * c3,
+                                (c_len as u32)
+                                    + unsafe { *parent_cap_bounds_ptr.add(c0 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c1 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c2 as usize) }
+                                    + unsafe { *parent_cap_bounds_ptr.add(c3 as usize) },
+                            )
+                        } else {
+                            unsafe {
+                                eval_non_empty_buckets_5_plus(
+                                    c_len as u32,
+                                    c_len as u32,
+                                    0,
+                                    num_non_empty,
+                                    non_empty_indices_ptr,
+                                    counts_ptr,
+                                    parent_cap_bounds_ptr,
+                                )
+                            }
+                        };
+                        if num_non_empty > local_max_k {
+                            local_max_k = num_non_empty;
+                            min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                            max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                        }
+                        if lb_cost < best_val {
+                            if num_non_empty > valid_phase2_k {
+                                valid_phase2_k = num_non_empty;
+                            }
+                            if expected_rem == (c_len + 2 * duplicates) as u32 {
+                                self.local_metrics.guesses_evaluated += 1;
+                                min_val_found = min_val_found.min(lb_cost);
+                                best_val = lb_cost;
+                                k_to_beat_best = (3 * c_len as u32)
+                                    .saturating_sub(best_val.saturating_sub(1))
+                                    as usize;
+                                min_k_needed = (local_max_k + 1).min(k_to_beat_best);
+                                max_allowed_duplicates = c_len.saturating_sub(min_k_needed);
+                            } else {
+                                phase2_tuples.push(GuessTuple {
+                                    lb: lb_cost,
+                                    exp: expected_rem,
+                                    g: g as u32,
+                                });
+                            }
+                        } else {
+                            min_val_found = min_val_found.min(lb_cost);
+                        }
+                        if min_k_needed > c_len {
+                            break 'guess_loop;
+                        }
+                    }
+                }
+                let set_ptr = set.as_ptr();
+                for i in 0..c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let g = unsafe { *cand_to_guess_ptr.add(c) };
+                    unsafe {
+                        *is_in_set_ptr.add(g >> 6) = 0;
+                    }
+                }
+                self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
+            } else {
+                min_val_found = min_val_found.min(best_val);
+            }
+
+            let base_lb = unsafe {
+                *self
+                    .capacity_bounds_2d
+                    .get_unchecked(local_max_k)
+                    .get_unchecked(c_len)
+            };
+            if base_lb > local_lb {
+                local_lb = base_lb;
+            }
+
+            let phase1_lb = if valid_phase1_k > 0 {
+                heuristic::tight_capacity_bound(c_len, valid_phase1_k, local_max_k)
+            } else {
+                u32::MAX
+            };
+            let phase2_lb = if valid_phase2_k > 0 {
+                heuristic::phase2_capacity_bound(c_len, valid_phase2_k, local_max_k)
+            } else {
+                u32::MAX
+            };
+            let tight_lb = phase1_lb.min(phase2_lb);
+            if tight_lb != u32::MAX && tight_lb > local_lb {
+                local_lb = tight_lb;
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            if local_lb < best_val {
+                if self.current_cost_so_far + local_lb >= current_global_beta {
+                    cut_by_global = true;
+                } else if !phase2_tuples.is_empty() {
+                    sort_guess_tuples(&mut phase2_tuples);
+
+                    for (idx, &tuple) in phase2_tuples.iter().enumerate() {
+                        if idx + 1 < phase2_tuples.len() {
+                            let next_g = unsafe { phase2_tuples.get_unchecked(idx + 1).g as usize };
+                            let first_cand = unsafe { *set.get_unchecked(0) };
+                            #[cfg(target_arch = "x86_64")]
+                            unsafe {
+                                let next_ptr = self
+                                    .matrix
+                                    .data_ptr::<Elem>()
+                                    .add(next_g * self.matrix.num_candidates + first_cand)
+                                    as *const i8;
+                                core::arch::x86_64::_mm_prefetch(
+                                    next_ptr,
+                                    core::arch::x86_64::_MM_HINT_T0,
+                                );
+                            }
+                        }
+                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                        if self.current_cost_so_far + local_lb >= current_global_beta {
+                            cut_by_global = true;
+                            break;
+                        }
+                        if self.current_cost_so_far + tuple.lb >= current_global_beta {
+                            cut_by_global = true;
+                            min_val_found = min_val_found.min(tuple.lb);
+                            self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
+                            break;
+                        }
+                        if tuple.lb >= best_val {
+                            min_val_found = min_val_found.min(tuple.lb);
+                            self.local_metrics.pruned_by_bounds += phase2_tuples.len() - idx;
+                            break;
+                        }
+                        let val = self.min_guess_val_inner(
+                            set,
+                            &mut equiv_state,
+                            tuple.g as usize,
+                            best_val,
+                            depth,
+                            local_max_k,
+                        );
+                        min_val_found = min_val_found.min(val);
+                        if self.current_cost_so_far + val
+                            >= self.global_beta.load(Ordering::Relaxed)
+                        {
+                            cut_by_global = true;
+                        }
+                        if val < best_val {
+                            best_val = val;
+                            if best_val <= local_lb {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if best_val > phase2_effective_lb {
+                cut_by_global = true;
+            }
+            min_val_found = min_val_found.min(phase2_min_lb);
+        }
+
+        self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth] = phase1_tuples;
+        self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth] = phase2_tuples;
+
+        let is_exact = best_val < beta;
+        if is_exact {
+            if !cut_by_global {
+                self.cache.insert_set(hash, set, best_val, true);
+            }
+            crate::certlog::record_tagged(10, set, best_val, true, cut_by_global);
+            best_val
+        } else {
+            let mut final_lb = beta.max(local_lb);
+            if best_val > local_lb && min_val_found != u32::MAX {
+                final_lb = final_lb.max(min_val_found);
+            }
+            if !cut_by_global {
+                self.cache.insert_set(hash, set, final_lb, false);
+            }
+            crate::certlog::record_tagged(11, set, final_lb, false, cut_by_global);
+            final_lb
+        }
+    }
+
+    #[inline(always)]
+    pub fn min_guess_val(
+        &mut self,
+        set: &[usize],
+        active_guesses_slice: &[u64],
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let mut equiv_state = EquivState::Ready(active_guesses_slice as *const [u64]);
+        self.min_guess_val_inner(set, &mut equiv_state, guess, beta, depth, parent_max_k)
+    }
+
+    fn min_guess_val_inner(
+        &mut self,
+        set: &[usize],
+        equiv_state: &mut EquivState,
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+        let beta = beta.min(current_global_beta);
+
+        self.local_metrics.guesses_evaluated += 1;
+        if self.local_metrics.guesses_evaluated >= 1024 {
+            self.flush_metrics();
+        }
+
+        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
+        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
+        let c_len = set.len();
+        let g_offset = guess * self.matrix.num_candidates;
+        let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
+
+        if c_len <= 16 {
+            let set_ptr = set.as_ptr();
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let mut r_buf = std::mem::MaybeUninit::<[u16; 16]>::uninit();
+            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+
+            let mut seen = [0u64; M];
+            let mut seen2 = [0u64; M];
+            let mut seen3 = [0u64; M];
+            let mut num_non_empty = 0usize;
+            let mut num_eval = 0usize;
+            let mut responses = [0u16; 5];
+
+            let mut cand_idx = 0;
+            while cand_idx + 1 < c_len {
+                let c0 = unsafe { *set_ptr.add(cand_idx) };
+                let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
+                let r1 = unsafe { (*g_ptr.add(c1)).to_u16() };
+                unsafe {
+                    *r_buf_ptr.add(cand_idx) = r0;
+                    *r_buf_ptr.add(cand_idx + 1) = r1;
+                }
+                let w0 = (r0 as usize) >> 6;
+                let b0 = 1u64 << (r0 & 63);
+                let word0 = unsafe { seen.get_unchecked_mut(w0) };
+                if (*word0 & b0) != 0 {
+                    let word2_0 = unsafe { seen2.get_unchecked_mut(w0) };
+                    if (*word2_0 & b0) != 0 {
+                        let word3_0 = unsafe { seen3.get_unchecked_mut(w0) };
+                        if (*word3_0 & b0) == 0 {
+                            *word3_0 |= b0;
+                            unsafe {
+                                *responses.get_unchecked_mut(num_eval) = r0;
+                            }
+                            num_eval += 1;
+                        }
+                    } else {
+                        *word2_0 |= b0;
+                    }
+                } else {
+                    *word0 |= b0;
                     num_non_empty += 1;
                 }
-                counts[r] += 1;
+                let w1 = (r1 as usize) >> 6;
+                let b1 = 1u64 << (r1 & 63);
+                let word1 = unsafe { seen.get_unchecked_mut(w1) };
+                if (*word1 & b1) != 0 {
+                    let word2_1 = unsafe { seen2.get_unchecked_mut(w1) };
+                    if (*word2_1 & b1) != 0 {
+                        let word3_1 = unsafe { seen3.get_unchecked_mut(w1) };
+                        if (*word3_1 & b1) == 0 {
+                            *word3_1 |= b1;
+                            unsafe {
+                                *responses.get_unchecked_mut(num_eval) = r1;
+                            }
+                            num_eval += 1;
+                        }
+                    } else {
+                        *word2_1 |= b1;
+                    }
+                } else {
+                    *word1 |= b1;
+                    num_non_empty += 1;
+                }
+                cand_idx += 2;
+            }
+            if cand_idx < c_len {
+                let c = unsafe { *set_ptr.add(cand_idx) };
+                let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                unsafe {
+                    *r_buf_ptr.add(cand_idx) = r;
+                }
+                let w = (r as usize) >> 6;
+                let b = 1u64 << (r & 63);
+                let word = unsafe { seen.get_unchecked_mut(w) };
+                if (*word & b) != 0 {
+                    let word2 = unsafe { seen2.get_unchecked_mut(w) };
+                    if (*word2 & b) != 0 {
+                        let word3 = unsafe { seen3.get_unchecked_mut(w) };
+                        if (*word3 & b) == 0 {
+                            *word3 |= b;
+                            unsafe {
+                                *responses.get_unchecked_mut(num_eval) = r;
+                            }
+                            num_eval += 1;
+                        }
+                    } else {
+                        *word2 |= b;
+                    }
+                } else {
+                    *word |= b;
+                    num_non_empty += 1;
+                }
             }
 
             if num_non_empty <= 1 {
-                for i in 0..num_non_empty {
-                    counts[non_empty_indices[i] as usize] = 0;
+                return beta;
+            }
+
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            let has_win = (seen[WIN >> 6] & (1u64 << (WIN & 63))) != 0;
+            let mut cost = (3 * c_len - num_non_empty - (has_win as usize)) as u32;
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+            if num_eval == 0 {
+                return cost;
+            }
+
+            let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 5]>::uninit();
+            let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
+
+            if num_eval == 1 {
+                let r0 = responses[0];
+                let mut count0 = 0u16;
+                let mut hash0 = 0u64;
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r_1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r_0 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_1 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_2 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_3 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
                 }
-                continue;
+                while cand_idx < c_len {
+                    if unsafe { *r_buf_ptr.add(cand_idx) } == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 1;
+                }
+                let p_len = count0 as usize;
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                cost += lb - (2 * p_len - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                unsafe {
+                    *eval_entries_ptr = EvalEntry {
+                        hash: hash0,
+                        used_val: 0,
+                        r: r0,
+                        count: count0,
+                        is_exact: false,
+                    };
+                }
+            } else if num_eval == 2 {
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r_1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r_0 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_1 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_2 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_3 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
+                }
+                while cand_idx < c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 1;
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                unsafe {
+                    if count0 >= count1 {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                    } else {
+                        *eval_entries_ptr.add(0) = e1;
+                        *eval_entries_ptr.add(1) = e0;
+                    }
+                }
+            } else if num_eval == 3 {
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let r2 = responses[2];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut count2 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut hash2 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                let p_len2 = count2 as usize;
+                let lb2 = unsafe { *parent_cap_bounds_ptr.add(p_len2) };
+                cost += lb2 - (2 * p_len2 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let mut e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let mut e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                let mut e2 = EvalEntry {
+                    hash: hash2,
+                    used_val: 0,
+                    r: r2,
+                    count: count2,
+                    is_exact: false,
+                };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                }
+            } else if num_eval == 4 {
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let r2 = responses[2];
+                let r3 = responses[3];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut count2 = 0u16;
+                let mut count3 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut hash2 = 0u64;
+                let mut hash3 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                let p_len2 = count2 as usize;
+                let lb2 = unsafe { *parent_cap_bounds_ptr.add(p_len2) };
+                cost += lb2 - (2 * p_len2 - 1) as u32;
+                let p_len3 = count3 as usize;
+                let lb3 = unsafe { *parent_cap_bounds_ptr.add(p_len3) };
+                cost += lb3 - (2 * p_len3 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let mut e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let mut e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                let mut e2 = EvalEntry {
+                    hash: hash2,
+                    used_val: 0,
+                    r: r2,
+                    count: count2,
+                    is_exact: false,
+                };
+                let mut e3 = EvalEntry {
+                    hash: hash3,
+                    used_val: 0,
+                    r: r3,
+                    count: count3,
+                    is_exact: false,
+                };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e2.count < e3.count {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.count < e2.count {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.count < e3.count {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
+                }
+            } else if num_eval == 5 {
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let r2 = responses[2];
+                let r3 = responses[3];
+                let r4 = responses[4];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut count2 = 0u16;
+                let mut count3 = 0u16;
+                let mut count4 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut hash2 = 0u64;
+                let mut hash3 = 0u64;
+                let mut hash4 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r4 {
+                        count4 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash4 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                let p_len2 = count2 as usize;
+                let lb2 = unsafe { *parent_cap_bounds_ptr.add(p_len2) };
+                cost += lb2 - (2 * p_len2 - 1) as u32;
+                let p_len3 = count3 as usize;
+                let lb3 = unsafe { *parent_cap_bounds_ptr.add(p_len3) };
+                cost += lb3 - (2 * p_len3 - 1) as u32;
+                let p_len4 = count4 as usize;
+                let lb4 = unsafe { *parent_cap_bounds_ptr.add(p_len4) };
+                cost += lb4 - (2 * p_len4 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let mut e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let mut e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                let mut e2 = EvalEntry {
+                    hash: hash2,
+                    used_val: 0,
+                    r: r2,
+                    count: count2,
+                    is_exact: false,
+                };
+                let mut e3 = EvalEntry {
+                    hash: hash3,
+                    used_val: 0,
+                    r: r3,
+                    count: count3,
+                    is_exact: false,
+                };
+                let mut e4 = EvalEntry {
+                    hash: hash4,
+                    used_val: 0,
+                    r: r4,
+                    count: count4,
+                    is_exact: false,
+                };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e3.count < e4.count {
+                    std::mem::swap(&mut e3, &mut e4);
+                }
+                if e2.count < e4.count {
+                    std::mem::swap(&mut e2, &mut e4);
+                }
+                if e2.count < e3.count {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.count < e3.count {
+                    std::mem::swap(&mut e0, &mut e3);
+                }
+                if e1.count < e4.count {
+                    std::mem::swap(&mut e1, &mut e4);
+                }
+                if e0.count < e2.count {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.count < e3.count {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
+                    *eval_entries_ptr.add(4) = e4;
+                }
             }
 
-            let mut expected_rem = 0u32;
-            for i in 0..num_non_empty {
-                let r = non_empty_indices[i] as usize;
-                let count = counts[r] as u32;
-                expected_rem += count * count;
-                counts[r] = 0;
+            let mut small_offsets = [0u8; 5];
+            match num_eval {
+                1 => {}
+                2 => {
+                    small_offsets[1] = unsafe { (*eval_entries_ptr).count as u8 };
+                }
+                3 => {
+                    let c0 = unsafe { (*eval_entries_ptr).count as u8 };
+                    small_offsets[1] = c0;
+                    small_offsets[2] = c0 + unsafe { (*eval_entries_ptr.add(1)).count as u8 };
+                }
+                4 => {
+                    let c0 = unsafe { (*eval_entries_ptr).count as u8 };
+                    let c1 = c0 + unsafe { (*eval_entries_ptr.add(1)).count as u8 };
+                    small_offsets[1] = c0;
+                    small_offsets[2] = c1;
+                    small_offsets[3] = c1 + unsafe { (*eval_entries_ptr.add(2)).count as u8 };
+                }
+                5 => {
+                    let c0 = unsafe { (*eval_entries_ptr).count as u8 };
+                    let c1 = c0 + unsafe { (*eval_entries_ptr.add(1)).count as u8 };
+                    let c2 = c1 + unsafe { (*eval_entries_ptr.add(2)).count as u8 };
+                    let c3 = c2 + unsafe { (*eval_entries_ptr.add(3)).count as u8 };
+                    small_offsets[1] = c0;
+                    small_offsets[2] = c1;
+                    small_offsets[3] = c2;
+                    small_offsets[4] = c3;
+                }
+                _ => {}
             }
-            if expected_rem < min_expected_rem {
-                min_expected_rem = expected_rem;
-                best_guess = g;
+
+            let mut small_p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
+            let small_p_ptr = small_p.as_mut_ptr() as *mut usize;
+            let mut extracted_mask = 0u8;
+
+            let extract_bucket = |i: usize, target_r: u16, target_len: usize| {
+                let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
+                let mut found = 0;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == target_r {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        unsafe {
+                            *pi_ptr.add(found) = c;
+                        }
+                        found += 1;
+                        if found == target_len {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let mut all_exact = true;
+
+            if num_eval > 0 {
+                self.cache.prefetch(unsafe { (*eval_entries_ptr).hash });
             }
-        }
-
-        if best_guess == usize::MAX {
-            return u32::MAX; // Should not happen
-        }
-
-        let best_g_offset = best_guess * matrix.num_candidates;
-        let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
-        let mut counts = [0u16; 243];
-        for &c in set {
-            let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
-            counts[r] += 1;
-        }
-
-        let mut offsets = [0usize; 244];
-        for r_idx in 0..243 {
-            offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
-        }
-        let mut sorted_set = vec![0usize; set.len()];
-        let mut current_offsets = offsets;
-        for &c in set {
-            let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
-            let pos = current_offsets[r];
-            sorted_set[pos] = c;
-            current_offsets[r] += 1;
-        }
-
-        let mut cost = set.len() as u32;
-        for r_idx in 0..243 {
-            let p_len = counts[r_idx] as usize;
-            if p_len == 0 || r_idx == crate::core::Response::WIN.0 as usize {
-                continue;
+            if num_eval > 1 {
+                self.cache
+                    .prefetch(unsafe { (*eval_entries_ptr.add(1)).hash });
             }
-            let start = offsets[r_idx];
-            let end = start + p_len;
-            cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
+
+            for i in 0..num_eval {
+                if i + 2 < num_eval {
+                    self.cache
+                        .prefetch(unsafe { (*eval_entries_ptr.add(i + 2)).hash });
+                }
+                let entry = unsafe { &mut *eval_entries_ptr.add(i) };
+                let p_len = entry.count as usize;
+                let p_hash = entry.hash;
+                let initial_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                let (used_val, is_exact) =
+                    if let Some((cached_val, is_exact)) = self.cache.get(p_hash) {
+                        self.local_metrics.cache_hits += 1;
+                        (cached_val.max(initial_lb), is_exact)
+                    } else {
+                        extract_bucket(i, entry.r, p_len);
+                        extracted_mask |= 1 << i;
+                        let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
+                        let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
+                        let (quick_val, is_exact) =
+                            quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, p_slice);
+                        let used_val = quick_val.max(initial_lb);
+                        self.cache.insert_set(p_hash, p_slice, used_val, is_exact);
+                        cert_record!(4, p_slice, used_val, is_exact);
+                        (used_val, is_exact)
+                    };
+
+                entry.used_val = used_val;
+                entry.is_exact = is_exact;
+                if !is_exact {
+                    all_exact = false;
+                }
+
+                if used_val > initial_lb {
+                    cost += used_val - initial_lb;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        return cost;
+                    }
+                }
+            }
+
+            if all_exact {
+                return cost;
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+            let mut active_guesses_ptr: Option<*const [u64]> = None;
+
+            for i in 0..num_eval {
+                let entry = unsafe { *eval_entries_ptr.add(i) };
+                if entry.is_exact {
+                    continue;
+                }
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let used_val = entry.used_val;
+                let b = cost - used_val;
+                let new_beta = beta.saturating_sub(b);
+                let effective_beta =
+                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                if effective_beta <= used_val {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+
+                let p_len = entry.count as usize;
+                if (extracted_mask & (1 << i)) == 0 {
+                    extract_bucket(i, entry.r, p_len);
+                    extracted_mask |= 1 << i;
+                }
+                let pi_ptr = unsafe { small_p_ptr.add(small_offsets[i] as usize) };
+                let p_slice = unsafe { std::slice::from_raw_parts(pi_ptr, p_len) };
+                let p_hash = entry.hash;
+
+                let active_ptr = match active_guesses_ptr {
+                    Some(p) => p,
+                    None => {
+                        let p = self.get_or_compute_active_guesses(set, depth, equiv_state);
+                        active_guesses_ptr = Some(p);
+                        p
+                    }
+                };
+                let active_guesses_slice = unsafe { &*active_ptr };
+
+                let p_k = if p_len > 15 {
+                    crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p_slice)
+                        .min(p_len)
+                        .min(parent_max_k)
+                        .max(2)
+                } else {
+                    p_len.min(parent_max_k).max(2)
+                };
+                self.current_cost_so_far += b;
+                let val = self.min_state_val_with_hash(
+                    p_slice,
+                    p_hash,
+                    active_guesses_slice,
+                    effective_beta,
+                    depth + 1,
+                    p_k,
+                    used_val,
+                );
+                self.current_cost_so_far -= b;
+
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if b + val >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return b + val;
+                }
+                cost = b + val;
+            }
+            cost
+        } else {
+            let (counts_ptr, hashes_ptr, p_lbs_ptr, child_max_ks_ptr) = {
+                let s = self.scratch.as_mut().unwrap();
+                (
+                    s.scratch_guess_counts[depth].as_mut_ptr(),
+                    s.scratch_guess_hashes[depth].as_mut_ptr(),
+                    s.scratch_guess_p_lbs[depth].as_mut_ptr(),
+                    s.scratch_guess_child_max_ks[depth].as_mut_ptr(),
+                )
+            };
+
+            let mut eval_entries = std::mem::MaybeUninit::<[u32; R]>::uninit();
+            let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut u32;
+            let mut num_eval = 0;
+
+            let mut seen = [0u64; M];
+            let mut seen_ge_3 = [0u64; M];
+            let mut has_size_ge_3 = false;
+
+            struct GuessCleanup<const M: usize> {
+                counts_ptr: *mut u16,
+                seen_ptr: *const u64,
+            }
+
+            impl<const M: usize> Drop for GuessCleanup<M> {
+                #[inline(always)]
+                fn drop(&mut self) {
+                    unsafe {
+                        for m in 0..M {
+                            let mut word = *self.seen_ptr.add(m);
+                            while word != 0 {
+                                let bit_idx = word.trailing_zeros() as usize;
+                                let r = (m << 6) | bit_idx;
+                                word &= word - 1;
+                                *self.counts_ptr.add(r) = 0;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let is_contiguous_root = c_len == self.matrix.num_candidates
+                && Elem::IS_U8
+                && unsafe {
+                    *set.get_unchecked(0) == 0 && *set.get_unchecked(c_len - 1) == c_len - 1
+                };
+
+            let _cleanup = GuessCleanup::<M> {
+                counts_ptr,
+                seen_ptr: seen.as_ptr(),
+            };
+
+            let zobrist_ptr = self.matrix.zobrist.as_ptr();
+            let set_ptr = set.as_ptr();
+            let mut r_buf = std::mem::MaybeUninit::<[u16; 256]>::uninit();
+            let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
+            let can_buffer = c_len <= 256 && !is_contiguous_root;
+            let mut total_buckets = 0u32;
+            macro_rules! count_resp {
+                ($r:expr) => {
+                    let r = $r;
+                    let cnt = *counts_ptr.add(r) + 1;
+                    *counts_ptr.add(r) = cnt;
+                    if cnt == 1 {
+                        total_buckets += 1;
+                        *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    } else if cnt == 3 {
+                        has_size_ge_3 = true;
+                        *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    }
+                };
+            }
+
+            let mut i = 0;
+            if is_contiguous_root {
+                let g_u8_ptr = g_ptr as *const u8;
+                while i + 15 < c_len {
+                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                    unsafe {
+                        count_resp!((r_u64_0 & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 8) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 16) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 24) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 32) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 40) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 48) & 0xFF) as usize);
+                        count_resp!((r_u64_0 >> 56) as usize);
+                        count_resp!((r_u64_1 & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 8) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 16) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 24) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 32) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 40) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 48) & 0xFF) as usize);
+                        count_resp!((r_u64_1 >> 56) as usize);
+                    }
+                    i += 16;
+                }
+                while i + 7 < c_len {
+                    let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    unsafe {
+                        count_resp!((r_u64 & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 8) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 16) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 24) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 32) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 40) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 48) & 0xFF) as usize);
+                        count_resp!((r_u64 >> 56) as usize);
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    unsafe {
+                        count_resp!(*g_u8_ptr.add(i) as usize);
+                    }
+                    i += 1;
+                }
+            } else if can_buffer {
+                while i + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_u16() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_u16() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_u16() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_u16() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_u16() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_u16() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_u16() };
+
+                    unsafe {
+                        *r_buf_ptr.add(i) = r0;
+                        *r_buf_ptr.add(i + 1) = r1;
+                        *r_buf_ptr.add(i + 2) = r2;
+                        *r_buf_ptr.add(i + 3) = r3;
+                        *r_buf_ptr.add(i + 4) = r4;
+                        *r_buf_ptr.add(i + 5) = r5;
+                        *r_buf_ptr.add(i + 6) = r6;
+                        *r_buf_ptr.add(i + 7) = r7;
+
+                        count_resp!(r0 as usize);
+                        count_resp!(r1 as usize);
+                        count_resp!(r2 as usize);
+                        count_resp!(r3 as usize);
+                        count_resp!(r4 as usize);
+                        count_resp!(r5 as usize);
+                        count_resp!(r6 as usize);
+                        count_resp!(r7 as usize);
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_u16() };
+                    unsafe {
+                        *r_buf_ptr.add(i) = r;
+                        count_resp!(r as usize);
+                    }
+                    i += 1;
+                }
+            } else {
+                while i + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+
+                    unsafe {
+                        count_resp!(r0);
+                        count_resp!(r1);
+                        count_resp!(r2);
+                        count_resp!(r3);
+                        count_resp!(r4);
+                        count_resp!(r5);
+                        count_resp!(r6);
+                        count_resp!(r7);
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        count_resp!(r);
+                    }
+                    i += 1;
+                }
+            }
+            if total_buckets <= 1 {
+                return beta;
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+
+            let has_win = (unsafe { *seen.get_unchecked(WIN >> 6) } & (1u64 << (WIN & 63))) != 0;
+            let mut cost = (3 * c_len - total_buckets as usize - (has_win as usize)) as u32;
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                return cost;
+            }
+            if !has_size_ge_3 {
+                return cost;
+            }
+
+            for m in 0..M {
+                let mut word3 = unsafe { *seen_ge_3.get_unchecked(m) };
+                while word3 != 0 {
+                    let bit_idx = word3.trailing_zeros() as usize;
+                    let r = (m << 6) | bit_idx;
+                    word3 &= word3 - 1;
+                    let p_len = unsafe { *counts_ptr.add(r) as usize };
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    cost += lb - (2 * p_len - 1) as u32;
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        return cost;
+                    }
+                    let entry = ((p_len as u32) << 16) | ((!r as u16) as u32);
+                    unsafe {
+                        *eval_entries_ptr.add(num_eval) = entry;
+                    }
+                    num_eval += 1;
+                }
+            }
+
+            if num_eval == 0 {
+                return cost;
+            }
+
+            let split_idx = if num_eval == 1 {
+                let entry0 = unsafe { *eval_entries_ptr };
+                if (entry0 >> 16) > 15 { 1 } else { 0 }
+            } else if num_eval == 2 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                    unsafe {
+                        *eval_entries_ptr = k0;
+                        *eval_entries_ptr.add(1) = k1;
+                    }
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 { 2 } else { 1 }
+                } else {
+                    0
+                }
+            } else if num_eval == 3 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 { 3 } else { 2 }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 4 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 { 4 } else { 3 }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 5 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k0 < k3 {
+                    std::mem::swap(&mut k0, &mut k3);
+                }
+                if k1 < k4 {
+                    std::mem::swap(&mut k1, &mut k4);
+                }
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 {
+                                if (k4 >> 16) > 15 { 5 } else { 4 }
+                            } else {
+                                3
+                            }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 6 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 {
+                                if (k4 >> 16) > 15 {
+                                    if (k5 >> 16) > 15 { 6 } else { 5 }
+                                } else {
+                                    4
+                                }
+                            } else {
+                                3
+                            }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 7 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut k6 = unsafe { *eval_entries_ptr.add(6) };
+
+                if k0 < k6 {
+                    std::mem::swap(&mut k0, &mut k6);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k4 {
+                    std::mem::swap(&mut k1, &mut k4);
+                }
+                if k3 < k6 {
+                    std::mem::swap(&mut k3, &mut k6);
+                }
+
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k5 {
+                    std::mem::swap(&mut k2, &mut k5);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k4 < k6 {
+                    std::mem::swap(&mut k4, &mut k6);
+                }
+
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                    *eval_entries_ptr.add(6) = k6;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 {
+                                if (k4 >> 16) > 15 {
+                                    if (k5 >> 16) > 15 {
+                                        if (k6 >> 16) > 15 { 7 } else { 6 }
+                                    } else {
+                                        5
+                                    }
+                                } else {
+                                    4
+                                }
+                            } else {
+                                3
+                            }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval == 8 {
+                let mut k0 = unsafe { *eval_entries_ptr };
+                let mut k1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut k2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut k3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut k4 = unsafe { *eval_entries_ptr.add(4) };
+                let mut k5 = unsafe { *eval_entries_ptr.add(5) };
+                let mut k6 = unsafe { *eval_entries_ptr.add(6) };
+                let mut k7 = unsafe { *eval_entries_ptr.add(7) };
+
+                if k0 < k1 {
+                    std::mem::swap(&mut k0, &mut k1);
+                }
+                if k2 < k3 {
+                    std::mem::swap(&mut k2, &mut k3);
+                }
+                if k4 < k5 {
+                    std::mem::swap(&mut k4, &mut k5);
+                }
+                if k6 < k7 {
+                    std::mem::swap(&mut k6, &mut k7);
+                }
+
+                if k0 < k2 {
+                    std::mem::swap(&mut k0, &mut k2);
+                }
+                if k1 < k3 {
+                    std::mem::swap(&mut k1, &mut k3);
+                }
+                if k4 < k6 {
+                    std::mem::swap(&mut k4, &mut k6);
+                }
+                if k5 < k7 {
+                    std::mem::swap(&mut k5, &mut k7);
+                }
+
+                if k0 < k4 {
+                    std::mem::swap(&mut k0, &mut k4);
+                }
+                if k1 < k5 {
+                    std::mem::swap(&mut k1, &mut k5);
+                }
+                if k2 < k6 {
+                    std::mem::swap(&mut k2, &mut k6);
+                }
+                if k3 < k7 {
+                    std::mem::swap(&mut k3, &mut k7);
+                }
+
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+
+                if k2 < k4 {
+                    std::mem::swap(&mut k2, &mut k4);
+                }
+                if k3 < k5 {
+                    std::mem::swap(&mut k3, &mut k5);
+                }
+
+                if k1 < k2 {
+                    std::mem::swap(&mut k1, &mut k2);
+                }
+                if k3 < k4 {
+                    std::mem::swap(&mut k3, &mut k4);
+                }
+                if k5 < k6 {
+                    std::mem::swap(&mut k5, &mut k6);
+                }
+
+                unsafe {
+                    *eval_entries_ptr = k0;
+                    *eval_entries_ptr.add(1) = k1;
+                    *eval_entries_ptr.add(2) = k2;
+                    *eval_entries_ptr.add(3) = k3;
+                    *eval_entries_ptr.add(4) = k4;
+                    *eval_entries_ptr.add(5) = k5;
+                    *eval_entries_ptr.add(6) = k6;
+                    *eval_entries_ptr.add(7) = k7;
+                }
+                if (k0 >> 16) > 15 {
+                    if (k1 >> 16) > 15 {
+                        if (k2 >> 16) > 15 {
+                            if (k3 >> 16) > 15 {
+                                if (k4 >> 16) > 15 {
+                                    if (k5 >> 16) > 15 {
+                                        if (k6 >> 16) > 15 {
+                                            if (k7 >> 16) > 15 { 8 } else { 7 }
+                                        } else {
+                                            6
+                                        }
+                                    } else {
+                                        5
+                                    }
+                                } else {
+                                    4
+                                }
+                            } else {
+                                3
+                            }
+                        } else {
+                            2
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                }
+            } else if num_eval <= 16 {
+                for j in 1..num_eval {
+                    let key = unsafe { *eval_entries_ptr.add(j) };
+                    let mut k = j;
+                    while k > 0 {
+                        let prev = unsafe { *eval_entries_ptr.add(k - 1) };
+                        if prev < key {
+                            unsafe {
+                                *eval_entries_ptr.add(k) = prev;
+                            }
+                            k -= 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(k) = key;
+                    }
+                }
+                let mut split = 0;
+                while split < num_eval && unsafe { (*eval_entries_ptr.add(split) >> 16) > 15 } {
+                    split += 1;
+                }
+                split
+            } else {
+                let eval_slice =
+                    unsafe { std::slice::from_raw_parts_mut(eval_entries_ptr, num_eval) };
+                eval_slice.sort_unstable_by(|a, b| b.cmp(a));
+                let mut split = 0;
+                while split < num_eval && unsafe { (*eval_entries_ptr.add(split) >> 16) > 15 } {
+                    split += 1;
+                }
+                split
+            };
+
+            struct EvalHashCleanup {
+                hashes_ptr: *mut u64,
+                eval_entries_ptr: *const u32,
+                num_eval: usize,
+            }
+
+            impl Drop for EvalHashCleanup {
+                #[inline(always)]
+                fn drop(&mut self) {
+                    unsafe {
+                        for j in 0..self.num_eval {
+                            let r = (!*self.eval_entries_ptr.add(j) & 0xFFFF) as usize;
+                            *self.hashes_ptr.add(r) = 0;
+                        }
+                    }
+                }
+            }
+
+            macro_rules! match_bucket_buf {
+                ($b:expr, $idx:expr, $r0:ident, $h0:ident $(, $r:ident, $h:ident)*) => {
+                    if $b == $r0 {
+                        $h0 ^= unsafe { *zobrist_ptr.add(*set_ptr.add($idx)) };
+                    }
+                    $(
+                        else if $b == $r {
+                            $h ^= unsafe { *zobrist_ptr.add(*set_ptr.add($idx)) };
+                        }
+                    )*
+                };
+            }
+
+            macro_rules! scan_buf_hashes {
+                ($($r:ident, $h:ident),*) => {
+                    let mut cand_idx = 0;
+                    while cand_idx + 3 < c_len {
+                        let r_u64 = unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                        let b0 = (r_u64 & 0xFFFF) as usize;
+                        let b1 = ((r_u64 >> 16) & 0xFFFF) as usize;
+                        let b2 = ((r_u64 >> 32) & 0xFFFF) as usize;
+                        let b3 = (r_u64 >> 48) as usize;
+                        match_bucket_buf!(b0, cand_idx, $($r, $h),*);
+                        match_bucket_buf!(b1, cand_idx + 1, $($r, $h),*);
+                        match_bucket_buf!(b2, cand_idx + 2, $($r, $h),*);
+                        match_bucket_buf!(b3, cand_idx + 3, $($r, $h),*);
+                        cand_idx += 4;
+                    }
+                    while cand_idx < c_len {
+                        let r = unsafe { *r_buf_ptr.add(cand_idx) as usize };
+                        match_bucket_buf!(r, cand_idx, $($r, $h),*);
+                        cand_idx += 1;
+                    }
+                };
+            }
+
+            let _eval_hash_cleanup = {
+                if num_eval == 1 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            if ((r_u64) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if ((r_u64 >> 8) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if ((r_u64 >> 16) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if ((r_u64 >> 24) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if ((r_u64 >> 32) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if ((r_u64 >> 40) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if ((r_u64 >> 48) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if ((r_u64 >> 56) & 0xFF) as usize == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            if unsafe { *g_u8_ptr.add(cand_idx) as usize } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0);
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            if unsafe { (*g_ptr.add(c0)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if unsafe { (*g_ptr.add(c1)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            if unsafe { (*g_ptr.add(c2)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if unsafe { (*g_ptr.add(c3)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            if unsafe { (*g_ptr.add(c)).to_usize() } == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                            cand_idx += 1;
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                    }
+                } else if num_eval == 2 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1);
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r_2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r_3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            if r_2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if r_3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                            cand_idx += 1;
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                    }
+                } else if num_eval == 3 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2);
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r_2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r_3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            if r_2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if r_3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                            cand_idx += 1;
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                    }
+                } else if num_eval == 4 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let r3 = (!unsafe { *eval_entries_ptr.add(3) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    let mut h3 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2, r3, h3);
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r_2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r_3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            if r_2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c2) };
+                            } else if r_2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c2) };
+                            }
+                            if r_3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c3) };
+                            } else if r_3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c3) };
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                            cand_idx += 1;
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                        *hashes_ptr.add(r3) = h3;
+                    }
+                } else if num_eval == 5 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let r3 = (!unsafe { *eval_entries_ptr.add(3) } & 0xFFFF) as usize;
+                    let r4 = (!unsafe { *eval_entries_ptr.add(4) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    let mut h3 = 0u64;
+                    let mut h4 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2, r3, h3, r4, h4);
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 1 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            cand_idx += 2;
+                        }
+                        if cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                        *hashes_ptr.add(r3) = h3;
+                        *hashes_ptr.add(r4) = h4;
+                    }
+                } else if num_eval == 6 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let r3 = (!unsafe { *eval_entries_ptr.add(3) } & 0xFFFF) as usize;
+                    let r4 = (!unsafe { *eval_entries_ptr.add(4) } & 0xFFFF) as usize;
+                    let r5 = (!unsafe { *eval_entries_ptr.add(5) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    let mut h3 = 0u64;
+                    let mut h4 = 0u64;
+                    let mut h5 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        scan_buf_hashes!(r0, h0, r1, h1, r2, h2, r3, h3, r4, h4, r5, h5);
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 1 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            cand_idx += 2;
+                        }
+                        if cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                        *hashes_ptr.add(r3) = h3;
+                        *hashes_ptr.add(r4) = h4;
+                        *hashes_ptr.add(r5) = h5;
+                    }
+                } else {
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 15 < c_len {
+                            let r_u64_0 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let r_u64_1 = unsafe {
+                                (g_u8_ptr.add(cand_idx + 8) as *const u64).read_unaligned()
+                            };
+                            let b0 = (r_u64_0 & 0xFF) as usize;
+                            let b1 = ((r_u64_0 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64_0 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64_0 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64_0 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64_0 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64_0 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64_0 >> 56) as usize;
+
+                            let b8 = (r_u64_1 & 0xFF) as usize;
+                            let b9 = ((r_u64_1 >> 8) & 0xFF) as usize;
+                            let b10 = ((r_u64_1 >> 16) & 0xFF) as usize;
+                            let b11 = ((r_u64_1 >> 24) & 0xFF) as usize;
+                            let b12 = ((r_u64_1 >> 32) & 0xFF) as usize;
+                            let b13 = ((r_u64_1 >> 40) & 0xFF) as usize;
+                            let b14 = ((r_u64_1 >> 48) & 0xFF) as usize;
+                            let b15 = (r_u64_1 >> 56) as usize;
+
+                            unsafe {
+                                if *counts_ptr.add(b0) > 2 {
+                                    *hashes_ptr.add(b0) ^= *zobrist_ptr.add(cand_idx);
+                                }
+                                if *counts_ptr.add(b1) > 2 {
+                                    *hashes_ptr.add(b1) ^= *zobrist_ptr.add(cand_idx + 1);
+                                }
+                                if *counts_ptr.add(b2) > 2 {
+                                    *hashes_ptr.add(b2) ^= *zobrist_ptr.add(cand_idx + 2);
+                                }
+                                if *counts_ptr.add(b3) > 2 {
+                                    *hashes_ptr.add(b3) ^= *zobrist_ptr.add(cand_idx + 3);
+                                }
+                                if *counts_ptr.add(b4) > 2 {
+                                    *hashes_ptr.add(b4) ^= *zobrist_ptr.add(cand_idx + 4);
+                                }
+                                if *counts_ptr.add(b5) > 2 {
+                                    *hashes_ptr.add(b5) ^= *zobrist_ptr.add(cand_idx + 5);
+                                }
+                                if *counts_ptr.add(b6) > 2 {
+                                    *hashes_ptr.add(b6) ^= *zobrist_ptr.add(cand_idx + 6);
+                                }
+                                if *counts_ptr.add(b7) > 2 {
+                                    *hashes_ptr.add(b7) ^= *zobrist_ptr.add(cand_idx + 7);
+                                }
+                                if *counts_ptr.add(b8) > 2 {
+                                    *hashes_ptr.add(b8) ^= *zobrist_ptr.add(cand_idx + 8);
+                                }
+                                if *counts_ptr.add(b9) > 2 {
+                                    *hashes_ptr.add(b9) ^= *zobrist_ptr.add(cand_idx + 9);
+                                }
+                                if *counts_ptr.add(b10) > 2 {
+                                    *hashes_ptr.add(b10) ^= *zobrist_ptr.add(cand_idx + 10);
+                                }
+                                if *counts_ptr.add(b11) > 2 {
+                                    *hashes_ptr.add(b11) ^= *zobrist_ptr.add(cand_idx + 11);
+                                }
+                                if *counts_ptr.add(b12) > 2 {
+                                    *hashes_ptr.add(b12) ^= *zobrist_ptr.add(cand_idx + 12);
+                                }
+                                if *counts_ptr.add(b13) > 2 {
+                                    *hashes_ptr.add(b13) ^= *zobrist_ptr.add(cand_idx + 13);
+                                }
+                                if *counts_ptr.add(b14) > 2 {
+                                    *hashes_ptr.add(b14) ^= *zobrist_ptr.add(cand_idx + 14);
+                                }
+                                if *counts_ptr.add(b15) > 2 {
+                                    *hashes_ptr.add(b15) ^= *zobrist_ptr.add(cand_idx + 15);
+                                }
+                            }
+                            cand_idx += 16;
+                        }
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+                            unsafe {
+                                if *counts_ptr.add(b0) > 2 {
+                                    *hashes_ptr.add(b0) ^= *zobrist_ptr.add(cand_idx);
+                                }
+                                if *counts_ptr.add(b1) > 2 {
+                                    *hashes_ptr.add(b1) ^= *zobrist_ptr.add(cand_idx + 1);
+                                }
+                                if *counts_ptr.add(b2) > 2 {
+                                    *hashes_ptr.add(b2) ^= *zobrist_ptr.add(cand_idx + 2);
+                                }
+                                if *counts_ptr.add(b3) > 2 {
+                                    *hashes_ptr.add(b3) ^= *zobrist_ptr.add(cand_idx + 3);
+                                }
+                                if *counts_ptr.add(b4) > 2 {
+                                    *hashes_ptr.add(b4) ^= *zobrist_ptr.add(cand_idx + 4);
+                                }
+                                if *counts_ptr.add(b5) > 2 {
+                                    *hashes_ptr.add(b5) ^= *zobrist_ptr.add(cand_idx + 5);
+                                }
+                                if *counts_ptr.add(b6) > 2 {
+                                    *hashes_ptr.add(b6) ^= *zobrist_ptr.add(cand_idx + 6);
+                                }
+                                if *counts_ptr.add(b7) > 2 {
+                                    *hashes_ptr.add(b7) ^= *zobrist_ptr.add(cand_idx + 7);
+                                }
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if unsafe { *counts_ptr.add(r) } > 2 {
+                                unsafe {
+                                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(cand_idx);
+                                }
+                            }
+                            cand_idx += 1;
+                        }
+                    } else if can_buffer {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64_0 =
+                                unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let r_u64_1 = unsafe {
+                                (r_buf_ptr.add(cand_idx + 4) as *const u64).read_unaligned()
+                            };
+                            let r0 = (r_u64_0 & 0xFFFF) as usize;
+                            let r1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
+                            let r2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
+                            let r3 = (r_u64_0 >> 48) as usize;
+                            let r4 = (r_u64_1 & 0xFFFF) as usize;
+                            let r5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
+                            let r6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
+                            let r7 = (r_u64_1 >> 48) as usize;
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 {
+                                    let c0 = *set_ptr.add(cand_idx);
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 {
+                                    let c1 = *set_ptr.add(cand_idx + 1);
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 {
+                                    let c2 = *set_ptr.add(cand_idx + 2);
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 {
+                                    let c3 = *set_ptr.add(cand_idx + 3);
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                                if *counts_ptr.add(r4) > 2 {
+                                    let c4 = *set_ptr.add(cand_idx + 4);
+                                    *hashes_ptr.add(r4) ^= *zobrist_ptr.add(c4);
+                                }
+                                if *counts_ptr.add(r5) > 2 {
+                                    let c5 = *set_ptr.add(cand_idx + 5);
+                                    *hashes_ptr.add(r5) ^= *zobrist_ptr.add(c5);
+                                }
+                                if *counts_ptr.add(r6) > 2 {
+                                    let c6 = *set_ptr.add(cand_idx + 6);
+                                    *hashes_ptr.add(r6) ^= *zobrist_ptr.add(c6);
+                                }
+                                if *counts_ptr.add(r7) > 2 {
+                                    let c7 = *set_ptr.add(cand_idx + 7);
+                                    *hashes_ptr.add(r7) ^= *zobrist_ptr.add(c7);
+                                }
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx + 3 < c_len {
+                            let r_u64 =
+                                unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let r0 = (r_u64 & 0xFFFF) as usize;
+                            let r1 = ((r_u64 >> 16) & 0xFFFF) as usize;
+                            let r2 = ((r_u64 >> 32) & 0xFFFF) as usize;
+                            let r3 = (r_u64 >> 48) as usize;
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 {
+                                    let c0 = *set_ptr.add(cand_idx);
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 {
+                                    let c1 = *set_ptr.add(cand_idx + 1);
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 {
+                                    let c2 = *set_ptr.add(cand_idx + 2);
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 {
+                                    let c3 = *set_ptr.add(cand_idx + 3);
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *r_buf_ptr.add(cand_idx) as usize };
+                            if unsafe { *counts_ptr.add(r) } > 2 {
+                                let c = unsafe { *set_ptr.add(cand_idx) };
+                                unsafe {
+                                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
+                                }
+                            }
+                            cand_idx += 1;
+                        }
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let c4 = unsafe { *set_ptr.add(cand_idx + 4) };
+                            let c5 = unsafe { *set_ptr.add(cand_idx + 5) };
+                            let c6 = unsafe { *set_ptr.add(cand_idx + 6) };
+                            let c7 = unsafe { *set_ptr.add(cand_idx + 7) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                            let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                            let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                            let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 {
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 {
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 {
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 {
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                                if *counts_ptr.add(r4) > 2 {
+                                    *hashes_ptr.add(r4) ^= *zobrist_ptr.add(c4);
+                                }
+                                if *counts_ptr.add(r5) > 2 {
+                                    *hashes_ptr.add(r5) ^= *zobrist_ptr.add(c5);
+                                }
+                                if *counts_ptr.add(r6) > 2 {
+                                    *hashes_ptr.add(r6) ^= *zobrist_ptr.add(c6);
+                                }
+                                if *counts_ptr.add(r7) > 2 {
+                                    *hashes_ptr.add(r7) ^= *zobrist_ptr.add(c7);
+                                }
+                            }
+                            cand_idx += 8;
+                        }
+                        while cand_idx + 3 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 {
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 {
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 {
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 {
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                            }
+                            cand_idx += 4;
+                        }
+                        while cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if unsafe { *counts_ptr.add(r) } > 2 {
+                                unsafe {
+                                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
+                                }
+                            }
+                            cand_idx += 1;
+                        }
+                    }
+                }
+                EvalHashCleanup {
+                    hashes_ptr,
+                    eval_entries_ptr,
+                    num_eval,
+                }
+            };
+
+            let mut exact_mask = [0u64; M];
+            let mut cached_mask = [0u64; M];
+            let mut num_exact = 0;
+
+            if num_eval > 0 {
+                let e0 = unsafe { *eval_entries_ptr };
+                let r0 = (!e0 & 0xFFFF) as usize;
+                self.cache.prefetch(unsafe { *hashes_ptr.add(r0) });
+            }
+            if num_eval > 1 {
+                let e1 = unsafe { *eval_entries_ptr.add(1) };
+                let r1 = (!e1 & 0xFFFF) as usize;
+                self.cache.prefetch(unsafe { *hashes_ptr.add(r1) });
+            }
+
+            if num_eval <= 64 {
+                for i in 0..num_eval {
+                    if i + 2 < num_eval {
+                        let next_e = unsafe { *eval_entries_ptr.add(i + 2) };
+                        let next_r = (!next_e & 0xFFFF) as usize;
+                        self.cache.prefetch(unsafe { *hashes_ptr.add(next_r) });
+                    }
+                    let entry = unsafe { *eval_entries_ptr.add(i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+                    if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                        self.local_metrics.cache_hits += 1;
+                        let used_val = cached_val.max(cap_lb);
+                        unsafe {
+                            *p_lbs_ptr.add(i) = used_val;
+                        }
+                        let bit = 1u64 << i;
+                        if is_exact {
+                            exact_mask[0] |= bit;
+                            num_exact += 1;
+                        }
+                        cached_mask[0] |= bit;
+
+                        if used_val > cap_lb {
+                            cost += used_val - cap_lb;
+                            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                            let cutoff = beta
+                                .min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                            if cost >= cutoff {
+                                self.local_metrics.pruned_by_bounds += 1;
+                                return cost;
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            *p_lbs_ptr.add(i) = cap_lb;
+                        }
+                    }
+                }
+            } else {
+                for i in 0..num_eval {
+                    if i + 2 < num_eval {
+                        let next_e = unsafe { *eval_entries_ptr.add(i + 2) };
+                        let next_r = (!next_e & 0xFFFF) as usize;
+                        self.cache.prefetch(unsafe { *hashes_ptr.add(next_r) });
+                    }
+                    let entry = unsafe { *eval_entries_ptr.add(i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+                    if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                        self.local_metrics.cache_hits += 1;
+                        let used_val = cached_val.max(cap_lb);
+                        unsafe {
+                            *p_lbs_ptr.add(i) = used_val;
+                        }
+                        let word_idx = i >> 6;
+                        let bit = 1u64 << (i & 63);
+                        if is_exact {
+                            unsafe {
+                                *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                            }
+                            num_exact += 1;
+                        }
+                        unsafe {
+                            *cached_mask.get_unchecked_mut(word_idx) |= bit;
+                        }
+
+                        if used_val > cap_lb {
+                            cost += used_val - cap_lb;
+                            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                            let cutoff = beta
+                                .min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                            if cost >= cutoff {
+                                self.local_metrics.pruned_by_bounds += 1;
+                                return cost;
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            *p_lbs_ptr.add(i) = cap_lb;
+                        }
+                    }
+                }
+            }
+
+            if num_exact == num_eval {
+                return cost;
+            }
+
+            let mut sorted_set =
+                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
+            if sorted_set.len() < set.len() {
+                sorted_set.resize(set.len(), 0);
+            }
+            let sorted_set_ptr = sorted_set.as_mut_ptr();
+
+            let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
+            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
+            let mut curr = 0;
+            for m in 0..M {
+                let mut word = unsafe { *seen.get_unchecked(m) };
+                while word != 0 {
+                    let bit_idx = word.trailing_zeros() as usize;
+                    let r = (m << 6) | bit_idx;
+                    word &= word - 1;
+                    unsafe {
+                        *current_offsets_ptr.add(r) = curr;
+                        curr += *counts_ptr.add(r);
+                    }
+                }
+            }
+
+            macro_rules! sort_cand {
+                ($r:expr, $c:expr) => {
+                    let r = $r;
+                    let pos_ptr = current_offsets_ptr.add(r);
+                    let pos = *pos_ptr as usize;
+                    *sorted_set_ptr.add(pos) = $c;
+                    *pos_ptr += 1;
+                };
+            }
+
+            let mut i = 0;
+            if is_contiguous_root {
+                let g_u8_ptr = g_ptr as *const u8;
+                while i + 15 < c_len {
+                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                    unsafe {
+                        sort_cand!((r_u64_0 & 0xFF) as usize, i);
+                        sort_cand!(((r_u64_0 >> 8) & 0xFF) as usize, i + 1);
+                        sort_cand!(((r_u64_0 >> 16) & 0xFF) as usize, i + 2);
+                        sort_cand!(((r_u64_0 >> 24) & 0xFF) as usize, i + 3);
+                        sort_cand!(((r_u64_0 >> 32) & 0xFF) as usize, i + 4);
+                        sort_cand!(((r_u64_0 >> 40) & 0xFF) as usize, i + 5);
+                        sort_cand!(((r_u64_0 >> 48) & 0xFF) as usize, i + 6);
+                        sort_cand!((r_u64_0 >> 56) as usize, i + 7);
+                        sort_cand!((r_u64_1 & 0xFF) as usize, i + 8);
+                        sort_cand!(((r_u64_1 >> 8) & 0xFF) as usize, i + 9);
+                        sort_cand!(((r_u64_1 >> 16) & 0xFF) as usize, i + 10);
+                        sort_cand!(((r_u64_1 >> 24) & 0xFF) as usize, i + 11);
+                        sort_cand!(((r_u64_1 >> 32) & 0xFF) as usize, i + 12);
+                        sort_cand!(((r_u64_1 >> 40) & 0xFF) as usize, i + 13);
+                        sort_cand!(((r_u64_1 >> 48) & 0xFF) as usize, i + 14);
+                        sort_cand!((r_u64_1 >> 56) as usize, i + 15);
+                    }
+                    i += 16;
+                }
+                while i + 7 < c_len {
+                    let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    unsafe {
+                        sort_cand!((r_u64 & 0xFF) as usize, i);
+                        sort_cand!(((r_u64 >> 8) & 0xFF) as usize, i + 1);
+                        sort_cand!(((r_u64 >> 16) & 0xFF) as usize, i + 2);
+                        sort_cand!(((r_u64 >> 24) & 0xFF) as usize, i + 3);
+                        sort_cand!(((r_u64 >> 32) & 0xFF) as usize, i + 4);
+                        sort_cand!(((r_u64 >> 40) & 0xFF) as usize, i + 5);
+                        sort_cand!(((r_u64 >> 48) & 0xFF) as usize, i + 6);
+                        sort_cand!((r_u64 >> 56) as usize, i + 7);
+                    }
+                    i += 8;
+                }
+                while i < c_len {
+                    unsafe {
+                        sort_cand!(*g_u8_ptr.add(i) as usize, i);
+                    }
+                    i += 1;
+                }
+            } else if can_buffer {
+                while i + 7 < c_len {
+                    let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+
+                    unsafe {
+                        sort_cand!((r_u64_0 & 0xFFFF) as usize, c0);
+                        sort_cand!(((r_u64_0 >> 16) & 0xFFFF) as usize, c1);
+                        sort_cand!(((r_u64_0 >> 32) & 0xFFFF) as usize, c2);
+                        sort_cand!((r_u64_0 >> 48) as usize, c3);
+                        sort_cand!((r_u64_1 & 0xFFFF) as usize, c4);
+                        sort_cand!(((r_u64_1 >> 16) & 0xFFFF) as usize, c5);
+                        sort_cand!(((r_u64_1 >> 32) & 0xFFFF) as usize, c6);
+                        sort_cand!((r_u64_1 >> 48) as usize, c7);
+                    }
+                    i += 8;
+                }
+                while i + 3 < c_len {
+                    let r_u64 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+
+                    unsafe {
+                        sort_cand!((r_u64 & 0xFFFF) as usize, c0);
+                        sort_cand!(((r_u64 >> 16) & 0xFFFF) as usize, c1);
+                        sort_cand!(((r_u64 >> 32) & 0xFFFF) as usize, c2);
+                        sort_cand!((r_u64 >> 48) as usize, c3);
+                    }
+                    i += 4;
+                }
+                while i < c_len {
+                    let r_idx = unsafe { *r_buf_ptr.add(i) as usize };
+                    let c = unsafe { *set_ptr.add(i) };
+                    unsafe {
+                        sort_cand!(r_idx, c);
+                    }
+                    i += 1;
+                }
+            } else {
+                while i + 7 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let c4 = unsafe { *set_ptr.add(i + 4) };
+                    let c5 = unsafe { *set_ptr.add(i + 5) };
+                    let c6 = unsafe { *set_ptr.add(i + 6) };
+                    let c7 = unsafe { *set_ptr.add(i + 7) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                    let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                    let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                    let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+
+                    unsafe {
+                        sort_cand!(r0, c0);
+                        sort_cand!(r1, c1);
+                        sort_cand!(r2, c2);
+                        sort_cand!(r3, c3);
+                        sort_cand!(r4, c4);
+                        sort_cand!(r5, c5);
+                        sort_cand!(r6, c6);
+                        sort_cand!(r7, c7);
+                    }
+                    i += 8;
+                }
+                while i + 3 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    unsafe {
+                        sort_cand!(r0, c0);
+                        sort_cand!(r1, c1);
+                        sort_cand!(r2, c2);
+                        sort_cand!(r3, c3);
+                    }
+                    i += 4;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        sort_cand!(r_idx, c);
+                    }
+                    i += 1;
+                }
+            }
+
+            let mut fast_cost = cost;
+            if split_idx > 0 {
+                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return cost;
+                }
+
+                for i in 0..split_idx {
+                    unsafe {
+                        *child_max_ks_ptr.add(i) = 0;
+                    }
+                }
+
+                let mut can_prune_fast = false;
+                macro_rules! eval_approx_tight_lb {
+                    ($i:expr) => {
+                        let entry = unsafe { *eval_entries_ptr.add($i) };
+                        let p_len = (entry >> 16) as usize;
+                        let r_idx = (!entry & 0xFFFF) as usize;
+                        let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                        let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                        let p =
+                            unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+
+                        let k_upper =
+                            crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p);
+                        unsafe {
+                            *child_max_ks_ptr.add($i) = k_upper as u16;
+                        }
+                        let approx_tight_lb =
+                            crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k)
+                                .max(lb);
+                        unsafe {
+                            *p_lbs_ptr.add($i) = approx_tight_lb;
+                        }
+                        if approx_tight_lb > lb {
+                            fast_cost += approx_tight_lb - lb;
+                            if fast_cost >= cutoff {
+                                can_prune_fast = true;
+                                break;
+                            }
+                        }
+                    };
+                }
+
+                if num_eval <= 64 {
+                    let mut to_eval = (!cached_mask[0]) & Self::mask_low_bits(split_idx);
+                    while to_eval != 0 {
+                        let i = to_eval.trailing_zeros() as usize;
+                        to_eval &= to_eval - 1;
+                        eval_approx_tight_lb!(i);
+                    }
+                } else {
+                    for i in 0..split_idx {
+                        let word_idx = i >> 6;
+                        let bit = 1u64 << (i & 63);
+                        if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                            continue;
+                        }
+                        eval_approx_tight_lb!(i);
+                    }
+                }
+                if can_prune_fast {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                    return fast_cost;
+                }
+            }
+
+            macro_rules! eval_quick_bucket {
+                ($i:expr) => {
+                    let entry = unsafe { *eval_entries_ptr.add($i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+
+                    let (quick_val, is_exact) =
+                        quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, p);
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let used_val = quick_val.max(lb);
+                    unsafe {
+                        *p_lbs_ptr.add($i) = used_val;
+                    }
+                    if is_exact {
+                        let word_idx = $i >> 6;
+                        let bit = 1u64 << ($i & 63);
+                        unsafe {
+                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                        }
+                        num_exact += 1;
+                    }
+                    self.cache.insert_set(hash, p, used_val, is_exact);
+                    cert_record!(5, p, used_val, is_exact);
+
+                    if used_val > lb {
+                        let delta = used_val - lb;
+                        cost += delta;
+                        fast_cost += delta;
+                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                        let cutoff =
+                            beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                        if fast_cost >= cutoff {
+                            self.local_metrics.pruned_by_bounds += 1;
+                            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                            return fast_cost;
+                        }
+                    }
+                };
+            }
+
+            if num_eval <= 64 {
+                let range_mask = Self::mask_low_bits(num_eval) & !Self::mask_low_bits(split_idx);
+                let mut to_eval = (!cached_mask[0]) & range_mask;
+                while to_eval != 0 {
+                    let i = to_eval.trailing_zeros() as usize;
+                    to_eval &= to_eval - 1;
+                    eval_quick_bucket!(i);
+                }
+            } else {
+                for i in split_idx..num_eval {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    eval_quick_bucket!(i);
+                }
+            }
+
+            if num_exact == num_eval {
+                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+
+            macro_rules! eval_candidate_k_bound {
+                ($i:expr) => {
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if fast_cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return fast_cost;
+                    }
+
+                    let entry = unsafe { *eval_entries_ptr.add($i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let approx_tight_lb = unsafe { *p_lbs_ptr.add($i) };
+                    let approx_inc = approx_tight_lb - lb;
+
+                    let target_k =
+                        crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
+                    if target_k == 2 {
+                        unsafe {
+                            *p_lbs_ptr.add($i) = lb;
+                        }
+                        self.cache.insert_set(hash, p, lb, false);
+                        cert_record!(6, p, lb, false);
+                    } else {
+                        let k_upper = unsafe { *child_max_ks_ptr.add($i) as usize };
+                        let k_cand =
+                            crate::heuristic::compute_candidate_branching_factor_with_target(
+                                self.matrix,
+                                p,
+                                target_k.min(k_upper),
+                            );
+                        if k_cand >= target_k {
+                            unsafe {
+                                *p_lbs_ptr.add($i) = lb;
+                            }
+                            self.cache.insert_set(hash, p, lb, false);
+                            cert_record!(7, p, lb, false);
+                        } else if k_cand >= k_upper {
+                            let k = k_upper;
+                            let tight_lb =
+                                crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                            let used_val = tight_lb.max(lb);
+                            unsafe {
+                                *p_lbs_ptr.add($i) = used_val;
+                            }
+                            self.cache.insert_set(hash, p, used_val, false);
+                            cert_record!(9, p, used_val, false);
+
+                            if used_val > lb {
+                                let actual_inc = used_val - lb;
+                                cost += actual_inc;
+                                fast_cost += actual_inc - approx_inc;
+                                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                                let cutoff = beta.min(
+                                    current_global_beta.saturating_sub(self.current_cost_so_far),
+                                );
+                                if fast_cost >= cutoff {
+                                    self.local_metrics.pruned_by_bounds += 1;
+                                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
+                                        sorted_set;
+                                    return fast_cost;
+                                }
+                            }
+                        } else {
+                            let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
+                                self.matrix,
+                                p,
+                                k_cand,
+                                target_k.min(k_upper),
+                            );
+                            if k >= target_k {
+                                unsafe {
+                                    *p_lbs_ptr.add($i) = lb;
+                                }
+                                self.cache.insert_set(hash, p, lb, false);
+                                cert_record!(8, p, lb, false);
+                            } else {
+                                unsafe {
+                                    *child_max_ks_ptr.add($i) = k as u16;
+                                }
+                                let tight_lb =
+                                    crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                                let used_val = tight_lb.max(lb);
+                                unsafe {
+                                    *p_lbs_ptr.add($i) = used_val;
+                                }
+                                self.cache.insert_set(hash, p, used_val, false);
+                                cert_record!(9, p, used_val, false);
+
+                                if used_val > lb {
+                                    let actual_inc = used_val - lb;
+                                    cost += actual_inc;
+                                    fast_cost += actual_inc - approx_inc;
+                                    let current_global_beta =
+                                        self.global_beta.load(Ordering::Relaxed);
+                                    let cutoff = beta.min(
+                                        current_global_beta
+                                            .saturating_sub(self.current_cost_so_far),
+                                    );
+                                    if fast_cost >= cutoff {
+                                        self.local_metrics.pruned_by_bounds += 1;
+                                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
+                                            sorted_set;
+                                        return fast_cost;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+            }
+
+            if num_eval <= 64 {
+                let mut to_eval = (!cached_mask[0]) & Self::mask_low_bits(split_idx);
+                while to_eval != 0 {
+                    let i = to_eval.trailing_zeros() as usize;
+                    to_eval &= to_eval - 1;
+                    eval_candidate_k_bound!(i);
+                }
+            } else {
+                for i in 0..split_idx {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    eval_candidate_k_bound!(i);
+                }
+            }
+
+            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+            let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+            if cost >= cutoff {
+                self.local_metrics.pruned_by_bounds += 1;
+                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                return cost;
+            }
+            let mut active_guesses_ptr: Option<*const [u64]> = None;
+
+            macro_rules! solve_child_bucket {
+                ($i:expr) => {
+                    let entry = unsafe { *eval_entries_ptr.add($i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return cost;
+                    }
+
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+
+                    let actual_lb = unsafe { *p_lbs_ptr.add($i) };
+                    let b = cost - actual_lb;
+                    let new_beta = beta - b;
+
+                    let effective_beta = new_beta
+                        .min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+
+                    if effective_beta <= actual_lb {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return cost;
+                    }
+
+                    let child_k = if $i < split_idx {
+                        let stored_k = unsafe { *child_max_ks_ptr.add($i) as usize };
+                        if stored_k != 0 {
+                            stored_k.min(p_len).min(parent_max_k).max(2)
+                        } else {
+                            p_len.min(parent_max_k).max(2)
+                        }
+                    } else {
+                        p_len.min(parent_max_k).max(2)
+                    };
+
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+                    let known_quick = if $i >= split_idx { actual_lb } else { 0 };
+                    let active_ptr = match active_guesses_ptr {
+                        Some(p) => p,
+                        None => {
+                            let p = self.get_or_compute_active_guesses(set, depth, equiv_state);
+                            active_guesses_ptr = Some(p);
+                            p
+                        }
+                    };
+                    let active_guesses_slice = unsafe { &*active_ptr };
+                    self.current_cost_so_far += b;
+                    let val = self.min_state_val_with_hash(
+                        p,
+                        hash,
+                        active_guesses_slice,
+                        effective_beta,
+                        depth + 1,
+                        child_k,
+                        known_quick,
+                    );
+                    self.current_cost_so_far -= b;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if b + val >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return b + val;
+                    }
+                    cost = b + val;
+                };
+            }
+
+            if num_eval <= 64 {
+                let mut to_solve = (!exact_mask[0]) & Self::mask_low_bits(num_eval);
+                while to_solve != 0 {
+                    let i = to_solve.trailing_zeros() as usize;
+                    to_solve &= to_solve - 1;
+                    solve_child_bucket!(i);
+                }
+            } else {
+                for i in 0..num_eval {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    solve_child_bucket!(i);
+                }
+            }
+
+            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+
+            cost
         }
-        cost
     }
+}
 
+macro_rules! new_solver_variant {
+    ($word_len:expr, $($arg:expr),*) => {
+        match $word_len {
+            1 => Solver::L1(SpecializedSolver::<3, 1, 1, u8>::new_with_global_beta($($arg),*)),
+            2 => Solver::L2(SpecializedSolver::<9, 1, 4, u8>::new_with_global_beta($($arg),*)),
+            3 => Solver::L3(SpecializedSolver::<27, 1, 13, u8>::new_with_global_beta($($arg),*)),
+            4 => Solver::L4(SpecializedSolver::<81, 2, 40, u8>::new_with_global_beta($($arg),*)),
+            5 => Solver::L5(SpecializedSolver::<243, 4, 121, u8>::new_with_global_beta($($arg),*)),
+            6 => Solver::L6(SpecializedSolver::<729, 12, 364, Response>::new_with_global_beta($($arg),*)),
+            7 => Solver::L7(SpecializedSolver::<2187, 35, 1093, Response>::new_with_global_beta($($arg),*)),
+            8 => Solver::L8(SpecializedSolver::<6561, 103, 3280, Response>::new_with_global_beta($($arg),*)),
+            9 => Solver::L9(SpecializedSolver::<19683, 308, 9841, Response>::new_with_global_beta($($arg),*)),
+            10 => Solver::L10(SpecializedSolver::<59049, 923, 29524, Response>::new_with_global_beta($($arg),*)),
+            _ => Solver::L5(SpecializedSolver::<243, 4, 121, u8>::new_with_global_beta($($arg),*)),
+        }
+    };
+}
+
+macro_rules! match_solver_mut {
+    ($self:expr, $inner:ident => $body:expr) => {
+        match $self {
+            Solver::L1($inner) => $body,
+            Solver::L2($inner) => $body,
+            Solver::L3($inner) => $body,
+            Solver::L4($inner) => $body,
+            Solver::L5($inner) => $body,
+            Solver::L6($inner) => $body,
+            Solver::L7($inner) => $body,
+            Solver::L8($inner) => $body,
+            Solver::L9($inner) => $body,
+            Solver::L10($inner) => $body,
+        }
+    };
+}
+
+/// The optimal Wordle solver using Branch and Bound.
+pub enum Solver<'a> {
+    L1(SpecializedSolver<'a, 3, 1, 1, u8>),
+    L2(SpecializedSolver<'a, 9, 1, 4, u8>),
+    L3(SpecializedSolver<'a, 27, 1, 13, u8>),
+    L4(SpecializedSolver<'a, 81, 2, 40, u8>),
+    L5(SpecializedSolver<'a, 243, 4, 121, u8>),
+    L6(SpecializedSolver<'a, 729, 12, 364, Response>),
+    L7(SpecializedSolver<'a, 2187, 35, 1093, Response>),
+    L8(SpecializedSolver<'a, 6561, 103, 3280, Response>),
+    L9(SpecializedSolver<'a, 19683, 308, 9841, Response>),
+    L10(SpecializedSolver<'a, 59049, 923, 29524, Response>),
+}
+
+impl<'a> Solver<'a> {
     pub fn new(
         matrix: &'a ResponseMatrix,
         max_k: usize,
@@ -320,29 +7512,8 @@ impl<'a> Solver<'a> {
         global_beta: &'a AtomicU32,
         equiv_cache: &'a EquivCache,
     ) -> Self {
-        let mut scratch = THREAD_SCRATCH
-            .with(|ts| ts.borrow_mut().take())
-            .unwrap_or_else(|| {
-                Box::new(SolverScratch {
-                    scratch_is_in_set: std::array::from_fn(|_| {
-                        vec![0u64; dict.guesses.len().div_ceil(64)]
-                    }),
-                    scratch_sorted_sets: std::array::from_fn(|_| Vec::new()),
-                    scratch_phase1_tuples: std::array::from_fn(|_| Vec::new()),
-                    scratch_phase2_tuples: std::array::from_fn(|_| Vec::new()),
-                    scratch_hash_table: std::array::from_fn(|_| vec![0u64; 32768]),
-                    scratch_added_indices: std::array::from_fn(|_| Vec::with_capacity(14855)),
-                    scratch_projs: std::array::from_fn(|_| vec![0u64; 14855]),
-                    scratch_active_bits: std::array::from_fn(|_| vec![0u64; 233]),
-                    scratch_guess_counts: [[0u16; 243]; 32],
-                    scratch_guess_hashes: [[0u64; 243]; 32],
-                    scratch_guess_p_lbs: [[0u32; 243]; 32],
-                    scratch_guess_child_max_ks: [[0u16; 243]; 32],
-                })
-            });
-        scratch.fit_dictionary(dict.guesses.len());
-
-        Self {
+        new_solver_variant!(
+            dict.word_len,
             matrix,
             max_k,
             dict,
@@ -350,16 +7521,272 @@ impl<'a> Solver<'a> {
             capacity_bounds_2d,
             cache,
             global_beta,
-            equiv_cache,
-            current_cost_so_far: 0,
-            scratch: Some(scratch),
+            equiv_cache
+        )
+    }
+
+    #[inline(always)]
+    pub fn quick_bucket_eval(
+        matrix: &ResponseMatrix,
+        dict: &Dictionary,
+        bucket: &[usize],
+    ) -> (u32, bool) {
+        if dict.word_len <= 5 {
+            quick_bucket_eval_elem::<u8>(matrix, dict, bucket)
+        } else {
+            quick_bucket_eval_elem::<Response>(matrix, dict, bucket)
         }
     }
 
-    /// Solves the given candidate subset to minimize the total expected guesses.
-    ///
-    /// Evaluates all initial guesses in parallel using Rayon, sharing the global
-    /// best upper bound (`beta`) atomically for heavy cross-thread pruning.
+    #[inline(always)]
+    pub fn min_state_val(
+        &mut self,
+        set: &[usize],
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_state_val(set, parent_active_guesses, beta, depth, parent_max_k))
+    }
+
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn min_state_val_with_hash(
+        &mut self,
+        set: &[usize],
+        hash: u64,
+        parent_active_guesses: &[u64],
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+        known_quick_lb: u32,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_state_val_with_hash(set, hash, parent_active_guesses, beta, depth, parent_max_k, known_quick_lb))
+    }
+
+    #[inline(always)]
+    pub fn min_guess_val(
+        &mut self,
+        set: &[usize],
+        active_guesses_slice: &[u64],
+        guess: usize,
+        beta: u32,
+        depth: usize,
+        parent_max_k: usize,
+    ) -> u32 {
+        match_solver_mut!(self, s => s.min_guess_val(set, active_guesses_slice, guess, beta, depth, parent_max_k))
+    }
+
+    #[inline(always)]
+    pub fn flush_metrics(&mut self) {
+        match_solver_mut!(self, s => s.flush_metrics());
+    }
+
+    pub fn greedy_solve(
+        matrix: &ResponseMatrix,
+        dict: &'a crate::dict::Dictionary,
+        set: &[usize],
+    ) -> u32 {
+        if set.len() <= 2 {
+            return (set.len() * (set.len() + 1) / 2) as u32;
+        }
+
+        let mut c_mask = 0u32;
+        for &c in set {
+            c_mask |= matrix.candidate_masks[c];
+        }
+
+        let mut best_guess = usize::MAX;
+        let mut min_expected_rem = u32::MAX;
+
+        let skip_projections = c_mask.count_ones() >= 26;
+        let mut seen_projections = if skip_projections {
+            rustc_hash::FxHashSet::default()
+        } else {
+            rustc_hash::FxHashSet::with_capacity_and_hasher(
+                dict.guesses.len().min(4096),
+                Default::default(),
+            )
+        };
+
+        if matrix.num_responses <= 256 {
+            let mut counts = [0u16; 256];
+            let mut non_empty_indices = [0u16; 256];
+            let matrix_data_ptr = matrix.data_u8.as_ptr();
+            for g in 0..dict.guesses.len() {
+                if !skip_projections {
+                    if (matrix.guess_masks[g] & c_mask) == 0 {
+                        continue;
+                    }
+                    let chars = &dict.guess_chars[g];
+                    let mut proj = 0u64;
+                    for i in 0..dict.word_len.min(8) {
+                        let li = chars[i] as u64;
+                        proj |= ((li + 1) * (((c_mask >> li) & 1) as u64)) << (i * 5);
+                    }
+                    if !seen_projections.insert(proj) {
+                        continue;
+                    }
+                }
+
+                let g_offset = g * matrix.num_candidates;
+                let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
+                let mut num_non_empty = 0;
+                for &c in set {
+                    let r = unsafe { *g_ptr.add(c) as usize };
+                    if counts[r] == 0 {
+                        non_empty_indices[num_non_empty] = r as u16;
+                        num_non_empty += 1;
+                    }
+                    counts[r] += 1;
+                }
+
+                if num_non_empty <= 1 {
+                    for i in 0..num_non_empty {
+                        counts[non_empty_indices[i] as usize] = 0;
+                    }
+                    continue;
+                }
+
+                let mut expected_rem = 0u32;
+                for i in 0..num_non_empty {
+                    let r = non_empty_indices[i] as usize;
+                    let count = counts[r] as u32;
+                    expected_rem += count * count;
+                    counts[r] = 0;
+                }
+                if expected_rem < min_expected_rem {
+                    min_expected_rem = expected_rem;
+                    best_guess = g;
+                }
+            }
+
+            if best_guess == usize::MAX {
+                return u32::MAX;
+            }
+
+            let best_g_offset = best_guess * matrix.num_candidates;
+            let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
+            for &c in set {
+                let r = unsafe { *best_g_ptr.add(c) as usize };
+                counts[r] += 1;
+            }
+
+            let mut offsets = [0usize; 257];
+            for r_idx in 0..matrix.num_responses {
+                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+            }
+            let mut sorted_set = vec![0usize; set.len()];
+            let mut current_offsets = offsets;
+            for &c in set {
+                let r = unsafe { *best_g_ptr.add(c) as usize };
+                let pos = current_offsets[r];
+                sorted_set[pos] = c;
+                current_offsets[r] += 1;
+            }
+
+            let mut cost = set.len() as u32;
+            for r_idx in 0..matrix.num_responses {
+                let p_len = counts[r_idx] as usize;
+                if p_len == 0 || r_idx == matrix.win_response.0 as usize {
+                    continue;
+                }
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
+            }
+            cost
+        } else {
+            let mut counts = vec![0u16; matrix.num_responses];
+            let mut non_empty_indices = vec![0u16; matrix.num_responses];
+            let matrix_data_ptr = matrix.data.as_ptr();
+            for g in 0..dict.guesses.len() {
+                if !skip_projections {
+                    if (matrix.guess_masks[g] & c_mask) == 0 {
+                        continue;
+                    }
+                    let chars = &dict.guess_chars[g];
+                    let mut proj = 0u64;
+                    for i in 0..dict.word_len.min(8) {
+                        let li = chars[i] as u64;
+                        proj |= ((li + 1) * (((c_mask >> li) & 1) as u64)) << (i * 5);
+                    }
+                    if !seen_projections.insert(proj) {
+                        continue;
+                    }
+                }
+
+                let g_offset = g * matrix.num_candidates;
+                let g_ptr = unsafe { matrix_data_ptr.add(g_offset) };
+                let mut num_non_empty = 0;
+                for &c in set {
+                    let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                    if counts[r] == 0 {
+                        non_empty_indices[num_non_empty] = r as u16;
+                        num_non_empty += 1;
+                    }
+                    counts[r] += 1;
+                }
+
+                if num_non_empty <= 1 {
+                    for i in 0..num_non_empty {
+                        counts[non_empty_indices[i] as usize] = 0;
+                    }
+                    continue;
+                }
+
+                let mut expected_rem = 0u32;
+                for i in 0..num_non_empty {
+                    let r = non_empty_indices[i] as usize;
+                    let count = counts[r] as u32;
+                    expected_rem += count * count;
+                    counts[r] = 0;
+                }
+                if expected_rem < min_expected_rem {
+                    min_expected_rem = expected_rem;
+                    best_guess = g;
+                }
+            }
+
+            if best_guess == usize::MAX {
+                return u32::MAX;
+            }
+
+            let best_g_offset = best_guess * matrix.num_candidates;
+            let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
+            for &c in set {
+                let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
+                counts[r] += 1;
+            }
+
+            let mut offsets = vec![0usize; matrix.num_responses + 1];
+            for r_idx in 0..matrix.num_responses {
+                offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
+            }
+            let mut sorted_set = vec![0usize; set.len()];
+            let mut current_offsets = offsets.clone();
+            for &c in set {
+                let r = unsafe { (*best_g_ptr.add(c)).0 as usize };
+                let pos = current_offsets[r];
+                sorted_set[pos] = c;
+                current_offsets[r] += 1;
+            }
+
+            let mut cost = set.len() as u32;
+            for r_idx in 0..matrix.num_responses {
+                let p_len = counts[r_idx] as usize;
+                if p_len == 0 || r_idx == matrix.win_response.0 as usize {
+                    continue;
+                }
+                let start = offsets[r_idx];
+                let end = start + p_len;
+                cost += Self::greedy_solve(matrix, dict, &sorted_set[start..end]);
+            }
+            cost
+        }
+    }
+
     pub fn solve(
         matrix: &'a ResponseMatrix,
         initial_candidates: &[usize],
@@ -373,8 +7800,13 @@ impl<'a> Solver<'a> {
             2 => return 3,
             _ => {}
         }
-        // 64 M units x 16 bytes (two AtomicU64 slots per unit) = 1 GB.
-        let cache_size = 64 * 1024 * 1024;
+        let cache_size = if initial_candidates.len() <= 32 {
+            1 << 16
+        } else if initial_candidates.len() <= 1024 {
+            1 << 20
+        } else {
+            64 * 1024 * 1024
+        };
         let global_cache = crate::cache::GlobalCache::new(cache_size);
         let max_k = heuristic::compute_max_branching_factor(matrix, initial_candidates);
 
@@ -382,10 +7814,8 @@ impl<'a> Solver<'a> {
         heuristic::sort_guesses_by_expected_remaining(matrix, initial_candidates, &mut guesses);
 
         let set = initial_candidates;
-
         let initial_greedy_cost = Self::greedy_solve(matrix, dict, initial_candidates);
 
-        // Filter active guesses
         let mut active_guesses = Vec::with_capacity(guesses.len());
         for &g in &guesses {
             let mut first_r = None;
@@ -416,29 +7846,26 @@ impl<'a> Solver<'a> {
         if !active_guesses.is_empty() {
             let first_g = active_guesses[0];
 
-            // To prevent 7 cores from sitting idle while evaluating the massive first guess,
-            // we parallelize its buckets! Since this is the best guess, it's very unlikely to be pruned,
-            // so we don't lose much alpha-beta efficiency by evaluating buckets in parallel.
-
-            let mut counts = [0u16; 243];
-            let mut non_empty_indices = [0u8; 243];
+            let num_resp = matrix.num_responses;
+            let mut counts = vec![0u16; num_resp];
+            let mut non_empty_indices = vec![0u16; num_resp];
             let mut num_non_empty = 0;
 
             for &c in set {
                 let r_idx = matrix.get(first_g, c).0 as usize;
                 if counts[r_idx] == 0 {
-                    non_empty_indices[num_non_empty] = r_idx as u8;
+                    non_empty_indices[num_non_empty] = r_idx as u16;
                     num_non_empty += 1;
                 }
                 counts[r_idx] += 1;
             }
 
-            let mut offsets = [0usize; 244];
-            for r_idx in 0..243 {
+            let mut offsets = vec![0usize; num_resp + 1];
+            for r_idx in 0..num_resp {
                 offsets[r_idx + 1] = offsets[r_idx] + counts[r_idx] as usize;
             }
             let mut sorted_set = vec![0usize; set.len()];
-            let mut current_offsets = offsets;
+            let mut current_offsets = offsets.clone();
             for &c in set {
                 let r_idx = matrix.get(first_g, c).0 as usize;
                 let pos = current_offsets[r_idx];
@@ -451,7 +7878,7 @@ impl<'a> Solver<'a> {
             for i in 0..num_non_empty {
                 let r_idx = non_empty_indices[i] as usize;
                 let p_len = counts[r_idx] as usize;
-                if r_idx == crate::core::Response::WIN.0 as usize {
+                if r_idx == matrix.win_response.0 as usize {
                     continue;
                 }
                 if p_len <= 2 {
@@ -485,8 +7912,21 @@ impl<'a> Solver<'a> {
                         equiv_cache,
                     );
                     let bucket_greedy = Self::greedy_solve(matrix, dict, &bucket);
-                    let val =
-                        solver.min_state_val(&bucket, &all_guesses_bits, bucket_greedy, 2, max_k);
+                    let bucket_k = if bucket.len() > 15 {
+                        crate::heuristic::compute_branching_factor_upper_bound(matrix, &bucket)
+                            .min(bucket.len())
+                            .min(max_k)
+                            .max(2)
+                    } else {
+                        bucket.len().min(max_k).max(2)
+                    };
+                    let val = solver.min_state_val(
+                        &bucket,
+                        &all_guesses_bits,
+                        bucket_greedy,
+                        2,
+                        bucket_k,
+                    );
                     val.min(bucket_greedy)
                 })
                 .sum();
@@ -494,42 +7934,67 @@ impl<'a> Solver<'a> {
             let first_guess_cost = base_cost + bucket_costs;
             let greedy_cost_to_beat = initial_greedy_cost.min(first_guess_cost);
 
-            // Pre-filter alternative root guesses: only retain those whose
-            // capacity_bound lb is strictly less than the current beta.
-            // A guess with lb >= beta cannot possibly improve the solution,
-            // so we can skip it entirely. Note: allowed_guesses (active_guesses)
-            // is passed unchanged to sub-problems; this filter only affects
-            // which root tasks we launch.
-            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = active_guesses[1..]
-                .iter()
-                .copied()
-                .filter_map(|g| {
-                    let mut counts = [0u16; 243];
-                    for &c in set {
-                        counts[matrix.get(g, c).0 as usize] += 1;
-                    }
-                    let lb: u32 = set.len() as u32
-                        + counts
-                            .iter()
-                            .enumerate()
-                            .filter(|&(r_idx, &cnt)| {
-                                cnt > 0 && r_idx != crate::core::Response::WIN.0 as usize
-                            })
-                            .map(|(_, &cnt)| capacity_bounds_2d[max_k][cnt as usize])
-                            .sum::<u32>();
-                    let mut expected_rem = 0u32;
-                    for &cnt in &counts {
-                        if cnt > 0 {
-                            expected_rem += (cnt as u32) * (cnt as u32);
+            let mut root_candidates_tuples: Vec<(usize, u32, u32)> = if matrix.num_responses <= 256
+            {
+                active_guesses[1..]
+                    .par_iter()
+                    .copied()
+                    .filter_map(|g| {
+                        let g_ptr =
+                            unsafe { matrix.data_u8.as_ptr().add(g * matrix.num_candidates) };
+                        let mut counts = [0u16; 256];
+                        for &c in set {
+                            let r = unsafe { *g_ptr.add(c) as usize };
+                            counts[r] += 1;
                         }
-                    }
-                    if lb < greedy_cost_to_beat {
-                        Some((g, lb, expected_rem))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+                        let mut lb = set.len() as u32;
+                        let win_r = matrix.win_response.0 as usize;
+                        let mut expected_rem = 0u32;
+                        for (r_idx, &cnt) in counts[..matrix.num_responses].iter().enumerate() {
+                            if cnt > 0 {
+                                expected_rem += (cnt as u32) * (cnt as u32);
+                                if r_idx != win_r {
+                                    lb += capacity_bounds_2d[max_k][cnt as usize];
+                                }
+                            }
+                        }
+                        if lb < greedy_cost_to_beat {
+                            Some((g, lb, expected_rem))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                active_guesses[1..]
+                    .par_iter()
+                    .copied()
+                    .filter_map(|g| {
+                        let g_ptr = unsafe { matrix.data.as_ptr().add(g * matrix.num_candidates) };
+                        let mut counts = vec![0u16; matrix.num_responses];
+                        for &c in set {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            counts[r] += 1;
+                        }
+                        let mut lb = set.len() as u32;
+                        let win_r = matrix.win_response.0 as usize;
+                        let mut expected_rem = 0u32;
+                        for (r_idx, &cnt) in counts.iter().enumerate() {
+                            if cnt > 0 {
+                                expected_rem += (cnt as u32) * (cnt as u32);
+                                if r_idx != win_r {
+                                    lb += capacity_bounds_2d[max_k][cnt as usize];
+                                }
+                            }
+                        }
+                        if lb < greedy_cost_to_beat {
+                            Some((g, lb, expected_rem))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
 
             root_candidates_tuples.sort_unstable_by_key(|t| (t.1, t.2));
             let root_candidates: Vec<usize> =
@@ -541,11 +8006,6 @@ impl<'a> Solver<'a> {
                 active_guesses.len() - 1
             );
 
-            // Single tight-beta scan over remaining root candidates.
-            // first_guess_cost is computed exactly above via bucket parallelization,
-            // so it is already the tightest possible upper bound. One pass with
-            // beta=greedy_cost_to_beat prunes almost all root candidates immediately.
-            // IDA* is not needed here: beta is already exact after evaluating first_g.
             if !root_candidates.is_empty() {
                 let scan_beta = std::sync::atomic::AtomicU32::new(greedy_cost_to_beat);
                 let result_beta = crate::parallel_depth::solve_parallel_depth2(
@@ -568,1270 +8028,7 @@ impl<'a> Solver<'a> {
 
         initial_greedy_cost
     }
-
-    /// Quickly evaluates small candidate sets (<= 15) using in-set partitions.
-    /// Returns (cost, is_exact).
-    /// - If an in-set guess partitions the remaining n-1 candidates into n-1 distinct buckets,
-    ///   the exact cost is 2*n - 1.
-    /// - If no in-set guess achieves n-1, but at least one achieves n-2 distinct buckets,
-    ///   the exact cost is 2*n.
-    /// - Otherwise, no guess (in-set or out-of-set) can achieve < 2*n, so 2*n is a guaranteed
-    ///   lower bound.
-    #[inline(always)]
-    pub fn quick_bucket_eval(
-        matrix: &ResponseMatrix,
-        dict: &Dictionary,
-        bucket: &[usize],
-    ) -> (u32, bool) {
-        let n = bucket.len();
-        match n {
-            0 => (0, true),
-            1 => (1, true),
-            2 => (3, true),
-            _ => {
-                let mut best_inside = u32::MAX;
-                let target_exact = (2 * n) as u32;
-                let data_ptr = matrix.data.as_ptr();
-                for &ci in bucket {
-                    let gi = unsafe { *dict.candidate_to_guess.get_unchecked(ci) };
-                    let g_ptr = unsafe { data_ptr.add(gi * matrix.num_candidates) };
-
-                    let mut mask = [0u64; 4];
-                    let mut collisions = 0;
-                    let max_collisions = if best_inside == target_exact { 1 } else { 2 };
-
-                    for &c in bucket {
-                        let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                        let word_idx = r >> 6;
-                        let bit = 1u64 << (r & 63);
-                        let word = unsafe { mask.get_unchecked_mut(word_idx) };
-                        if (*word & bit) != 0 {
-                            collisions += 1;
-                            if collisions >= max_collisions {
-                                break;
-                            }
-                        } else {
-                            *word |= bit;
-                        }
-                    }
-
-                    if collisions == 0 {
-                        return ((2 * n - 1) as u32, true);
-                    }
-                    if collisions == 1 && max_collisions == 2 {
-                        best_inside = target_exact;
-                    }
-                }
-
-                if best_inside == target_exact {
-                    (target_exact, true)
-                } else {
-                    (target_exact, false)
-                }
-            }
-        }
-    }
-
-    /// Computes the minimum expected cost to solve `set`, minimizing over every guess in
-    /// `allowed_guesses`. This is the search's main per-state entry point:
-    /// 1. **Transposition table lookup**: an exact cached value returns immediately; a cached
-    ///    lower bound `>= beta` fails high immediately (see the module-level note above on
-    ///    fail-hard transposition pruning).
-    /// 2. **Capacity lower bound pruning**: `capacity_bounds[c_len]` (global) and a per-node
-    ///    `local_max_k`-derived bound both give an instant return once they prove `beta`
-    ///    can't be beaten.
-    /// 3. **Equivalence-class projection**: guesses that partition `set` identically to one
-    ///    already tried at this node are skipped via a bitwise projection over the candidate
-    ///    set's letter inventory (`seen_projections`).
-    /// 4. **Guess ordering + fail-hard alpha-beta**: remaining guesses are sorted by expected
-    ///    remaining candidates and evaluated via `min_guess_val`, tightening `best_val` as
-    ///    better guesses are found and stopping early once `best_val` reaches the proven
-    ///    local lower bound.
-    pub fn min_state_val(
-        &mut self,
-        set: &[usize],
-        parent_active_guesses: &[u64],
-        beta: u32,
-        depth: usize,
-        parent_max_k: usize,
-    ) -> u32 {
-        self.metrics
-            .max_depth
-            .fetch_max(depth, std::sync::atomic::Ordering::Relaxed);
-
-        let mut hash = 0;
-        for &c in set {
-            hash ^= self.matrix.zobrist[c];
-        }
-
-        let mut cached_lower_bound = 0;
-        if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-            self.metrics
-                .cache_hits
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if is_exact {
-                return cached_val;
-            } else {
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cached_val >= beta
-                    || self.current_cost_so_far + cached_val >= current_global_beta
-                {
-                    return cached_val;
-                }
-                cached_lower_bound = cached_val;
-            }
-        }
-
-        self.metrics
-            .states_evaluated
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let c_len = set.len();
-        if c_len == 0 {
-            return 0;
-        }
-        if c_len == 1 {
-            return 1;
-        }
-        if c_len == 2 {
-            return 3;
-        }
-        if c_len <= 15 {
-            let (val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, set);
-            if is_exact {
-                self.cache.insert_set(hash, set, val, true);
-                cert_record!(1, set, val, true);
-                return val;
-            }
-            cached_lower_bound = cached_lower_bound.max(val);
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cached_lower_bound >= beta
-                || self.current_cost_so_far + cached_lower_bound >= current_global_beta
-            {
-                self.cache.insert_set(hash, set, cached_lower_bound, false);
-                cert_record!(2, set, cached_lower_bound, false);
-                return cached_lower_bound;
-            }
-        }
-
-        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
-        let parent_lb = unsafe { *parent_cap_bounds.get_unchecked(c_len) };
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if parent_lb >= beta || self.current_cost_so_far + parent_lb >= current_global_beta {
-            cert_record!(3, set, parent_lb, false);
-            return parent_lb;
-        }
-
-        let mut best_val = beta;
-        // Set when the shared global beta, rather than this node's own `beta`,
-        // stops the search before every guess is resolved. Such a result is not
-        // proven for this set alone, so it must not reach the transposition
-        // table: a later search of the set with a different cost so far would
-        // trust it as an exact value or lower bound.
-        let mut cut_by_global = false;
-
-        let set_hash = hash;
-
-        let should_cache_equiv = set.len() >= 10 && set.len() < 40;
-        let shard_idx = (set_hash as usize) % 1024;
-        let mut active_bits_scratch =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_active_bits[depth]);
-        let rc_opt = if should_cache_equiv {
-            let cache = self.equiv_cache[shard_idx].read().unwrap();
-            if let Some(cached) = cache.get(&set_hash) {
-                self.metrics
-                    .equiv_cache_hits
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Some(std::sync::Arc::clone(cached))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let slice_ptr: *const [u64];
-        let _keep_alive = if set.len() >= 40 {
-            slice_ptr = parent_active_guesses as *const _;
-            None
-        } else if let Some(rc) = &rc_opt {
-            slice_ptr = rc.as_slice() as *const _;
-            None
-        } else {
-            let num_u64s = self.dict.guesses.len().div_ceil(64);
-            active_bits_scratch.clear();
-            active_bits_scratch.resize(num_u64s, 0);
-
-            let scratch_ref = self.scratch.as_mut().unwrap();
-            let table = &mut scratch_ref.scratch_hash_table[depth];
-            let added_indices = &mut scratch_ref.scratch_added_indices[depth];
-            added_indices.clear();
-            let num_guesses = self.dict.guesses.len();
-
-            let projs = &mut scratch_ref.scratch_projs[depth];
-
-            let active_count: u32 = parent_active_guesses.iter().map(|&b| b.count_ones()).sum();
-            let table_size =
-                (((active_count + 243) * 2).next_power_of_two() as usize).clamp(1024, table.len());
-            let mask = table_size - 1;
-            let shift = 64 - table_size.trailing_zeros();
-
-            let chunk_size = 512;
-            for chunk_start in (0..num_guesses).step_by(chunk_size) {
-                let chunk_end = (chunk_start + chunk_size).min(num_guesses);
-                let b_start = chunk_start / 64;
-                let b_end = chunk_end.div_ceil(64);
-                let mut has_active = false;
-                for b in b_start..b_end {
-                    if unsafe { *parent_active_guesses.get_unchecked(b) } != 0 {
-                        has_active = true;
-                        break;
-                    }
-                }
-                if !has_active {
-                    continue;
-                }
-
-                let projs_chunk = &mut projs[chunk_start..chunk_end];
-                projs_chunk.fill(0);
-                for &c in set {
-                    let c_off = c * num_guesses;
-                    let z = unsafe { *self.matrix.zobrist.get_unchecked(c) };
-                    let c_slice = unsafe {
-                        self.matrix
-                            .data_c_g
-                            .get_unchecked(c_off + chunk_start..c_off + chunk_end)
-                    };
-                    for (p, &r) in projs_chunk.iter_mut().zip(c_slice.iter()) {
-                        *p ^= z.wrapping_mul(r.0 as u64 + 1);
-                    }
-                }
-            }
-
-            let mut useless_projs = [0u64; 243];
-            for r in 0..243 {
-                let mut p = 0u64;
-                let m = r as u64 + 1;
-                for &c in set {
-                    p ^= unsafe { *self.matrix.zobrist.get_unchecked(c) }.wrapping_mul(m);
-                }
-                if p == 0 {
-                    p = 1;
-                }
-                useless_projs[r] = p;
-            }
-            for r in 0..243 {
-                let proj = useless_projs[r];
-                let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                loop {
-                    let slot = table[idx];
-                    if slot == 0 {
-                        table[idx] = proj;
-                        added_indices.push(idx);
-                        break;
-                    }
-                    if slot == proj {
-                        break;
-                    }
-                    idx = (idx + 1) & mask;
-                }
-            }
-
-            for (block_idx, &block) in parent_active_guesses.iter().enumerate() {
-                if block == u64::MAX {
-                    for tz in 0..64 {
-                        let g = block_idx * 64 + tz;
-                        if g >= num_guesses {
-                            break;
-                        }
-                        let mut proj = unsafe { *projs.get_unchecked(g) };
-                        if proj == 0 {
-                            proj = 1;
-                        }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                        loop {
-                            let slot = table[idx];
-                            if slot == 0 {
-                                table[idx] = proj;
-                                unsafe {
-                                    *active_bits_scratch.get_unchecked_mut(block_idx) |= 1 << tz;
-                                }
-                                added_indices.push(idx);
-                                break;
-                            }
-                            if slot == proj {
-                                break;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                    }
-                } else if block != 0 {
-                    let mut b = block;
-                    while b != 0 {
-                        let tz = b.trailing_zeros();
-                        let g = block_idx * 64 + tz as usize;
-                        let mut proj = unsafe { *projs.get_unchecked(g) };
-                        if proj == 0 {
-                            proj = 1;
-                        }
-                        let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
-                        loop {
-                            let slot = table[idx];
-                            if slot == 0 {
-                                table[idx] = proj;
-                                active_bits_scratch[block_idx] |= 1 << tz;
-                                added_indices.push(idx);
-                                break;
-                            }
-                            if slot == proj {
-                                break;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                        b &= b - 1;
-                    }
-                }
-            }
-
-            for &idx in added_indices.iter() {
-                table[idx] = 0;
-            }
-
-            let rc_new = if should_cache_equiv {
-                let rc = std::sync::Arc::new(active_bits_scratch.clone());
-                let mut cache_mut = self.equiv_cache[shard_idx].write().unwrap();
-                if let Some(cached) = cache_mut.get(&set_hash) {
-                    self.metrics
-                        .equiv_cache_hits
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(std::sync::Arc::clone(cached))
-                } else {
-                    self.metrics
-                        .equiv_cache_misses
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    self.metrics.pruned_by_equivalence.fetch_add(
-                        self.dict.guesses.len()
-                            - rc.iter().map(|b| b.count_ones() as usize).sum::<usize>(),
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
-                    let cap = EQUIV_CACHE_CAP.load(Ordering::Relaxed);
-                    if cache_mut.len() > cap {
-                        let evict = (cap / 4).max(1);
-                        let keys_to_remove: Vec<_> =
-                            cache_mut.keys().take(evict).copied().collect();
-                        for k in keys_to_remove {
-                            cache_mut.remove(&k);
-                        }
-                    }
-                    cache_mut.insert(set_hash, std::sync::Arc::clone(&rc));
-                    Some(rc)
-                }
-            } else {
-                self.metrics
-                    .equiv_cache_misses
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                self.metrics.pruned_by_equivalence.fetch_add(
-                    self.dict.guesses.len()
-                        - active_bits_scratch
-                            .iter()
-                            .map(|b| b.count_ones() as usize)
-                            .sum::<usize>(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                None
-            };
-
-            if let Some(rc_val) = &rc_new {
-                slice_ptr = rc_val.as_slice() as *const _;
-            } else {
-                slice_ptr = active_bits_scratch.as_slice() as *const _;
-            }
-            rc_new
-        };
-
-        let active_guesses_slice = unsafe { &*slice_ptr };
-
-        self.scratch.as_mut().unwrap().scratch_active_bits[depth] = active_bits_scratch;
-
-        let mut local_lb = parent_lb.max(cached_lower_bound);
-        let mut counts = [0u16; 243];
-        let mut non_empty_indices = [0u8; 243];
-
-        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
-        let matrix_data_ptr = self.matrix.data.as_ptr();
-
-        let mut phase1_tuples =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth]);
-        phase1_tuples.clear();
-        let mut phase2_tuples =
-            std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth]);
-        phase2_tuples.clear();
-
-        let mut local_max_k = 0;
-        let mut valid_phase1_k = 0;
-        let mut min_val_found = u32::MAX;
-
-        for &cand in set {
-            let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(cand) };
-            if (active_guesses_slice[g / 64] & (1 << (g % 64))) == 0 {
-                continue;
-            }
-            let mut num_non_empty = 0;
-            let g_off = g * self.matrix.num_candidates;
-            let g_ptr = unsafe { matrix_data_ptr.add(g_off) };
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                unsafe {
-                    let cnt = counts.get_unchecked_mut(r);
-                    *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                    num_non_empty += (*cnt == 0) as usize;
-                    *cnt += 1;
-                }
-            }
-            if num_non_empty == 1 {
-                unsafe {
-                    let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                    *counts.get_unchecked_mut(r_idx) = 0;
-                }
-                continue;
-            }
-            if num_non_empty > local_max_k {
-                local_max_k = num_non_empty;
-            }
-            let mut expected_rem = 0u32;
-            let mut lb_cost = c_len as u32;
-            for i in 0..num_non_empty {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                let count = unsafe { *counts.get_unchecked(r_idx) };
-                unsafe {
-                    *counts.get_unchecked_mut(r_idx) = 0;
-                }
-                expected_rem += (count as u32) * (count as u32);
-                if r_idx != Response::WIN.0 as usize {
-                    lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                }
-            }
-            if lb_cost < beta {
-                if num_non_empty > valid_phase1_k {
-                    valid_phase1_k = num_non_empty;
-                }
-                phase1_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-            } else {
-                min_val_found = min_val_found.min(lb_cost);
-            }
-        }
-        phase1_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
-
-        for (idx, &(_g, _, g_lb, _non_empty)) in phase1_tuples.iter().enumerate() {
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if self.current_cost_so_far + local_lb >= current_global_beta {
-                cut_by_global = true;
-                break;
-            }
-            if self.current_cost_so_far + g_lb >= current_global_beta {
-                cut_by_global = true;
-                min_val_found = min_val_found.min(g_lb);
-                self.metrics.pruned_by_bounds.fetch_add(
-                    phase1_tuples.len() - idx,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                break;
-            }
-            if g_lb >= best_val {
-                min_val_found = min_val_found.min(g_lb);
-                self.metrics.pruned_by_bounds.fetch_add(
-                    phase1_tuples.len() - idx,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                break;
-            }
-            let val =
-                self.min_guess_val(set, active_guesses_slice, _g, best_val, depth, parent_max_k);
-            min_val_found = min_val_found.min(val);
-            // A guess cut short by the global beta returns a partial cost.
-            if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                cut_by_global = true;
-            }
-            if val < best_val {
-                best_val = val;
-                if best_val <= local_lb {
-                    break;
-                }
-            }
-        }
-
-        let phase2_min_lb = heuristic::phase2_capacity_bound(c_len, parent_max_k, parent_max_k);
-        let phase2_effective_lb = local_lb.max(phase2_min_lb);
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        if best_val > phase2_effective_lb
-            && self.current_cost_so_far + phase2_effective_lb < current_global_beta
-        {
-            // Gather Phase 2 guesses: active guesses not in set
-            let mut valid_phase2_k = 0;
-            let mut is_in_set =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_is_in_set[depth]);
-            for &c in set {
-                let g = unsafe { *self.dict.candidate_to_guess.get_unchecked(c) };
-                unsafe {
-                    *is_in_set.get_unchecked_mut(g / 64) |= 1 << (g % 64);
-                }
-            }
-            let num_guesses = self.dict.guesses.len();
-            let data_c_g_ptr = self.matrix.data_c_g.as_ptr();
-            let mut stack_c_ptrs = [std::ptr::null::<Response>(); 256];
-            let mut heap_c_ptrs = Vec::new();
-            let c_ptrs: &[*const Response] = if c_len <= 256 {
-                for (i, &c) in set.iter().enumerate() {
-                    unsafe {
-                        *stack_c_ptrs.get_unchecked_mut(i) = data_c_g_ptr.add(c * num_guesses);
-                    }
-                }
-                &stack_c_ptrs[..c_len]
-            } else {
-                heap_c_ptrs.reserve(c_len);
-                for &c in set {
-                    heap_c_ptrs.push(unsafe { data_c_g_ptr.add(c * num_guesses) });
-                }
-                &heap_c_ptrs
-            };
-
-            for (block_idx, &block) in active_guesses_slice.iter().enumerate() {
-                if block == 0 {
-                    continue;
-                }
-                let mut b = block & !is_in_set[block_idx];
-                while b != 0 {
-                    let tz = b.trailing_zeros();
-                    let g = block_idx * 64 + tz as usize;
-                    b &= b - 1;
-
-                    let mut num_non_empty = 0;
-                    for &c_base in c_ptrs {
-                        let r = unsafe { (*c_base.add(g)).0 as usize };
-                        unsafe {
-                            let cnt = counts.get_unchecked_mut(r);
-                            *non_empty_indices.get_unchecked_mut(num_non_empty) = r as u8;
-                            num_non_empty += (*cnt == 0) as usize;
-                            *cnt += 1;
-                        }
-                    }
-                    if num_non_empty == 1 {
-                        unsafe {
-                            let r_idx = *non_empty_indices.get_unchecked(0) as usize;
-                            *counts.get_unchecked_mut(r_idx) = 0;
-                        }
-                        continue;
-                    }
-                    let mut expected_rem = 0u32;
-                    let mut lb_cost = c_len as u32;
-                    for i in 0..num_non_empty {
-                        let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                        let count = unsafe { *counts.get_unchecked(r_idx) };
-                        unsafe {
-                            *counts.get_unchecked_mut(r_idx) = 0;
-                        }
-                        expected_rem += (count as u32) * (count as u32);
-                        if r_idx != Response::WIN.0 as usize {
-                            lb_cost += unsafe { *parent_cap_bounds_ptr.add(count as usize) };
-                        }
-                    }
-                    if num_non_empty == 2
-                        && expected_rem == (c_len * c_len) as u32 - 2 * (c_len as u32) + 2
-                    {
-                        continue;
-                    }
-                    if num_non_empty > local_max_k {
-                        local_max_k = num_non_empty;
-                    }
-                    if lb_cost < best_val {
-                        if num_non_empty > valid_phase2_k {
-                            valid_phase2_k = num_non_empty;
-                        }
-                        phase2_tuples.push((g, expected_rem, lb_cost, num_non_empty));
-                    } else {
-                        min_val_found = min_val_found.min(lb_cost);
-                    }
-                }
-            }
-            for &c in set {
-                let g = self.dict.candidate_to_guess[c];
-                is_in_set[g / 64] = 0;
-            }
-            self.scratch.as_mut().unwrap().scratch_is_in_set[depth] = is_in_set;
-
-            let base_lb = unsafe {
-                *self
-                    .capacity_bounds_2d
-                    .get_unchecked(local_max_k)
-                    .get_unchecked(c_len)
-            };
-            if base_lb > local_lb {
-                local_lb = base_lb;
-            }
-
-            let phase1_lb = if valid_phase1_k > 0 {
-                heuristic::tight_capacity_bound(c_len, valid_phase1_k, local_max_k)
-            } else {
-                u32::MAX
-            };
-            let phase2_lb = if valid_phase2_k > 0 {
-                heuristic::phase2_capacity_bound(c_len, valid_phase2_k, local_max_k)
-            } else {
-                u32::MAX
-            };
-            let tight_lb = phase1_lb.min(phase2_lb);
-            if tight_lb != u32::MAX && tight_lb > local_lb {
-                local_lb = tight_lb;
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if local_lb < best_val && self.current_cost_so_far + local_lb >= current_global_beta {
-                cut_by_global = true;
-            }
-            if local_lb < best_val && self.current_cost_so_far + local_lb < current_global_beta {
-                phase2_tuples.sort_unstable_by_key(|&(g, exp, lb, _)| (lb, exp, g));
-
-                for (idx, &(_g, _, g_lb, _non_empty)) in phase2_tuples.iter().enumerate() {
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    if self.current_cost_so_far + local_lb >= current_global_beta {
-                        cut_by_global = true;
-                        break;
-                    }
-                    if self.current_cost_so_far + g_lb >= current_global_beta {
-                        cut_by_global = true;
-                        min_val_found = min_val_found.min(g_lb);
-                        self.metrics.pruned_by_bounds.fetch_add(
-                            phase2_tuples.len() - idx,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                        break;
-                    }
-                    if g_lb >= best_val {
-                        min_val_found = min_val_found.min(g_lb);
-                        self.metrics.pruned_by_bounds.fetch_add(
-                            phase2_tuples.len() - idx,
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                        break;
-                    }
-                    let val = self.min_guess_val(
-                        set,
-                        active_guesses_slice,
-                        _g,
-                        best_val,
-                        depth,
-                        local_max_k,
-                    );
-                    min_val_found = min_val_found.min(val);
-                    if self.current_cost_so_far + val >= self.global_beta.load(Ordering::Relaxed) {
-                        cut_by_global = true;
-                    }
-                    if val < best_val {
-                        best_val = val;
-                        if best_val <= local_lb {
-                            break;
-                        }
-                    }
-                }
-            }
-        } else {
-            if best_val > phase2_effective_lb {
-                // Phase 2 was skipped because of the global beta.
-                cut_by_global = true;
-            }
-            min_val_found = min_val_found.min(phase2_min_lb);
-        }
-
-        self.scratch.as_mut().unwrap().scratch_phase1_tuples[depth] = phase1_tuples;
-        self.scratch.as_mut().unwrap().scratch_phase2_tuples[depth] = phase2_tuples;
-
-        let is_exact = best_val < beta;
-        if is_exact {
-            if !cut_by_global {
-                self.cache.insert_set(hash, set, best_val, true);
-            }
-            crate::certlog::record_tagged(10, set, best_val, true, cut_by_global);
-            best_val
-        } else {
-            let mut final_lb = beta.max(local_lb);
-            if best_val > local_lb && min_val_found != u32::MAX {
-                final_lb = final_lb.max(min_val_found);
-            }
-            if !cut_by_global {
-                self.cache.insert_set(hash, set, final_lb, false);
-            }
-            crate::certlog::record_tagged(11, set, final_lb, false, cut_by_global);
-            final_lb
-        }
-    }
-    /// Evaluates the true cost of making a specific `guess` given the current `set` of candidates.
-    ///
-    /// This mathematically partitions the candidates into up to 243 ternary response buckets.
-    /// It recursively queries `min_state_val` on each sub-bucket. Alpha-beta pruning is applied
-    /// at the bucket level: if the cumulative cost of resolved buckets plus the theoretical
-    /// heuristic minimum cost of the remaining unresolved buckets exceeds `beta`, evaluation
-    /// is immediately aborted.
-    pub fn min_guess_val(
-        &mut self,
-        set: &[usize],
-        active_guesses_slice: &[u64],
-        guess: usize,
-
-        beta: u32,
-        depth: usize,
-        parent_max_k: usize,
-    ) -> u32 {
-        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-        let beta = beta.min(current_global_beta);
-
-        self.metrics
-            .guesses_evaluated
-            .fetch_add(1, Ordering::Relaxed);
-
-        let parent_cap_bounds = &self.capacity_bounds_2d[parent_max_k];
-        let parent_cap_bounds_ptr = parent_cap_bounds.as_ptr();
-        let c_len = set.len();
-        let g_offset = guess * self.matrix.num_candidates;
-        let g_ptr = unsafe { self.matrix.data.as_ptr().add(g_offset) };
-
-        if c_len <= 16 {
-            let mut local_counts = [(0u8, 0u8, 0u32); 16];
-            let mut c_responses = [0u8; 16];
-            let mut num_non_empty = 0;
-            for (cand_idx, &c) in set.iter().enumerate() {
-                let r = unsafe { (*g_ptr.add(c)).0 };
-                unsafe {
-                    *c_responses.get_unchecked_mut(cand_idx) = r;
-                }
-                let mut found = false;
-                for i in 0..num_non_empty {
-                    let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                    if entry.0 == r {
-                        entry.1 += 1;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    unsafe {
-                        *local_counts.get_unchecked_mut(num_non_empty) = (r, 1, 0);
-                    }
-                    num_non_empty += 1;
-                }
-            }
-
-            if num_non_empty == 1 {
-                return beta;
-            }
-
-            let mut cost = c_len as u32;
-            let mut max_p_len = 0;
-
-            for i in 0..num_non_empty {
-                let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                let r_idx = entry.0 as usize;
-                if r_idx == Response::WIN.0 as usize {
-                    continue;
-                }
-                let p_len = entry.1 as usize;
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                cost += lb;
-                entry.2 = lb;
-            }
-
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                return cost;
-            }
-
-            if max_p_len <= 2 {
-                return cost;
-            }
-
-            local_counts[0..num_non_empty]
-                .sort_unstable_by_key(|&(_, count, _)| std::cmp::Reverse(count));
-
-            for i in 0..num_non_empty {
-                let entry = unsafe { local_counts.get_unchecked_mut(i) };
-                let p_len = entry.1 as usize;
-                let r_idx = entry.0 as usize;
-                if r_idx == Response::WIN.0 as usize || p_len <= 2 {
-                    continue;
-                }
-
-                let mut p = [0usize; 16];
-                let mut p_idx = 0;
-                for (cand_idx, &c) in set.iter().enumerate() {
-                    let r = unsafe { *c_responses.get_unchecked(cand_idx) as usize };
-                    if r == r_idx {
-                        unsafe {
-                            *p.get_unchecked_mut(p_idx) = c;
-                        }
-                        p_idx += 1;
-                    }
-                }
-
-                let (quick_val, is_exact) =
-                    Self::quick_bucket_eval(self.matrix, self.dict, unsafe {
-                        p.get_unchecked(0..p_len)
-                    });
-                let lb = entry.2;
-                let used_val = quick_val.max(lb);
-                cost += used_val - lb;
-                entry.2 = used_val;
-                cert_record!(4, unsafe { p.get_unchecked(0..p_len) }, used_val, is_exact);
-
-                if is_exact {
-                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                        return cost;
-                    }
-                    continue;
-                }
-
-                let b = cost - entry.2;
-                let new_beta = beta - b;
-                let effective_beta =
-                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
-
-                if effective_beta == 0 {
-                    return cost;
-                }
-
-                self.current_cost_so_far += b;
-                let val = self.min_state_val(
-                    &p[0..p_len],
-                    active_guesses_slice,
-                    effective_beta,
-                    depth + 1,
-                    p_len.min(parent_max_k).max(2),
-                );
-                self.current_cost_so_far -= b;
-
-                // Reload the global beta: a child cut short by it returns a
-                // value that only means something against its current value.
-                if b + val >= beta
-                    || self.current_cost_so_far + b + val
-                        >= self.global_beta.load(Ordering::Relaxed)
-                {
-                    return b + val;
-                }
-                cost = b + val;
-                entry.2 = val;
-            }
-            cost
-        } else {
-            let (counts_ptr, hashes_ptr, p_lbs_ptr, child_max_ks_ptr) = {
-                let s = self.scratch.as_mut().unwrap();
-                (
-                    s.scratch_guess_counts[depth].as_mut_ptr(),
-                    s.scratch_guess_hashes[depth].as_mut_ptr(),
-                    s.scratch_guess_p_lbs[depth].as_mut_ptr(),
-                    s.scratch_guess_child_max_ks[depth].as_mut_ptr(),
-                )
-            };
-
-            let mut non_empty_indices = [0u8; 243];
-            let num_non_empty = std::cell::Cell::new(0usize);
-            let mut eval_indices = [0u8; 243];
-            let mut num_eval = 0;
-            let num_p_lbs = std::cell::Cell::new(0usize);
-
-            struct GuessCleanup<'a> {
-                counts_ptr: *mut u16,
-                hashes_ptr: *mut u64,
-                p_lbs_ptr: *mut u32,
-                child_max_ks_ptr: *mut u16,
-                non_empty_indices_ptr: *const u8,
-                eval_indices_ptr: *const u8,
-                num_non_empty: &'a std::cell::Cell<usize>,
-                num_p_lbs: &'a std::cell::Cell<usize>,
-            }
-
-            impl<'a> Drop for GuessCleanup<'a> {
-                #[inline(always)]
-                fn drop(&mut self) {
-                    unsafe {
-                        let n_non_empty = self.num_non_empty.get();
-                        for i in 0..n_non_empty {
-                            let r = *self.non_empty_indices_ptr.add(i) as usize;
-                            *self.counts_ptr.add(r) = 0;
-                            *self.hashes_ptr.add(r) = 0;
-                        }
-                        let n_p_lbs = self.num_p_lbs.get();
-                        for i in 0..n_p_lbs {
-                            let r = *self.eval_indices_ptr.add(i) as usize;
-                            *self.p_lbs_ptr.add(r) = 0;
-                            *self.child_max_ks_ptr.add(r) = 0;
-                        }
-                    }
-                }
-            }
-
-            let _cleanup = GuessCleanup {
-                counts_ptr,
-                hashes_ptr,
-                p_lbs_ptr,
-                child_max_ks_ptr,
-                non_empty_indices_ptr: non_empty_indices.as_ptr(),
-                eval_indices_ptr: eval_indices.as_ptr(),
-                num_non_empty: &num_non_empty,
-                num_p_lbs: &num_p_lbs,
-            };
-
-            let zobrist_ptr = self.matrix.zobrist.as_ptr();
-            for &c in set {
-                let r = unsafe { (*g_ptr.add(c)).0 as usize };
-                unsafe {
-                    let cnt = counts_ptr.add(r);
-                    let curr_non_empty = num_non_empty.get();
-                    *non_empty_indices.get_unchecked_mut(curr_non_empty) = r as u8;
-                    num_non_empty.set(curr_non_empty + (*cnt == 0) as usize);
-                    *cnt += 1;
-                    *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
-                }
-            }
-
-            if num_non_empty.get() == 1 {
-                return beta;
-            }
-
-            let mut cost = set.len() as u32;
-            let mut max_p_len = 0;
-
-            for i in 0..num_non_empty.get() {
-                let r_idx = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                if r_idx == Response::WIN.0 as usize {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                if p_len > max_p_len {
-                    max_p_len = p_len;
-                }
-                if p_len > 2 {
-                    unsafe {
-                        *eval_indices.get_unchecked_mut(num_eval) = r_idx as u8;
-                    }
-                    num_eval += 1;
-                }
-                cost += unsafe { *parent_cap_bounds_ptr.add(p_len) };
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                return cost;
-            }
-
-            if max_p_len <= 2 {
-                return cost;
-            }
-
-            // CRITICAL OPTIMIZATION: Evaluate largest buckets first.
-            // Large buckets have a higher probability of exceeding their heuristic minimum bounds.
-            // By evaluating them first, we can rapidly tighten our accumulated cost and trigger
-            // an Alpha-Beta cutoff (cost >= beta) before wasting time evaluating the smaller buckets.
-            // Ties broken by response index for deterministic order.
-            eval_indices[0..num_eval].sort_unstable_by_key(|&r| {
-                (std::cmp::Reverse(unsafe { *counts_ptr.add(r as usize) }), r)
-            });
-
-            let split_idx = eval_indices[0..num_eval]
-                .partition_point(|&r| unsafe { *counts_ptr.add(r as usize) > 15 });
-
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                unsafe {
-                    *p_lbs_ptr.add(r_idx) = *parent_cap_bounds_ptr.add(p_len);
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-            }
-            num_p_lbs.set(num_eval);
-
-            // Pass 1: Cache-only check descending by bucket size before partitioning into sorted_set.
-            // If cached bounds alone push cost >= beta or current_cost_so_far + cost >= current_global_beta,
-            // we prune immediately without spending time on counting sort or scratch buffer partitioning.
-            let mut exact_mask = [0u64; 4];
-            let mut cached_mask = [0u64; 4];
-            let mut num_exact = 0;
-
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-                    self.metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                    let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                    let used_val = cached_val.max(lb);
-                    cost += used_val - lb;
-                    unsafe {
-                        *p_lbs_ptr.add(r_idx) = used_val;
-                    }
-                    let word_idx = r_idx >> 6;
-                    let bit = 1u64 << (r_idx & 63);
-                    if is_exact {
-                        unsafe {
-                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
-                        }
-                        num_exact += 1;
-                    }
-                    unsafe {
-                        *cached_mask.get_unchecked_mut(word_idx) |= bit;
-                    }
-
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                        self.metrics
-                            .pruned_by_bounds
-                            .fetch_add(1, Ordering::Relaxed);
-                        return cost;
-                    }
-                }
-            }
-
-            // If all buckets with p_len > 2 were exact in cache, no partitioning or evaluation is needed.
-            if num_exact == num_eval {
-                return cost;
-            }
-
-            // Fast slice partition using counting sort
-            let mut sorted_set =
-                std::mem::take(&mut self.scratch.as_mut().unwrap().scratch_sorted_sets[depth]);
-            sorted_set.resize(set.len(), 0);
-
-            let mut offsets = [0u16; 243];
-            let mut curr = 0;
-            let n_non_empty = num_non_empty.get();
-            for i in 0..n_non_empty {
-                let r = unsafe { *non_empty_indices.get_unchecked(i) as usize };
-                unsafe {
-                    *offsets.get_unchecked_mut(r) = curr;
-                    curr += *counts_ptr.add(r);
-                }
-            }
-
-            let mut current_offsets = offsets;
-            for &c in set {
-                let r_idx = unsafe { (*g_ptr.add(c)).0 as usize };
-                let pos = unsafe { *current_offsets.get_unchecked(r_idx) as usize };
-                unsafe {
-                    *sorted_set.get_unchecked_mut(pos) = c;
-                    *current_offsets.get_unchecked_mut(r_idx) += 1;
-                }
-            }
-
-            // Pass 2a: Cheap uncached buckets evaluation (quick_bucket_eval on p_len <= 15).
-            // Evaluating small buckets first takes nanoseconds and often prunes cost >= beta
-            // immediately, completely bypassing expensive full-dictionary branching factor searches
-            // on any p_len > 15 buckets for this guess.
-            for i in split_idx..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-
-                let (quick_val, is_exact) = Self::quick_bucket_eval(self.matrix, self.dict, p);
-                let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                let used_val = quick_val.max(lb);
-                cost += used_val - lb;
-                unsafe {
-                    *p_lbs_ptr.add(r_idx) = used_val;
-                }
-                if is_exact {
-                    unsafe {
-                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
-                    }
-                    num_exact += 1;
-                }
-                self.cache.insert_set(hash, p, used_val, is_exact);
-                cert_record!(5, p, used_val, is_exact);
-                unsafe {
-                    *child_max_ks_ptr.add(r_idx) = (p_len.min(parent_max_k)) as u16;
-                }
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                    break;
-                }
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
-            if num_exact == num_eval {
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
-            // Pass 2b: Large uncached buckets evaluation (tight capacity bound on p_len > 15).
-            // Only reached if small buckets alone did not exceed beta.
-            for i in 0..split_idx {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-
-                let lb = unsafe { *p_lbs_ptr.add(r_idx) };
-                let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
-                if target_k == 2 {
-                    unsafe {
-                        *child_max_ks_ptr.add(r_idx) =
-                            (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                    }
-                    self.cache.insert_set(hash, p, lb, false);
-                    cert_record!(6, p, lb, false);
-                } else {
-                    let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
-                        self.matrix,
-                        p,
-                        target_k,
-                    );
-                    if k_cand >= target_k {
-                        unsafe {
-                            *child_max_ks_ptr.add(r_idx) =
-                                (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                        }
-                        self.cache.insert_set(hash, p, lb, false);
-                        cert_record!(7, p, lb, false);
-                    } else {
-                        let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
-                            self.matrix,
-                            p,
-                            k_cand,
-                            target_k,
-                        );
-                        if k >= target_k {
-                            unsafe {
-                                *child_max_ks_ptr.add(r_idx) =
-                                    (p_len as u16).min(*child_max_ks_ptr.add(r_idx));
-                            }
-                            self.cache.insert_set(hash, p, lb, false);
-                            cert_record!(8, p, lb, false);
-                        } else {
-                            unsafe {
-                                *child_max_ks_ptr.add(r_idx) =
-                                    (k as u16).min(*child_max_ks_ptr.add(r_idx));
-                            }
-                            let tight_lb =
-                                crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
-                            let used_val = tight_lb.max(lb);
-                            cost += used_val - lb;
-                            unsafe {
-                                *p_lbs_ptr.add(r_idx) = used_val;
-                            }
-                            self.cache.insert_set(hash, p, used_val, false);
-                            cert_record!(9, p, used_val, false);
-                        }
-                    }
-                }
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                    break;
-                }
-            }
-
-            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-            if cost >= beta || self.current_cost_so_far + cost >= current_global_beta {
-                self.metrics
-                    .pruned_by_bounds
-                    .fetch_add(1, Ordering::Relaxed);
-                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                return cost;
-            }
-
-            for i in 0..num_eval {
-                let r_idx = unsafe { *eval_indices.get_unchecked(i) as usize };
-                let word_idx = r_idx >> 6;
-                let bit = 1u64 << (r_idx & 63);
-                if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
-
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + cost >= current_global_beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
-                }
-
-                let start = unsafe { *offsets.get_unchecked(r_idx) as usize };
-                let end = start + p_len;
-                let p = unsafe { sorted_set.get_unchecked(start..end) };
-
-                let b = cost - unsafe { *p_lbs_ptr.add(r_idx) };
-                let new_beta = beta - b;
-
-                // Also respect the global beta from concurrent threads: if another thread
-                // already found a solution cheaper than beta, tighten our local bound.
-                let effective_beta =
-                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
-
-                if effective_beta == 0 {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
-                }
-
-                self.current_cost_so_far += b;
-                let val = self.min_state_val(
-                    p,
-                    active_guesses_slice,
-                    effective_beta,
-                    depth + 1,
-                    (unsafe { *child_max_ks_ptr.add(r_idx) } as usize).max(2),
-                );
-                self.current_cost_so_far -= b;
-                if b + val >= beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return b + val;
-                }
-                // Propagate any tightening from the global beta.
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                if self.current_cost_so_far + b + val >= current_global_beta {
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return b + val;
-                }
-                cost = b + val;
-            }
-
-            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-
-            cost
-        }
-    }
 }
-
-// Note: GlobalCache now stores both Exact values (when a full search completes)
-// and Lower Bounds (when a search fails high against `beta`).
-// This implements Fail-Hard Alpha-Beta Transposition Table Pruning, ensuring that
-// if we revisit a state with a `beta` that is <= a previously established lower bound,
-// we can instantly prune the subtree and return `beta`, avoiding massive redundant deep searches.
 
 #[cfg(test)]
 mod tests {
@@ -2102,9 +8299,9 @@ mod solver_cache_tests {
         let equiv_cache: [_; 1024] =
             std::array::from_fn(|_| std::sync::RwLock::new(rustc_hash::FxHashMap::default()));
 
-        // Test multiple small subsets of candidates (sizes 2, 3, 4)
-        for offset in (0..15).step_by(5) {
-            for size in 2..=4 {
+        // Test multiple small subsets of candidates (sizes 2..=14)
+        for offset in (0..30).step_by(5) {
+            for size in 2..=16 {
                 let bucket: Vec<usize> = (offset..offset + size).collect();
                 let (q_val, is_exact) = Solver::quick_bucket_eval(&matrix, &dict, &bucket);
                 let true_cost = Solver::solve(&matrix, &bucket, &dict, &metrics, &equiv_cache);
@@ -2122,6 +8319,211 @@ mod solver_cache_tests {
                         q_val,
                         true_cost,
                         bucket
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_sort_guess_tuples_networks() {
+        fn permute(arr: &mut [usize], l: usize, r: usize, results: &mut Vec<Vec<usize>>) {
+            if l == r {
+                results.push(arr.to_vec());
+            } else {
+                for i in l..=r {
+                    arr.swap(l, i);
+                    permute(arr, l + 1, r, results);
+                    arr.swap(l, i);
+                }
+            }
+        }
+
+        for n in 2..=8 {
+            let mut base: Vec<usize> = (0..n).collect();
+            let mut perms = Vec::new();
+            permute(&mut base, 0, n - 1, &mut perms);
+            for p in perms {
+                let mut tuples: Vec<GuessTuple> = p
+                    .iter()
+                    .map(|&val| GuessTuple {
+                        lb: val as u32,
+                        exp: 0,
+                        g: 0,
+                    })
+                    .collect();
+                sort_guess_tuples(&mut tuples);
+                for i in 0..n {
+                    assert_eq!(
+                        tuples[i].lb, i as u32,
+                        "Sorting network failed for len {}",
+                        n
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_eval_entries_sorting_networks() {
+        fn permute(arr: &mut [u16], l: usize, r: usize, results: &mut Vec<Vec<u16>>) {
+            if l == r {
+                results.push(arr.to_vec());
+            } else {
+                for i in l..=r {
+                    arr.swap(l, i);
+                    permute(arr, l + 1, r, results);
+                    arr.swap(l, i);
+                }
+            }
+        }
+
+        for n in 2..=5 {
+            let mut base: Vec<u16> = (0..n as u16).collect();
+            let mut perms = Vec::new();
+            permute(&mut base, 0, n - 1, &mut perms);
+            for p in perms {
+                let mut entries = [
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                ];
+                for i in 0..n {
+                    entries[i].count = p[i];
+                }
+                let eval_entries_ptr = entries.as_mut_ptr();
+                if n == 2 {
+                    let e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let e1 = unsafe { *eval_entries_ptr.add(1) };
+                    if e0.count < e1.count {
+                        unsafe {
+                            *eval_entries_ptr.add(0) = e1;
+                            *eval_entries_ptr.add(1) = e0;
+                        }
+                    }
+                } else if n == 3 {
+                    let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                    let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    if e1.count < e2.count {
+                        std::mem::swap(&mut e1, &mut e2);
+                    }
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                        *eval_entries_ptr.add(2) = e2;
+                    }
+                } else if n == 4 {
+                    let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                    let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                    let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    if e2.count < e3.count {
+                        std::mem::swap(&mut e2, &mut e3);
+                    }
+                    if e0.count < e2.count {
+                        std::mem::swap(&mut e0, &mut e2);
+                    }
+                    if e1.count < e3.count {
+                        std::mem::swap(&mut e1, &mut e3);
+                    }
+                    if e1.count < e2.count {
+                        std::mem::swap(&mut e1, &mut e2);
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                        *eval_entries_ptr.add(2) = e2;
+                        *eval_entries_ptr.add(3) = e3;
+                    }
+                } else if n == 5 {
+                    let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                    let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                    let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                    let mut e4 = unsafe { *eval_entries_ptr.add(4) };
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    if e3.count < e4.count {
+                        std::mem::swap(&mut e3, &mut e4);
+                    }
+                    if e2.count < e4.count {
+                        std::mem::swap(&mut e2, &mut e4);
+                    }
+                    if e2.count < e3.count {
+                        std::mem::swap(&mut e2, &mut e3);
+                    }
+                    if e0.count < e3.count {
+                        std::mem::swap(&mut e0, &mut e3);
+                    }
+                    if e1.count < e4.count {
+                        std::mem::swap(&mut e1, &mut e4);
+                    }
+                    if e0.count < e2.count {
+                        std::mem::swap(&mut e0, &mut e2);
+                    }
+                    if e1.count < e3.count {
+                        std::mem::swap(&mut e1, &mut e3);
+                    }
+                    if e1.count < e2.count {
+                        std::mem::swap(&mut e1, &mut e2);
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                        *eval_entries_ptr.add(2) = e2;
+                        *eval_entries_ptr.add(3) = e3;
+                        *eval_entries_ptr.add(4) = e4;
+                    }
+                }
+                for i in 0..n {
+                    assert_eq!(
+                        entries[i].count,
+                        (n - 1 - i) as u16,
+                        "EvalEntry sorting network failed for len {}",
+                        n
                     );
                 }
             }
