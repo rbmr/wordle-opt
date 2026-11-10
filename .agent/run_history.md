@@ -1041,7 +1041,36 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `0c2b116` | pc01 | 2200 | 1 | optimal | 20.022s | 7477 | 2331 | 23644 | ~543MB | vectorize candidate branching factor calculation for small subsets with SSE2; new all-time record N=2200 (20.022s vs 20.071s, -49ms); pick 19.9s; cpu 317.8s; busy cores 15.9; states 23,644 vs 23,652; guesses 589,658 vs 598,705 [-9,047 guesses]; bounds pruned 1,946,656; equiv pruned 188,986,885; cache hits 2,424,847; validation OK |
 | 2026-11-10 | `0c2b116` | pc01 | 2340 | — | optimal | 23.562s (0.01h) | 8001 | 2478 | 26071 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-0c2b116); vectorize candidate branching factor calculation for small subsets with SSE2; build 23.562s; pick 23.3s; cpu 373.8s; busy cores 15.9 (root_guesses @ 15s: 7225); states 26,071; guesses 752,427; bounds pruned 2,088,208; equiv pruned 207,854,767; cache hits 3,486,242; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `0c2b116` | pc01 | 2340 | — | optimal --certify | 23.425s (0.01h) | 8001 | 2478 | 26178 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.425s (pick 23.3s, cpu 371.7s, busy cores 15.9); 1,329,020 solver facts; 590 gap refutations (7.390s); 634,575 claims (445,557 capacity, 189,018 expansion, 0 failures, 9,518,644 bytes); independent check verified optimal in 59.661s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `6102360` | pc01 | 1000 | 1 | optimal | 2.601s | 3124 | 1049 | 818 | — | defer Zobrist hashing for small candidate sets in solver min_guess_val; pick 2.6s; cpu 41.0s; busy cores 15.8; states 818 vs 822 [-4 states]; guesses 15,057 vs 15,087 [-30 guesses]; bounds pruned 44,696; equiv pruned 5,069,828; cache hits 165,614; validation OK |
+| 2026-11-10 | `6102360` | pc01 | 1600 | 1 | optimal | 8.169s | 5256 | 1681 | 3944 | — | defer Zobrist hashing for small candidate sets in solver min_guess_val; pick 8.1s; cpu 128.0s; busy cores 15.7; states 3,944 vs 3,951 [-7 states]; guesses 66,203 vs 66,266 [-63 guesses]; bounds pruned 315,713; equiv pruned 29,461,381; cache hits 354,030; validation OK |
+| 2026-11-10 | `6102360` | pc01 | 2000 | 1 | optimal | 13.767s | 6723 | 2119 | 7800 | — | defer Zobrist hashing for small candidate sets in solver min_guess_val; pick 13.7s; cpu 217.1s; busy cores 15.8; states 7,800; guesses 185,591 vs 186,045 [-454 guesses]; bounds pruned 501,685; equiv pruned 59,871,059; cache hits 837,794; validation OK |
+| 2026-11-10 | `6102360` | pc01 | 2200 | 1 | optimal | 20.053s | 7477 | 2331 | 23597 | ~542MB | defer Zobrist hashing for small candidate sets in solver min_guess_val; pick 20.0s; cpu 318.2s; busy cores 15.9; states 23,597 vs 23,644 [-47 states]; guesses 589,420 vs 589,658 [-238 guesses]; bounds pruned 1,944,508; equiv pruned 188,521,865; cache hits 2,425,282; validation OK |
+| 2026-11-10 | `6102360` | pc01 | 2340 | — | optimal | 23.543s (0.01h) | 8001 | 2478 | 26031 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-6102360); defer Zobrist hashing for small candidate sets in solver min_guess_val; new all-time record full run build time (23.543s vs 23.562s); pick 23.3s; cpu 373.9s; busy cores 15.9 (root_guesses @ 15s: 7241); states 26,031 vs 26,071 [-40 states]; guesses 753,219; bounds pruned 2,080,327; equiv pruned 207,569,474; cache hits 3,496,090; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `6102360` | pc01 | 2340 | — | optimal --certify | 23.433s (0.01h) | 8001 | 2478 | 26173 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.433s (pick 23.3s, cpu 371.8s, busy cores 15.9); 1,327,741 solver facts; 590 gap refutations (7.541s); 628,362 claims (441,966 capacity, 186,396 expansion, 0 failures, 9,425,449 bytes); independent check verified optimal in 60.160s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `6102360` rows evaluate deferring Zobrist hashing for small candidate sets in solver `min_guess_val`:
+  - In `src/solver.rs`:
+    - In `min_guess_val_inner`: for small candidate sets ($c\_len \le 16$), removed `hash: u64` from `LocalCount`, shrinking each entry from 16 bytes down to 4 bytes (`r: u16, count: u16`).
+    - Reduced the total `local_counts` array from 256 bytes down to 64 bytes (fitting exactly in a single 64-byte L1 cache line).
+    - Eliminated Zobrist table reads, candidate index bit-shifting, and hash XOR accumulation during the initial candidate loop.
+    - Completely bypassed Zobrist hash calculation for the millions of guesses that prune by capacity bound (`cost >= cutoff`) or have all buckets of size $\le 2$ (`c_len - num_non_empty <= 1`).
+    - For surviving buckets with $> 2$ candidates, the hash is computed lazily from `r_buf` immediately before cache lookup.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.601s** (cpu 41.0s, pick 2.6s, states 818 vs 822 [-4 states], guesses 15,057 vs 15,087 [-30 guesses], bounds pruned 44,696, cost 3124).
+    - `N=1600, seed=1`: **8.169s** (cpu 128.0s, pick 8.1s, states 3,944 vs 3,951 [-7 states], guesses 66,203 vs 66,266 [-63 guesses], bounds pruned 315,713, cost 5256).
+    - `N=2000, seed=1`: **13.767s** (cpu 217.1s, pick 13.7s, states 7,800, guesses 185,591 vs 186,045 [-454 guesses], bounds pruned 501,685, cost 6723).
+    - `N=2200, seed=1`: **20.053s** (cpu 318.2s, pick 20.0s, states 23,597 vs 23,644 [-47 states], guesses 589,420 vs 589,658 [-238 guesses], bounds pruned 1,944,508, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-6102360`): **23.543s** (new all-time record! cpu 373.9s, pick 23.3s, states 26,031 vs 26,071 [-40 states], guesses 753,219, bounds pruned 2,080,327, equiv pruned 207,569,474, cache hits 3,496,090, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 128.34s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.93s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 300.46s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 51.13s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 628,362 claims with 0 failures, and independent `check` verified `3.91e11` response reads in 60.160s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `0c2b116` rows evaluate vectorizing candidate branching factor calculation for small subsets with SSE2:
   - In `src/heuristic.rs` (`compute_candidate_branching_factor_with_target`):
