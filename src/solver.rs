@@ -3370,7 +3370,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut all_exact = true;
 
+            if num_eval > 0 {
+                self.cache.prefetch(unsafe { (*eval_entries_ptr).hash });
+            }
+            if num_eval > 1 {
+                self.cache
+                    .prefetch(unsafe { (*eval_entries_ptr.add(1)).hash });
+            }
+
             for i in 0..num_eval {
+                if i + 2 < num_eval {
+                    self.cache
+                        .prefetch(unsafe { (*eval_entries_ptr.add(i + 2)).hash });
+                }
                 let entry = unsafe { &mut *eval_entries_ptr.add(i) };
                 let p_len = entry.count as usize;
                 let p_hash = entry.hash;
@@ -3849,7 +3861,23 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut cached_mask = [0u64; M];
             let mut num_exact = 0;
 
+            if num_eval > 0 {
+                let e0 = unsafe { *eval_entries_ptr };
+                let r0 = (!e0 & 0xFFFF) as usize;
+                self.cache.prefetch(unsafe { *hashes_ptr.add(r0) });
+            }
+            if num_eval > 1 {
+                let e1 = unsafe { *eval_entries_ptr.add(1) };
+                let r1 = (!e1 & 0xFFFF) as usize;
+                self.cache.prefetch(unsafe { *hashes_ptr.add(r1) });
+            }
+
             for i in 0..num_eval {
+                if i + 2 < num_eval {
+                    let next_e = unsafe { *eval_entries_ptr.add(i + 2) };
+                    let next_r = (!next_e & 0xFFFF) as usize;
+                    self.cache.prefetch(unsafe { *hashes_ptr.add(next_r) });
+                }
                 let entry = unsafe { *eval_entries_ptr.add(i) };
                 let p_len = (entry >> 16) as usize;
                 let r_idx = (!entry & 0xFFFF) as usize;

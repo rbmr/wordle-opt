@@ -159,6 +159,21 @@ impl GlobalCache {
         self.insert(full_hash, value, is_exact);
     }
 
+    /// Prefetch the transposition table bucket corresponding to `full_hash` into CPU cache.
+    #[inline(always)]
+    pub fn prefetch(&self, full_hash: u64) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let base_index = (full_hash as usize & self.mask) << 1;
+            let ptr = self.entries.as_ptr().add(base_index) as *const i8;
+            core::arch::x86_64::_mm_prefetch(ptr, core::arch::x86_64::_MM_HINT_T0);
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let _ = full_hash;
+        }
+    }
+
     #[inline]
     pub fn get(&self, full_hash: u64) -> Option<(u32, bool)> {
         let base_index = (full_hash as usize & self.mask) << 1;

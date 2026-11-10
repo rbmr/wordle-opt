@@ -1319,6 +1319,10 @@ impl<'a> OptimalPolicy<'a> {
                             if idx >= bucket_tasks.len() {
                                 break;
                             }
+                            if idx + 1 < bucket_tasks.len() {
+                                self.cache
+                                    .prefetch(unsafe { bucket_tasks.get_unchecked(idx + 1).1 });
+                            }
                             let (bucket, hash) = unsafe { *bucket_tasks.get_unchecked(idx) };
                             if let Some((cached_val, true)) = self.cache.get(hash) {
                                 thread_cost += cached_val;
