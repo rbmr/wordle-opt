@@ -4797,108 +4797,64 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
             let can_buffer = c_len <= 256 && !is_contiguous_root;
             let mut total_buckets = 0u32;
+            macro_rules! count_resp {
+                ($r:expr) => {
+                    let r = $r;
+                    let cnt = *counts_ptr.add(r) + 1;
+                    *counts_ptr.add(r) = cnt;
+                    if cnt == 1 {
+                        total_buckets += 1;
+                        *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    } else if cnt == 3 {
+                        has_size_ge_3 = true;
+                        *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                    }
+                };
+            }
+
             let mut i = 0;
             if is_contiguous_root {
                 let g_u8_ptr = g_ptr as *const u8;
+                while i + 15 < c_len {
+                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                    unsafe {
+                        count_resp!((r_u64_0 & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 8) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 16) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 24) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 32) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 40) & 0xFF) as usize);
+                        count_resp!(((r_u64_0 >> 48) & 0xFF) as usize);
+                        count_resp!((r_u64_0 >> 56) as usize);
+                        count_resp!((r_u64_1 & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 8) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 16) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 24) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 32) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 40) & 0xFF) as usize);
+                        count_resp!(((r_u64_1 >> 48) & 0xFF) as usize);
+                        count_resp!((r_u64_1 >> 56) as usize);
+                    }
+                    i += 16;
+                }
                 while i + 7 < c_len {
                     let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
-                    let r0 = (r_u64 & 0xFF) as usize;
-                    let r1 = ((r_u64 >> 8) & 0xFF) as usize;
-                    let r2 = ((r_u64 >> 16) & 0xFF) as usize;
-                    let r3 = ((r_u64 >> 24) & 0xFF) as usize;
-                    let r4 = ((r_u64 >> 32) & 0xFF) as usize;
-                    let r5 = ((r_u64 >> 40) & 0xFF) as usize;
-                    let r6 = ((r_u64 >> 48) & 0xFF) as usize;
-                    let r7 = (r_u64 >> 56) as usize;
-
                     unsafe {
-                        let cnt0 = *counts_ptr.add(r0) + 1;
-                        *counts_ptr.add(r0) = cnt0;
-                        if cnt0 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-                        } else if cnt0 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-                        }
-                        let cnt1 = *counts_ptr.add(r1) + 1;
-                        *counts_ptr.add(r1) = cnt1;
-                        if cnt1 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
-                        } else if cnt1 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
-                        }
-                        let cnt2 = *counts_ptr.add(r2) + 1;
-                        *counts_ptr.add(r2) = cnt2;
-                        if cnt2 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
-                        } else if cnt2 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
-                        }
-                        let cnt3 = *counts_ptr.add(r3) + 1;
-                        *counts_ptr.add(r3) = cnt3;
-                        if cnt3 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
-                        } else if cnt3 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
-                        }
-                        let cnt4 = *counts_ptr.add(r4) + 1;
-                        *counts_ptr.add(r4) = cnt4;
-                        if cnt4 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
-                        } else if cnt4 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
-                        }
-                        let cnt5 = *counts_ptr.add(r5) + 1;
-                        *counts_ptr.add(r5) = cnt5;
-                        if cnt5 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
-                        } else if cnt5 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
-                        }
-                        let cnt6 = *counts_ptr.add(r6) + 1;
-                        *counts_ptr.add(r6) = cnt6;
-                        if cnt6 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
-                        } else if cnt6 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
-                        }
-                        let cnt7 = *counts_ptr.add(r7) + 1;
-                        *counts_ptr.add(r7) = cnt7;
-                        if cnt7 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
-                        } else if cnt7 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
-                        }
+                        count_resp!((r_u64 & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 8) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 16) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 24) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 32) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 40) & 0xFF) as usize);
+                        count_resp!(((r_u64 >> 48) & 0xFF) as usize);
+                        count_resp!((r_u64 >> 56) as usize);
                     }
                     i += 8;
                 }
                 while i < c_len {
-                    let r = unsafe { *g_u8_ptr.add(i) as usize };
                     unsafe {
-                        let cnt = *counts_ptr.add(r) + 1;
-                        *counts_ptr.add(r) = cnt;
-                        if cnt == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        } else if cnt == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        }
+                        count_resp!(*g_u8_ptr.add(i) as usize);
                     }
                     i += 1;
                 }
@@ -4930,90 +4886,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *r_buf_ptr.add(i + 5) = r5;
                         *r_buf_ptr.add(i + 6) = r6;
                         *r_buf_ptr.add(i + 7) = r7;
-                    }
 
-                    let r0 = r0 as usize;
-                    let r1 = r1 as usize;
-                    let r2 = r2 as usize;
-                    let r3 = r3 as usize;
-                    let r4 = r4 as usize;
-                    let r5 = r5 as usize;
-                    let r6 = r6 as usize;
-                    let r7 = r7 as usize;
-
-                    unsafe {
-                        let cnt0 = *counts_ptr.add(r0) + 1;
-                        *counts_ptr.add(r0) = cnt0;
-                        if cnt0 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-                        } else if cnt0 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-                        }
-                        let cnt1 = *counts_ptr.add(r1) + 1;
-                        *counts_ptr.add(r1) = cnt1;
-                        if cnt1 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
-                        } else if cnt1 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
-                        }
-                        let cnt2 = *counts_ptr.add(r2) + 1;
-                        *counts_ptr.add(r2) = cnt2;
-                        if cnt2 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
-                        } else if cnt2 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
-                        }
-                        let cnt3 = *counts_ptr.add(r3) + 1;
-                        *counts_ptr.add(r3) = cnt3;
-                        if cnt3 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
-                        } else if cnt3 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
-                        }
-                        let cnt4 = *counts_ptr.add(r4) + 1;
-                        *counts_ptr.add(r4) = cnt4;
-                        if cnt4 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
-                        } else if cnt4 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
-                        }
-                        let cnt5 = *counts_ptr.add(r5) + 1;
-                        *counts_ptr.add(r5) = cnt5;
-                        if cnt5 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
-                        } else if cnt5 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
-                        }
-                        let cnt6 = *counts_ptr.add(r6) + 1;
-                        *counts_ptr.add(r6) = cnt6;
-                        if cnt6 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
-                        } else if cnt6 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
-                        }
-                        let cnt7 = *counts_ptr.add(r7) + 1;
-                        *counts_ptr.add(r7) = cnt7;
-                        if cnt7 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
-                        } else if cnt7 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
-                        }
+                        count_resp!(r0 as usize);
+                        count_resp!(r1 as usize);
+                        count_resp!(r2 as usize);
+                        count_resp!(r3 as usize);
+                        count_resp!(r4 as usize);
+                        count_resp!(r5 as usize);
+                        count_resp!(r6 as usize);
+                        count_resp!(r7 as usize);
                     }
                     i += 8;
                 }
@@ -5022,18 +4903,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r = unsafe { (*g_ptr.add(c)).to_u16() };
                     unsafe {
                         *r_buf_ptr.add(i) = r;
-                    }
-                    let r = r as usize;
-                    unsafe {
-                        let cnt = *counts_ptr.add(r) + 1;
-                        *counts_ptr.add(r) = cnt;
-                        if cnt == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        } else if cnt == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        }
+                        count_resp!(r as usize);
                     }
                     i += 1;
                 }
@@ -5057,78 +4927,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
 
                     unsafe {
-                        let cnt0 = *counts_ptr.add(r0) + 1;
-                        *counts_ptr.add(r0) = cnt0;
-                        if cnt0 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-                        } else if cnt0 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
-                        }
-                        let cnt1 = *counts_ptr.add(r1) + 1;
-                        *counts_ptr.add(r1) = cnt1;
-                        if cnt1 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
-                        } else if cnt1 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
-                        }
-                        let cnt2 = *counts_ptr.add(r2) + 1;
-                        *counts_ptr.add(r2) = cnt2;
-                        if cnt2 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
-                        } else if cnt2 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
-                        }
-                        let cnt3 = *counts_ptr.add(r3) + 1;
-                        *counts_ptr.add(r3) = cnt3;
-                        if cnt3 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
-                        } else if cnt3 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
-                        }
-                        let cnt4 = *counts_ptr.add(r4) + 1;
-                        *counts_ptr.add(r4) = cnt4;
-                        if cnt4 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
-                        } else if cnt4 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
-                        }
-                        let cnt5 = *counts_ptr.add(r5) + 1;
-                        *counts_ptr.add(r5) = cnt5;
-                        if cnt5 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
-                        } else if cnt5 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
-                        }
-                        let cnt6 = *counts_ptr.add(r6) + 1;
-                        *counts_ptr.add(r6) = cnt6;
-                        if cnt6 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
-                        } else if cnt6 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
-                        }
-                        let cnt7 = *counts_ptr.add(r7) + 1;
-                        *counts_ptr.add(r7) = cnt7;
-                        if cnt7 == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
-                        } else if cnt7 == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
-                        }
+                        count_resp!(r0);
+                        count_resp!(r1);
+                        count_resp!(r2);
+                        count_resp!(r3);
+                        count_resp!(r4);
+                        count_resp!(r5);
+                        count_resp!(r6);
+                        count_resp!(r7);
                     }
                     i += 8;
                 }
@@ -5136,15 +4942,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let c = unsafe { *set_ptr.add(i) };
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
                     unsafe {
-                        let cnt = *counts_ptr.add(r) + 1;
-                        *counts_ptr.add(r) = cnt;
-                        if cnt == 1 {
-                            total_buckets += 1;
-                            *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        } else if cnt == 3 {
-                            has_size_ge_3 = true;
-                            *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        }
+                        count_resp!(r);
                     }
                     i += 1;
                 }
@@ -7084,70 +6882,59 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
+            macro_rules! sort_cand {
+                ($r:expr, $c:expr) => {
+                    let r = $r;
+                    let pos_ptr = current_offsets_ptr.add(r);
+                    let pos = *pos_ptr as usize;
+                    *sorted_set_ptr.add(pos) = $c;
+                    *pos_ptr += 1;
+                };
+            }
+
             let mut i = 0;
             if is_contiguous_root {
                 let g_u8_ptr = g_ptr as *const u8;
+                while i + 15 < c_len {
+                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                    unsafe {
+                        sort_cand!((r_u64_0 & 0xFF) as usize, i);
+                        sort_cand!(((r_u64_0 >> 8) & 0xFF) as usize, i + 1);
+                        sort_cand!(((r_u64_0 >> 16) & 0xFF) as usize, i + 2);
+                        sort_cand!(((r_u64_0 >> 24) & 0xFF) as usize, i + 3);
+                        sort_cand!(((r_u64_0 >> 32) & 0xFF) as usize, i + 4);
+                        sort_cand!(((r_u64_0 >> 40) & 0xFF) as usize, i + 5);
+                        sort_cand!(((r_u64_0 >> 48) & 0xFF) as usize, i + 6);
+                        sort_cand!((r_u64_0 >> 56) as usize, i + 7);
+                        sort_cand!((r_u64_1 & 0xFF) as usize, i + 8);
+                        sort_cand!(((r_u64_1 >> 8) & 0xFF) as usize, i + 9);
+                        sort_cand!(((r_u64_1 >> 16) & 0xFF) as usize, i + 10);
+                        sort_cand!(((r_u64_1 >> 24) & 0xFF) as usize, i + 11);
+                        sort_cand!(((r_u64_1 >> 32) & 0xFF) as usize, i + 12);
+                        sort_cand!(((r_u64_1 >> 40) & 0xFF) as usize, i + 13);
+                        sort_cand!(((r_u64_1 >> 48) & 0xFF) as usize, i + 14);
+                        sort_cand!((r_u64_1 >> 56) as usize, i + 15);
+                    }
+                    i += 16;
+                }
                 while i + 7 < c_len {
                     let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
-                    let r0 = (r_u64 & 0xFF) as usize;
-                    let r1 = ((r_u64 >> 8) & 0xFF) as usize;
-                    let r2 = ((r_u64 >> 16) & 0xFF) as usize;
-                    let r3 = ((r_u64 >> 24) & 0xFF) as usize;
-                    let r4 = ((r_u64 >> 32) & 0xFF) as usize;
-                    let r5 = ((r_u64 >> 40) & 0xFF) as usize;
-                    let r6 = ((r_u64 >> 48) & 0xFF) as usize;
-                    let r7 = (r_u64 >> 56) as usize;
-
                     unsafe {
-                        let pos_ptr0 = current_offsets_ptr.add(r0);
-                        let pos0 = *pos_ptr0 as usize;
-                        *sorted_set_ptr.add(pos0) = i;
-                        *pos_ptr0 += 1;
-
-                        let pos_ptr1 = current_offsets_ptr.add(r1);
-                        let pos1 = *pos_ptr1 as usize;
-                        *sorted_set_ptr.add(pos1) = i + 1;
-                        *pos_ptr1 += 1;
-
-                        let pos_ptr2 = current_offsets_ptr.add(r2);
-                        let pos2 = *pos_ptr2 as usize;
-                        *sorted_set_ptr.add(pos2) = i + 2;
-                        *pos_ptr2 += 1;
-
-                        let pos_ptr3 = current_offsets_ptr.add(r3);
-                        let pos3 = *pos_ptr3 as usize;
-                        *sorted_set_ptr.add(pos3) = i + 3;
-                        *pos_ptr3 += 1;
-
-                        let pos_ptr4 = current_offsets_ptr.add(r4);
-                        let pos4 = *pos_ptr4 as usize;
-                        *sorted_set_ptr.add(pos4) = i + 4;
-                        *pos_ptr4 += 1;
-
-                        let pos_ptr5 = current_offsets_ptr.add(r5);
-                        let pos5 = *pos_ptr5 as usize;
-                        *sorted_set_ptr.add(pos5) = i + 5;
-                        *pos_ptr5 += 1;
-
-                        let pos_ptr6 = current_offsets_ptr.add(r6);
-                        let pos6 = *pos_ptr6 as usize;
-                        *sorted_set_ptr.add(pos6) = i + 6;
-                        *pos_ptr6 += 1;
-
-                        let pos_ptr7 = current_offsets_ptr.add(r7);
-                        let pos7 = *pos_ptr7 as usize;
-                        *sorted_set_ptr.add(pos7) = i + 7;
-                        *pos_ptr7 += 1;
+                        sort_cand!((r_u64 & 0xFF) as usize, i);
+                        sort_cand!(((r_u64 >> 8) & 0xFF) as usize, i + 1);
+                        sort_cand!(((r_u64 >> 16) & 0xFF) as usize, i + 2);
+                        sort_cand!(((r_u64 >> 24) & 0xFF) as usize, i + 3);
+                        sort_cand!(((r_u64 >> 32) & 0xFF) as usize, i + 4);
+                        sort_cand!(((r_u64 >> 40) & 0xFF) as usize, i + 5);
+                        sort_cand!(((r_u64 >> 48) & 0xFF) as usize, i + 6);
+                        sort_cand!((r_u64 >> 56) as usize, i + 7);
                     }
                     i += 8;
                 }
                 while i < c_len {
-                    let r_idx = unsafe { *g_u8_ptr.add(i) as usize };
-                    let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
-                    let pos = unsafe { *pos_ptr as usize };
                     unsafe {
-                        *sorted_set_ptr.add(pos) = i;
-                        *pos_ptr += 1;
+                        sort_cand!(*g_u8_ptr.add(i) as usize, i);
                     }
                     i += 1;
                 }
@@ -7155,15 +6942,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 while i + 7 < c_len {
                     let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
                     let r_u64_1 = unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
-                    let r0 = (r_u64_0 & 0xFFFF) as usize;
-                    let r1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
-                    let r2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
-                    let r3 = (r_u64_0 >> 48) as usize;
-                    let r4 = (r_u64_1 & 0xFFFF) as usize;
-                    let r5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
-                    let r6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
-                    let r7 = (r_u64_1 >> 48) as usize;
-
                     let c0 = unsafe { *set_ptr.add(i) };
                     let c1 = unsafe { *set_ptr.add(i + 1) };
                     let c2 = unsafe { *set_ptr.add(i + 2) };
@@ -7174,91 +6952,37 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let c7 = unsafe { *set_ptr.add(i + 7) };
 
                     unsafe {
-                        let pos_ptr0 = current_offsets_ptr.add(r0);
-                        let pos0 = *pos_ptr0 as usize;
-                        *sorted_set_ptr.add(pos0) = c0;
-                        *pos_ptr0 += 1;
-
-                        let pos_ptr1 = current_offsets_ptr.add(r1);
-                        let pos1 = *pos_ptr1 as usize;
-                        *sorted_set_ptr.add(pos1) = c1;
-                        *pos_ptr1 += 1;
-
-                        let pos_ptr2 = current_offsets_ptr.add(r2);
-                        let pos2 = *pos_ptr2 as usize;
-                        *sorted_set_ptr.add(pos2) = c2;
-                        *pos_ptr2 += 1;
-
-                        let pos_ptr3 = current_offsets_ptr.add(r3);
-                        let pos3 = *pos_ptr3 as usize;
-                        *sorted_set_ptr.add(pos3) = c3;
-                        *pos_ptr3 += 1;
-
-                        let pos_ptr4 = current_offsets_ptr.add(r4);
-                        let pos4 = *pos_ptr4 as usize;
-                        *sorted_set_ptr.add(pos4) = c4;
-                        *pos_ptr4 += 1;
-
-                        let pos_ptr5 = current_offsets_ptr.add(r5);
-                        let pos5 = *pos_ptr5 as usize;
-                        *sorted_set_ptr.add(pos5) = c5;
-                        *pos_ptr5 += 1;
-
-                        let pos_ptr6 = current_offsets_ptr.add(r6);
-                        let pos6 = *pos_ptr6 as usize;
-                        *sorted_set_ptr.add(pos6) = c6;
-                        *pos_ptr6 += 1;
-
-                        let pos_ptr7 = current_offsets_ptr.add(r7);
-                        let pos7 = *pos_ptr7 as usize;
-                        *sorted_set_ptr.add(pos7) = c7;
-                        *pos_ptr7 += 1;
+                        sort_cand!((r_u64_0 & 0xFFFF) as usize, c0);
+                        sort_cand!(((r_u64_0 >> 16) & 0xFFFF) as usize, c1);
+                        sort_cand!(((r_u64_0 >> 32) & 0xFFFF) as usize, c2);
+                        sort_cand!((r_u64_0 >> 48) as usize, c3);
+                        sort_cand!((r_u64_1 & 0xFFFF) as usize, c4);
+                        sort_cand!(((r_u64_1 >> 16) & 0xFFFF) as usize, c5);
+                        sort_cand!(((r_u64_1 >> 32) & 0xFFFF) as usize, c6);
+                        sort_cand!((r_u64_1 >> 48) as usize, c7);
                     }
                     i += 8;
                 }
                 while i + 3 < c_len {
                     let r_u64 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
-                    let r0 = (r_u64 & 0xFFFF) as usize;
-                    let r1 = ((r_u64 >> 16) & 0xFFFF) as usize;
-                    let r2 = ((r_u64 >> 32) & 0xFFFF) as usize;
-                    let r3 = (r_u64 >> 48) as usize;
-
                     let c0 = unsafe { *set_ptr.add(i) };
                     let c1 = unsafe { *set_ptr.add(i + 1) };
                     let c2 = unsafe { *set_ptr.add(i + 2) };
                     let c3 = unsafe { *set_ptr.add(i + 3) };
 
                     unsafe {
-                        let pos_ptr0 = current_offsets_ptr.add(r0);
-                        let pos0 = *pos_ptr0 as usize;
-                        *sorted_set_ptr.add(pos0) = c0;
-                        *pos_ptr0 += 1;
-
-                        let pos_ptr1 = current_offsets_ptr.add(r1);
-                        let pos1 = *pos_ptr1 as usize;
-                        *sorted_set_ptr.add(pos1) = c1;
-                        *pos_ptr1 += 1;
-
-                        let pos_ptr2 = current_offsets_ptr.add(r2);
-                        let pos2 = *pos_ptr2 as usize;
-                        *sorted_set_ptr.add(pos2) = c2;
-                        *pos_ptr2 += 1;
-
-                        let pos_ptr3 = current_offsets_ptr.add(r3);
-                        let pos3 = *pos_ptr3 as usize;
-                        *sorted_set_ptr.add(pos3) = c3;
-                        *pos_ptr3 += 1;
+                        sort_cand!((r_u64 & 0xFFFF) as usize, c0);
+                        sort_cand!(((r_u64 >> 16) & 0xFFFF) as usize, c1);
+                        sort_cand!(((r_u64 >> 32) & 0xFFFF) as usize, c2);
+                        sort_cand!((r_u64 >> 48) as usize, c3);
                     }
                     i += 4;
                 }
                 while i < c_len {
                     let r_idx = unsafe { *r_buf_ptr.add(i) as usize };
                     let c = unsafe { *set_ptr.add(i) };
-                    let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
-                    let pos = unsafe { *pos_ptr as usize };
                     unsafe {
-                        *sorted_set_ptr.add(pos) = c;
-                        *pos_ptr += 1;
+                        sort_cand!(r_idx, c);
                     }
                     i += 1;
                 }
@@ -7280,46 +7004,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
                     let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
                     let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+
                     unsafe {
-                        let pos_ptr0 = current_offsets_ptr.add(r0);
-                        let pos0 = *pos_ptr0 as usize;
-                        *sorted_set_ptr.add(pos0) = c0;
-                        *pos_ptr0 += 1;
-
-                        let pos_ptr1 = current_offsets_ptr.add(r1);
-                        let pos1 = *pos_ptr1 as usize;
-                        *sorted_set_ptr.add(pos1) = c1;
-                        *pos_ptr1 += 1;
-
-                        let pos_ptr2 = current_offsets_ptr.add(r2);
-                        let pos2 = *pos_ptr2 as usize;
-                        *sorted_set_ptr.add(pos2) = c2;
-                        *pos_ptr2 += 1;
-
-                        let pos_ptr3 = current_offsets_ptr.add(r3);
-                        let pos3 = *pos_ptr3 as usize;
-                        *sorted_set_ptr.add(pos3) = c3;
-                        *pos_ptr3 += 1;
-
-                        let pos_ptr4 = current_offsets_ptr.add(r4);
-                        let pos4 = *pos_ptr4 as usize;
-                        *sorted_set_ptr.add(pos4) = c4;
-                        *pos_ptr4 += 1;
-
-                        let pos_ptr5 = current_offsets_ptr.add(r5);
-                        let pos5 = *pos_ptr5 as usize;
-                        *sorted_set_ptr.add(pos5) = c5;
-                        *pos_ptr5 += 1;
-
-                        let pos_ptr6 = current_offsets_ptr.add(r6);
-                        let pos6 = *pos_ptr6 as usize;
-                        *sorted_set_ptr.add(pos6) = c6;
-                        *pos_ptr6 += 1;
-
-                        let pos_ptr7 = current_offsets_ptr.add(r7);
-                        let pos7 = *pos_ptr7 as usize;
-                        *sorted_set_ptr.add(pos7) = c7;
-                        *pos_ptr7 += 1;
+                        sort_cand!(r0, c0);
+                        sort_cand!(r1, c1);
+                        sort_cand!(r2, c2);
+                        sort_cand!(r3, c3);
+                        sort_cand!(r4, c4);
+                        sort_cand!(r5, c5);
+                        sort_cand!(r6, c6);
+                        sort_cand!(r7, c7);
                     }
                     i += 8;
                 }
@@ -7333,36 +7027,18 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
                     let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
                     unsafe {
-                        let pos_ptr0 = current_offsets_ptr.add(r0);
-                        let pos0 = *pos_ptr0 as usize;
-                        *sorted_set_ptr.add(pos0) = c0;
-                        *pos_ptr0 += 1;
-
-                        let pos_ptr1 = current_offsets_ptr.add(r1);
-                        let pos1 = *pos_ptr1 as usize;
-                        *sorted_set_ptr.add(pos1) = c1;
-                        *pos_ptr1 += 1;
-
-                        let pos_ptr2 = current_offsets_ptr.add(r2);
-                        let pos2 = *pos_ptr2 as usize;
-                        *sorted_set_ptr.add(pos2) = c2;
-                        *pos_ptr2 += 1;
-
-                        let pos_ptr3 = current_offsets_ptr.add(r3);
-                        let pos3 = *pos_ptr3 as usize;
-                        *sorted_set_ptr.add(pos3) = c3;
-                        *pos_ptr3 += 1;
+                        sort_cand!(r0, c0);
+                        sort_cand!(r1, c1);
+                        sort_cand!(r2, c2);
+                        sort_cand!(r3, c3);
                     }
                     i += 4;
                 }
                 while i < c_len {
                     let c = unsafe { *set_ptr.add(i) };
                     let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
-                    let pos_ptr = unsafe { current_offsets_ptr.add(r_idx) };
-                    let pos = unsafe { *pos_ptr as usize };
                     unsafe {
-                        *sorted_set_ptr.add(pos) = c;
-                        *pos_ptr += 1;
+                        sort_cand!(r_idx, c);
                     }
                     i += 1;
                 }
