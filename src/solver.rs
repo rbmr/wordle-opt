@@ -4020,6 +4020,87 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *hashes_ptr.add(r0) = h0;
                         *hashes_ptr.add(r1) = h1;
                     }
+                } else if num_eval == 3 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        for cand_idx in 0..c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                        }
+                    } else {
+                        for cand_idx in 0..c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                    }
+                } else if num_eval == 4 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let r3 = (!unsafe { *eval_entries_ptr.add(3) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    let mut h3 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        for cand_idx in 0..c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                        }
+                    } else {
+                        for cand_idx in 0..c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                        *hashes_ptr.add(r3) = h3;
+                    }
                 } else {
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
