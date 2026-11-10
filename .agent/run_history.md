@@ -1171,7 +1171,34 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `39b1e76` | pc01 | 2200 | 1 | optimal | 19.878s | 7477 | 2331 | 23572 | ~543MB | fused small partition candidate counting and hash accumulation; build 19.878s (down from 19.937s); pick 19.8s; cpu 315.5s; busy cores 15.9; states 23,572; guesses 589,441; bounds pruned 1,942,762; equiv pruned 188,427,493; cache hits 2,428,862; validation OK |
 | 2026-11-10 | `39b1e76` | pc01 | 2340 | — | optimal | 23.340s (0.01h) | 8001 | 2478 | 26020 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-39b1e76); fused small partition candidate counting and hash accumulation; build 23.340s (down from 23.363s); pick 23.1s; cpu 370.7s; busy cores 15.9; states 25,928 (down from 26,020: -92 states); guesses 751,210 (down from 751,598: -388 guesses); bounds pruned 2,084,520; equiv pruned 207,591,208; cache hits 3,481,204; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `39b1e76` | pc01 | 2340 | — | optimal --certify | 23.239s (0.01h) | 8001 | 2478 | 26223 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.239s (pick 23.1s, cpu 368.7s, busy cores 15.9); 1,329,513 solver facts; 589 gap refutations (7.058s); 631,878 claims (444,075 capacity, 187,803 expansion, 0 failures, 9,478,189 bytes); independent check verified optimal in 62.406s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 500 | 1 | optimal | 0.341s | 1453 | 517 | 98 | — | buffer partition candidate responses in state evaluation; build 0.341s; cpu 5.0s; busy cores 14.7; states 98 (down from 104); guesses 8424; bounds pruned 8896; equiv pruned 277172; cache hits 57926; validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 1000 | 1 | optimal | 2.599s | 3124 | 1049 | 828 | — | buffer partition candidate responses in state evaluation; pick 2.6s; cpu 41.0s; busy cores 15.8; states 828; guesses 15,132; bounds pruned 50,090; equiv pruned 5,115,112; cache hits 165,729; validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 1600 | 1 | optimal | 8.140s | 5256 | 1681 | 3954 | — | buffer partition candidate responses in state evaluation; pick 8.1s; cpu 127.6s; busy cores 15.7; states 3954; guesses 66,258; bounds pruned 315,615; equiv pruned 29,564,568; cache hits 354,183; validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 2000 | 1 | optimal | 13.722s | 6723 | 2119 | 7782 | — | buffer partition candidate responses in state evaluation; pick 13.6s; cpu 216.1s; busy cores 15.7; states 7782; guesses 185,685 (down from 186,061: -376 guesses); bounds pruned 502,306; equiv pruned 59,770,506; cache hits 838,861; validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 2200 | 1 | optimal | 19.925s | 7477 | 2331 | 23622 | ~543MB | buffer partition candidate responses in state evaluation; build 19.925s; pick 19.8s; cpu 316.1s; busy cores 15.9; states 23,622; guesses 599,685; bounds pruned 1,961,192; equiv pruned 188,800,445; cache hits 2,437,886; validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 2340 | — | optimal | 23.390s (0.01h) | 8001 | 2478 | 25990 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-b16cc2f); buffer partition candidate responses in state evaluation; build 23.390s; pick 23.1s; cpu 371.6s; busy cores 15.9; states 25,990; guesses 752,235; bounds pruned 2,084,999; equiv pruned 207,522,940; cache hits 3,493,200; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `b16cc2f` | pc01 | 2340 | — | optimal --certify | 23.479s (0.01h) | 8001 | 2478 | 26189 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.479s (pick 23.2s, cpu 373.1s, busy cores 15.9); 1,335,463 solver facts; 589 gap refutations (7.070s); 634,764 claims (445,736 capacity, 189,028 expansion, 0 failures, 9,521,479 bytes); independent check verified optimal in 57.621s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `b16cc2f` rows evaluate buffering partition candidate responses in `SpecializedSolver::min_state_val_with_hash` ($c\_len \le 256$):
+  - In `src/solver.rs`:
+    - Added stack buffer `r_buf = MaybeUninit::<[u16; 256]>::uninit()`.
+    - In Phase 1 and Phase 2 for partitions with $c\_len \le 256$, cached candidate responses into `*r_buf_ptr.add(i)` during Pass 1 (collision checking).
+    - In Pass 2 (bucket counting for surviving guesses with `has_size_ge_3`), replaced the random gather from `matrix_data_ptr` (Phase 1) and column pointer loads from `c_ptrs_ptr` (Phase 2) with direct contiguous reads from `r_buf`.
+    - Maintained fallback path for $c\_len > 256$.
+  - Benchmarks on `pc01`:
+    - `N=500, seed=1`: **0.341s** (cpu 5.0s, states 98, guesses 8424, bounds pruned 8896, cost 1453).
+    - `N=1000, seed=1`: **2.599s** (cpu 41.0s, pick 2.6s, states 828, guesses 15,132, bounds pruned 50,090, cost 3124).
+    - `N=1600, seed=1`: **8.140s** (cpu 127.6s, pick 8.1s, states 3954, guesses 66,258, bounds pruned 315,615, cost 5256).
+    - `N=2000, seed=1`: **13.722s** (cpu 216.1s, pick 13.6s, states 7782, guesses 185,685, bounds pruned 502,306, cost 6723).
+    - `N=2200, seed=1`: **19.925s** (cpu 316.1s, pick 19.8s, states 23,622, guesses 599,685, bounds pruned 1,961,192, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-b16cc2f`): **23.390s** (cpu 371.6s, pick 23.1s, states 25,990, guesses 752,235, bounds pruned 2,084,999, equiv pruned 207,522,940, cache hits 3,493,200, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+    - Full `N=2340` Certificate Generation + Independent Check: Solve in 23.479s (cpu 373.1s), 1,335,463 facts proved, 589 gap refutations in 7.070s, 634,764 claims assembled in 83.122s (0 failures, 9,521,479 bytes). Independent `check` verified all 3.93e11 response reads in 57.621s (`CERTIFICATE VALID: the tree is optimal`).
+  - Full Ignored Audit Suite on `pc01`:
+    - `full_scale`: passed in 128.64s
+    - `parallel_consistency`: passed in 101.43s
+    - `published_optima`: passed in 299.11s
+    - `tt_audit` (`--features tt-audit`): passed in 44.68s
 
 - The `39b1e76` rows evaluate fusing candidate counting and hash accumulation for small candidate partitions in `SpecializedSolver::min_guess_val_inner` ($c\_len \le 16$):
   - In `src/solver.rs`:
