@@ -256,6 +256,53 @@ pub fn compute_candidate_branching_factor_with_target(
     let effective_target = target_k.min(candidates.len()).min(matrix.num_responses);
     let mut max_k = 0;
     if matrix.num_responses <= 256 {
+        #[cfg(target_arch = "x86_64")]
+        if candidates.len() <= 16 {
+            use std::arch::x86_64::*;
+            let data_ptr = matrix.data_u8.as_ptr();
+            let n = candidates.len();
+            let cand_ptr = candidates.as_ptr();
+            for i in 0..n {
+                let c = unsafe { *cand_ptr.add(i) };
+                let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
+                let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
+
+                let mut seen = [0u8; 16];
+                let seen_ptr = seen.as_mut_ptr();
+                let mut seen_len = 0u32;
+
+                for j in 0..n {
+                    if (seen_len as usize) + (n - j) <= max_k {
+                        break;
+                    }
+                    let other = unsafe { *cand_ptr.add(j) };
+                    let r = unsafe { *g_ptr.add(other) };
+                    if seen_len > 0 {
+                        unsafe {
+                            let v_seen = _mm_loadu_si128(seen_ptr as *const __m128i);
+                            let v_r = _mm_set1_epi8(r as i8);
+                            let cmp = _mm_cmpeq_epi8(v_r, v_seen);
+                            let mask = (_mm_movemask_epi8(cmp) as u32) & ((1u32 << seen_len) - 1);
+                            if mask != 0 {
+                                continue;
+                            }
+                        }
+                    }
+                    unsafe {
+                        *seen_ptr.add(seen_len as usize) = r;
+                    }
+                    seen_len += 1;
+                }
+                if (seen_len as usize) > max_k {
+                    max_k = seen_len as usize;
+                    if max_k >= effective_target {
+                        return max_k;
+                    }
+                }
+            }
+            return max_k;
+        }
+
         let data_ptr = matrix.data_u8.as_ptr();
         for &c in candidates {
             let g = unsafe { *matrix.candidate_to_guess.get_unchecked(c) };
@@ -1579,5 +1626,49 @@ mod target_bound_tests {
             compute_branching_factor_upper_bound(&matrix, &er_subset)
                 >= compute_max_branching_factor(&matrix, &er_subset)
         );
+    }
+
+    #[test]
+    fn test_candidate_branching_factor_sse2_exactness() {
+        use crate::dict::Dictionary;
+        let dict = Dictionary::load("words/guesses.txt", "words/candidates.txt");
+        let matrix = ResponseMatrix::new(&dict);
+        let mut rng = fastrand::Rng::with_seed(98765);
+
+        for size in 3..=16 {
+            for _ in 0..10 {
+                let mut candidates: Vec<usize> = (0..matrix.num_candidates).collect();
+                rng.shuffle(&mut candidates);
+                let subset = &candidates[..size];
+
+                for target_k in [2, 3, 5, 8, 12, 16, 20] {
+                    // Reference calculation using 256-bit bitmask directly
+                    let data_ptr = matrix.data_u8.as_ptr();
+                    let effective_target = target_k.min(subset.len()).min(matrix.num_responses);
+                    let mut ref_max_k = 0;
+                    for &c in subset {
+                        let g = matrix.candidate_to_guess[c];
+                        let g_ptr = unsafe { data_ptr.add(g * matrix.num_candidates) };
+                        let mut mask = [0u64; 16];
+                        count_unique_responses_from_row_u8(g_ptr, subset, &mut mask);
+                        let k = combine_and_count_u8(&mask);
+                        if k > ref_max_k {
+                            ref_max_k = k;
+                            if ref_max_k >= effective_target {
+                                break;
+                            }
+                        }
+                    }
+
+                    let actual_k =
+                        compute_candidate_branching_factor_with_target(&matrix, subset, target_k);
+                    assert_eq!(
+                        actual_k, ref_max_k,
+                        "Mismatch for size={}, target_k={}: actual={}, ref={}",
+                        size, target_k, actual_k, ref_max_k
+                    );
+                }
+            }
+        }
     }
 }
