@@ -1053,7 +1053,34 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `ba15846` | pc01 | 2200 | 1 | optimal | 20.049s | 7477 | 2331 | 23716 | ~543MB | defer bucket hash computation until after capacity bound check in solver; pick 20.0s; cpu 317.9s; busy cores 15.9; states 23,716; guesses 600,145; bounds pruned 1,965,728; equiv pruned 189,443,840; cache hits 2,434,528; validation OK |
 | 2026-11-10 | `ba15846` | pc01 | 2340 | — | optimal | 23.563s (0.01h) | 8001 | 2478 | 26038 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-ba15846); defer bucket hash computation until after capacity bound check in solver; build 23.563s; pick 23.3s; cpu 374.4s; busy cores 15.9 (root_guesses @ 15s: 7245); states 26,038; guesses 750,811 vs 753,219 [-2,408 guesses]; bounds pruned 2,078,718; equiv pruned 207,591,672; cache hits 3,480,118; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `ba15846` | pc01 | 2340 | — | optimal --certify | 23.367s (0.01h) | 8001 | 2478 | 26213 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.367s (pick 23.3s, cpu 370.9s, busy cores 15.9); 1,327,697 solver facts; 590 gap refutations (7.564s); 632,984 claims (444,834 capacity, 188,150 expansion, 0 failures, 9,494,779 bytes); independent check verified optimal in 74.943s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `b6727dd` | pc01 | 1000 | 1 | optimal | 2.605s | 3124 | 1049 | 812 | — | hardware prefetch for transposition table lookups in bucket evaluation; pick 2.6s; cpu 41.0s; busy cores 15.8; states 812 vs 823 [-11 states]; guesses 14,989 vs 15,119 [-130 guesses, breaking below 15k]; bounds pruned 49,692; equiv pruned 5,090,387; cache hits 165,716; validation OK |
+| 2026-11-10 | `b6727dd` | pc01 | 1600 | 1 | optimal | 8.177s | 5256 | 1681 | 3950 | — | hardware prefetch for transposition table lookups in bucket evaluation; pick 8.1s; cpu 128.1s; busy cores 15.7; states 3,950; guesses 66,208 vs 66,221 [-13 guesses]; bounds pruned 316,002; equiv pruned 29,451,201; cache hits 354,012; validation OK |
+| 2026-11-10 | `b6727dd` | pc01 | 2000 | 1 | optimal | 13.742s | 6723 | 2119 | 7798 | — | hardware prefetch for transposition table lookups in bucket evaluation; pick 13.7s; cpu 216.7s; busy cores 15.8; states 7,798; guesses 186,160; bounds pruned 502,945; equiv pruned 59,870,904; cache hits 836,933; validation OK |
+| 2026-11-10 | `b6727dd` | pc01 | 2200 | 1 | optimal | 20.044s | 7477 | 2331 | 23675 | ~543MB | hardware prefetch for transposition table lookups in bucket evaluation; pick 20.0s; cpu 318.0s; busy cores 15.9; states 23,675 vs 23,716 [-41 states]; guesses 600,121 vs 600,145; bounds pruned 1,960,471; equiv pruned 189,200,509; cache hits 2,435,985; validation OK |
+| 2026-11-10 | `b6727dd` | pc01 | 2340 | — | optimal | 23.525s (0.01h) | 8001 | 2478 | 25997 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-b6727dd); hardware prefetch for transposition table lookups in bucket evaluation; new all-time record full run build time (23.525s vs 23.543s); pick 23.3s; cpu 373.7s; busy cores 15.9 (root_guesses @ 15s: 7245); states 25,997 vs 26,038 [-41 states]; guesses 750,921; bounds pruned 2,077,867; equiv pruned 207,300,755; cache hits 3,484,499; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `b6727dd` | pc01 | 2340 | — | optimal --certify | 23.401s (0.01h) | 8001 | 2478 | 26205 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.401s (pick 23.3s, cpu 371.5s, busy cores 15.9); 1,328,047 solver facts; 591 gap refutations (7.731s); 629,544 claims (442,560 capacity, 186,984 expansion, 0 failures, 9,443,179 bytes); independent check verified optimal in 68.872s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `b6727dd` rows evaluate adding hardware prefetch for transposition table lookups in bucket evaluation:
+  - In `src/cache.rs`, `src/solver.rs`, and `src/policy.rs`:
+    - Added `GlobalCache::prefetch(&self, full_hash: u64)` utilizing `core::arch::x86_64::_mm_prefetch(ptr, _MM_HINT_T0)` to issue non-blocking hardware cache-line fetch requests for transposition table entries ahead of time.
+    - In `src/solver.rs`: prefetched child bucket TT lines ahead of the evaluation loop and 2 iterations ahead during bucket traversal for both small ($c\_len \le 16$) and large ($c\_len > 16$) candidate sets.
+    - In `src/policy.rs`: prefetched upcoming bucket TT entries during multithreaded opener evaluation.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.605s** (cpu 41.0s, pick 2.6s, states 812 vs 823 [-11 states], guesses 14,989 vs 15,119 [-130 guesses, breaking below 15k!], cost 3124).
+    - `N=1600, seed=1`: **8.177s** (cpu 128.1s, pick 8.1s, states 3,950, guesses 66,208 vs 66,221 [-13 guesses], cost 5256).
+    - `N=2000, seed=1`: **13.742s** (cpu 216.7s, pick 13.7s, states 7,798, guesses 186,160, cost 6723).
+    - `N=2200, seed=1`: **20.044s** (cpu 318.0s, pick 20.0s, states 23,675 vs 23,716 [-41 states], guesses 600,121, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-b6727dd`): **23.525s** (new all-time record! cpu 373.7s, pick 23.3s, states 25,997 vs 26,038 [-41 states], guesses 750,921, bounds pruned 2,077,867, equiv pruned 207,300,755, cache hits 3,484,499, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 123.19s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.69s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 301.71s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 48.59s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 629,544 claims with 0 failures, and independent `check` verified `3.91e11` response reads in 68.872s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `ba15846` rows evaluate deferring bucket hash computation until after the capacity bound check in solver `min_guess_val`:
   - In `src/solver.rs`:
