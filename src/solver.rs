@@ -3990,7 +3990,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut seen = [0u64; M];
             let mut seen2 = [0u64; M];
             let mut seen3 = [0u64; M];
-            let mut has_size_ge_3 = false;
+            let mut num_non_empty = 0usize;
+            let mut num_eval = 0usize;
+            let mut responses = [0u16; 5];
 
             let mut cand_idx = 0;
             while cand_idx + 1 < c_len {
@@ -4008,14 +4010,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (*word0 & b0) != 0 {
                     let word2_0 = unsafe { seen2.get_unchecked_mut(w0) };
                     if (*word2_0 & b0) != 0 {
-                        has_size_ge_3 = true;
                         let word3_0 = unsafe { seen3.get_unchecked_mut(w0) };
-                        *word3_0 |= b0;
+                        if (*word3_0 & b0) == 0 {
+                            *word3_0 |= b0;
+                            unsafe {
+                                *responses.get_unchecked_mut(num_eval) = r0;
+                            }
+                            num_eval += 1;
+                        }
                     } else {
                         *word2_0 |= b0;
                     }
                 } else {
                     *word0 |= b0;
+                    num_non_empty += 1;
                 }
                 let w1 = (r1 as usize) >> 6;
                 let b1 = 1u64 << (r1 & 63);
@@ -4023,14 +4031,20 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (*word1 & b1) != 0 {
                     let word2_1 = unsafe { seen2.get_unchecked_mut(w1) };
                     if (*word2_1 & b1) != 0 {
-                        has_size_ge_3 = true;
                         let word3_1 = unsafe { seen3.get_unchecked_mut(w1) };
-                        *word3_1 |= b1;
+                        if (*word3_1 & b1) == 0 {
+                            *word3_1 |= b1;
+                            unsafe {
+                                *responses.get_unchecked_mut(num_eval) = r1;
+                            }
+                            num_eval += 1;
+                        }
                     } else {
                         *word2_1 |= b1;
                     }
                 } else {
                     *word1 |= b1;
+                    num_non_empty += 1;
                 }
                 cand_idx += 2;
             }
@@ -4046,20 +4060,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 if (*word & b) != 0 {
                     let word2 = unsafe { seen2.get_unchecked_mut(w) };
                     if (*word2 & b) != 0 {
-                        has_size_ge_3 = true;
                         let word3 = unsafe { seen3.get_unchecked_mut(w) };
-                        *word3 |= b;
+                        if (*word3 & b) == 0 {
+                            *word3 |= b;
+                            unsafe {
+                                *responses.get_unchecked_mut(num_eval) = r;
+                            }
+                            num_eval += 1;
+                        }
                     } else {
                         *word2 |= b;
                     }
                 } else {
                     *word |= b;
+                    num_non_empty += 1;
                 }
-            }
-
-            let mut num_non_empty = 0usize;
-            for m in 0..M {
-                num_non_empty += unsafe { *seen.get_unchecked(m) }.count_ones() as usize;
             }
 
             if num_non_empty <= 1 {
@@ -4073,24 +4088,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.local_metrics.pruned_by_bounds += 1;
                 return cost;
             }
-            if !has_size_ge_3 {
+            if num_eval == 0 {
                 return cost;
             }
 
-            let mut num_eval = 0;
             let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 5]>::uninit();
             let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
-
-            let mut responses = [0u16; 5];
-            for m in 0..M {
-                let mut word3 = unsafe { *seen3.get_unchecked(m) };
-                while word3 != 0 {
-                    let bit_idx = word3.trailing_zeros() as usize;
-                    responses[num_eval] = ((m << 6) | bit_idx) as u16;
-                    num_eval += 1;
-                    word3 &= word3 - 1;
-                }
-            }
 
             if num_eval == 1 {
                 let r0 = responses[0];
@@ -4793,6 +4796,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut r_buf = std::mem::MaybeUninit::<[u16; 256]>::uninit();
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
             let can_buffer = c_len <= 256 && !is_contiguous_root;
+            let mut total_buckets = 0u32;
             let mut i = 0;
             if is_contiguous_root {
                 let g_u8_ptr = g_ptr as *const u8;
@@ -4819,49 +4823,65 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                         let cnt0 = *counts_ptr.add(r0) + 1;
                         *counts_ptr.add(r0) = cnt0;
-                        if cnt0 == 3 {
+                        if cnt0 == 1 {
+                            total_buckets += 1;
+                        } else if cnt0 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
                         }
                         let cnt1 = *counts_ptr.add(r1) + 1;
                         *counts_ptr.add(r1) = cnt1;
-                        if cnt1 == 3 {
+                        if cnt1 == 1 {
+                            total_buckets += 1;
+                        } else if cnt1 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
                         }
                         let cnt2 = *counts_ptr.add(r2) + 1;
                         *counts_ptr.add(r2) = cnt2;
-                        if cnt2 == 3 {
+                        if cnt2 == 1 {
+                            total_buckets += 1;
+                        } else if cnt2 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
                         }
                         let cnt3 = *counts_ptr.add(r3) + 1;
                         *counts_ptr.add(r3) = cnt3;
-                        if cnt3 == 3 {
+                        if cnt3 == 1 {
+                            total_buckets += 1;
+                        } else if cnt3 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
                         }
                         let cnt4 = *counts_ptr.add(r4) + 1;
                         *counts_ptr.add(r4) = cnt4;
-                        if cnt4 == 3 {
+                        if cnt4 == 1 {
+                            total_buckets += 1;
+                        } else if cnt4 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
                         }
                         let cnt5 = *counts_ptr.add(r5) + 1;
                         *counts_ptr.add(r5) = cnt5;
-                        if cnt5 == 3 {
+                        if cnt5 == 1 {
+                            total_buckets += 1;
+                        } else if cnt5 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
                         }
                         let cnt6 = *counts_ptr.add(r6) + 1;
                         *counts_ptr.add(r6) = cnt6;
-                        if cnt6 == 3 {
+                        if cnt6 == 1 {
+                            total_buckets += 1;
+                        } else if cnt6 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
                         }
                         let cnt7 = *counts_ptr.add(r7) + 1;
                         *counts_ptr.add(r7) = cnt7;
-                        if cnt7 == 3 {
+                        if cnt7 == 1 {
+                            total_buckets += 1;
+                        } else if cnt7 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
                         }
@@ -4874,7 +4894,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         let cnt = *counts_ptr.add(r) + 1;
                         *counts_ptr.add(r) = cnt;
-                        if cnt == 3 {
+                        if cnt == 1 {
+                            total_buckets += 1;
+                        } else if cnt == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         }
@@ -4932,49 +4954,65 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                         let cnt0 = *counts_ptr.add(r0) + 1;
                         *counts_ptr.add(r0) = cnt0;
-                        if cnt0 == 3 {
+                        if cnt0 == 1 {
+                            total_buckets += 1;
+                        } else if cnt0 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
                         }
                         let cnt1 = *counts_ptr.add(r1) + 1;
                         *counts_ptr.add(r1) = cnt1;
-                        if cnt1 == 3 {
+                        if cnt1 == 1 {
+                            total_buckets += 1;
+                        } else if cnt1 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
                         }
                         let cnt2 = *counts_ptr.add(r2) + 1;
                         *counts_ptr.add(r2) = cnt2;
-                        if cnt2 == 3 {
+                        if cnt2 == 1 {
+                            total_buckets += 1;
+                        } else if cnt2 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
                         }
                         let cnt3 = *counts_ptr.add(r3) + 1;
                         *counts_ptr.add(r3) = cnt3;
-                        if cnt3 == 3 {
+                        if cnt3 == 1 {
+                            total_buckets += 1;
+                        } else if cnt3 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
                         }
                         let cnt4 = *counts_ptr.add(r4) + 1;
                         *counts_ptr.add(r4) = cnt4;
-                        if cnt4 == 3 {
+                        if cnt4 == 1 {
+                            total_buckets += 1;
+                        } else if cnt4 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
                         }
                         let cnt5 = *counts_ptr.add(r5) + 1;
                         *counts_ptr.add(r5) = cnt5;
-                        if cnt5 == 3 {
+                        if cnt5 == 1 {
+                            total_buckets += 1;
+                        } else if cnt5 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
                         }
                         let cnt6 = *counts_ptr.add(r6) + 1;
                         *counts_ptr.add(r6) = cnt6;
-                        if cnt6 == 3 {
+                        if cnt6 == 1 {
+                            total_buckets += 1;
+                        } else if cnt6 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
                         }
                         let cnt7 = *counts_ptr.add(r7) + 1;
                         *counts_ptr.add(r7) = cnt7;
-                        if cnt7 == 3 {
+                        if cnt7 == 1 {
+                            total_buckets += 1;
+                        } else if cnt7 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
                         }
@@ -4992,7 +5030,9 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         let cnt = *counts_ptr.add(r) + 1;
                         *counts_ptr.add(r) = cnt;
-                        if cnt == 3 {
+                        if cnt == 1 {
+                            total_buckets += 1;
+                        } else if cnt == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         }
@@ -5030,49 +5070,65 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
                         let cnt0 = *counts_ptr.add(r0) + 1;
                         *counts_ptr.add(r0) = cnt0;
-                        if cnt0 == 3 {
+                        if cnt0 == 1 {
+                            total_buckets += 1;
+                        } else if cnt0 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
                         }
                         let cnt1 = *counts_ptr.add(r1) + 1;
                         *counts_ptr.add(r1) = cnt1;
-                        if cnt1 == 3 {
+                        if cnt1 == 1 {
+                            total_buckets += 1;
+                        } else if cnt1 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
                         }
                         let cnt2 = *counts_ptr.add(r2) + 1;
                         *counts_ptr.add(r2) = cnt2;
-                        if cnt2 == 3 {
+                        if cnt2 == 1 {
+                            total_buckets += 1;
+                        } else if cnt2 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
                         }
                         let cnt3 = *counts_ptr.add(r3) + 1;
                         *counts_ptr.add(r3) = cnt3;
-                        if cnt3 == 3 {
+                        if cnt3 == 1 {
+                            total_buckets += 1;
+                        } else if cnt3 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
                         }
                         let cnt4 = *counts_ptr.add(r4) + 1;
                         *counts_ptr.add(r4) = cnt4;
-                        if cnt4 == 3 {
+                        if cnt4 == 1 {
+                            total_buckets += 1;
+                        } else if cnt4 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
                         }
                         let cnt5 = *counts_ptr.add(r5) + 1;
                         *counts_ptr.add(r5) = cnt5;
-                        if cnt5 == 3 {
+                        if cnt5 == 1 {
+                            total_buckets += 1;
+                        } else if cnt5 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
                         }
                         let cnt6 = *counts_ptr.add(r6) + 1;
                         *counts_ptr.add(r6) = cnt6;
-                        if cnt6 == 3 {
+                        if cnt6 == 1 {
+                            total_buckets += 1;
+                        } else if cnt6 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
                         }
                         let cnt7 = *counts_ptr.add(r7) + 1;
                         *counts_ptr.add(r7) = cnt7;
-                        if cnt7 == 3 {
+                        if cnt7 == 1 {
+                            total_buckets += 1;
+                        } else if cnt7 == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
                         }
@@ -5086,18 +5142,15 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         let cnt = *counts_ptr.add(r) + 1;
                         *counts_ptr.add(r) = cnt;
-                        if cnt == 3 {
+                        if cnt == 1 {
+                            total_buckets += 1;
+                        } else if cnt == 3 {
                             has_size_ge_3 = true;
                             *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                         }
                     }
                     i += 1;
                 }
-            }
-
-            let mut total_buckets = 0u32;
-            for m in 0..M {
-                total_buckets += unsafe { *seen.get_unchecked(m) }.count_ones();
             }
             if total_buckets <= 1 {
                 return beta;
