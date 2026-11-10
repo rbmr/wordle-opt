@@ -1107,7 +1107,34 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `a225a24` | pc01 | 2200 | 1 | optimal | 19.904s | 7477 | 2331 | 23639 | ~543MB | unroll candidate duplicate loops by four in solver phase one and two; build 19.904s (down from 20.047s); pick 19.8s; cpu 315.8s (down from 318.3s); busy cores 15.9; states 23,639; guesses 600,196; bounds pruned 1,958,492; equiv pruned 188,939,363; cache hits 2,438,255; validation OK |
 | 2026-11-10 | `a225a24` | pc01 | 2340 | — | optimal | 23.319s (0.01h) | 8001 | 2478 | 26013 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-a225a24); unroll candidate duplicate loops by four in solver phase one and two; build 23.319s (down from 23.495s); pick 23.1s (down from 23.3s); cpu 370.5s (down from 373.3s); busy cores 15.9 (root_guesses @ 15s: 7417); states 26,013; guesses 751,811; bounds pruned 2,082,422; equiv pruned 207,754,845; cache hits 3,488,872; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `a225a24` | pc01 | 2340 | — | optimal --certify | 23.284s (0.01h) | 8001 | 2478 | 26202 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.284s (pick 23.2s, cpu 369.4s, busy cores 15.9); 1,327,484 solver facts; 590 gap refutations (7.322s); 632,473 claims (444,733 capacity, 187,740 expansion, 0 failures, 9,487,114 bytes); independent check verified optimal in 58.687s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `bca1c2e` | pc01 | 1000 | 1 | optimal | 2.600s | 3124 | 1049 | 829 | — | implement sorting networks for five and six evaluation buckets in solver; pick 2.6s; cpu 41.0s; busy cores 15.8; states 829; guesses 15,129; bounds pruned 49,698; equiv pruned 5,134,812; cache hits 165,641; validation OK |
+| 2026-11-10 | `bca1c2e` | pc01 | 1600 | 1 | optimal | 8.178s | 5256 | 1681 | 3956 | — | implement sorting networks for five and six evaluation buckets in solver; pick 8.1s; cpu 128.2s; busy cores 15.7; states 3,956 (down from 3,960); guesses 66,267 (down from 66,310); bounds pruned 315,037; equiv pruned 29,582,985; cache hits 353,915; validation OK |
+| 2026-11-10 | `bca1c2e` | pc01 | 2000 | 1 | optimal | 13.719s | 6723 | 2119 | 7786 | — | implement sorting networks for five and six evaluation buckets in solver; pick 13.6s; cpu 216.2s; busy cores 15.8; states 7,786; guesses 185,645 (down from 185,681); bounds pruned 501,884; equiv pruned 59,814,270 (up from 59,540,511); cache hits 839,028; validation OK |
+| 2026-11-10 | `bca1c2e` | pc01 | 2200 | 1 | optimal | 19.905s | 7477 | 2331 | 23647 | ~543MB | implement sorting networks for five and six evaluation buckets in solver; build 19.905s; pick 19.8s; cpu 315.6s (down from 315.8s); busy cores 15.9; states 23,647; guesses 590,919 (down from 600,196: -9,277 guesses); bounds pruned 1,945,788; equiv pruned 188,807,330; cache hits 2,431,485; validation OK |
+| 2026-11-10 | `bca1c2e` | pc01 | 2340 | — | optimal | 23.330s (0.01h) | 8001 | 2478 | 26038 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-bca1c2e); implement sorting networks for five and six evaluation buckets in solver; build 23.330s; pick 23.1s; cpu 370.8s; busy cores 15.9 (root_guesses @ 15s: 7413); states 26,038; guesses 750,638 (down from 751,811: -1,173 guesses); bounds pruned 2,089,579 (up from 2,082,422: +7,157 bounds pruned); equiv pruned 207,493,712; cache hits 3,478,248; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `bca1c2e` | pc01 | 2340 | — | optimal --certify | 23.332s (0.01h) | 8001 | 2478 | 26195 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.332s (pick 23.2s, cpu 370.6s, busy cores 15.9); 1,328,079 solver facts; 589 gap refutations (7.319s); 632,836 claims (444,826 capacity, 188,010 expansion, 0 failures, 9,492,559 bytes); independent check verified optimal in 58.666s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `bca1c2e` rows evaluate implementing optimal sorting networks for five and six evaluation buckets in solver:
+  - In `src/solver.rs` (`min_state_val_with_hash`):
+    - Replaced the insertion sort in `split_idx` evaluation bucket sorting for `num_eval == 5` with an optimal 9-comparator descending sorting network operating purely on registers.
+    - Added an optimal 12-comparator descending sorting network for `num_eval == 6` operating purely on registers.
+    - Both sorting networks eliminate loop bounds checks and branch mispredictions during bucket ordering for small bucket counts.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.600s** (cpu 41.0s, pick 2.6s, states 829, guesses 15,129, bounds pruned 49,698, cost 3124).
+    - `N=1600, seed=1`: **8.178s** (cpu 128.2s, pick 8.1s, states 3,956 [down from 3,960], guesses 66,267 [down from 66,310], bounds pruned 315,037, cost 5256).
+    - `N=2000, seed=1`: **13.719s** (cpu 216.2s, pick 13.6s, states 7,786, guesses 185,645 [down from 185,681: -36 guesses], bounds pruned 501,884, equiv pruned 59,814,270 [up from 59,540,511], cost 6723).
+    - `N=2200, seed=1`: **19.905s** (cpu 315.6s [down from 315.8s], pick 19.8s, states 23,647, guesses 590,919 [down from 600,196: -9,277 guesses], cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-bca1c2e`): **23.330s** (cpu 370.8s, pick 23.1s, states 26,038, guesses 750,638 [down from 751,811: -1,173 guesses], bounds pruned 2,089,579 [up from 2,082,422: +7,157 bounds pruned], equiv pruned 207,493,712, cache hits 3,478,248, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 125.23s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.59s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 298.54s (`test published_optimum_3158 ... ok`, `test published_optima ... ok`)
+      - `tt_audit` (`--features tt-audit`): 48.23s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 632,836 claims with 0 failures in 23.332s (cpu 370.6s), and independent `check` verified `3.93e11` response reads in 58.666s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `a225a24` rows evaluate unrolling candidate duplicate checking loops by four in solver Phase 1 and Phase 2:
   - In `src/solver.rs` (`min_state_val_with_hash`):
