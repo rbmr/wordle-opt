@@ -1436,6 +1436,43 @@ impl<'a> OptimalPolicy<'a> {
                             let mut chunk_root_done = 0usize;
 
                             for i in start_idx..end_idx {
+                                if i + 1 < end_idx {
+                                    let next_g =
+                                        unsafe { filtered_active.get_unchecked(i + 1).g as usize };
+                                    #[cfg(target_arch = "x86_64")]
+                                    unsafe {
+                                        let next_ptr = if self.matrix.word_len <= 5 {
+                                            self.matrix
+                                                .data_u8
+                                                .as_ptr()
+                                                .add(next_g * self.matrix.num_candidates)
+                                                as *const i8
+                                        } else {
+                                            self.matrix
+                                                .data
+                                                .as_ptr()
+                                                .add(next_g * self.matrix.num_candidates)
+                                                as *const i8
+                                        };
+                                        core::arch::x86_64::_mm_prefetch(
+                                            next_ptr,
+                                            core::arch::x86_64::_MM_HINT_T0,
+                                        );
+                                        core::arch::x86_64::_mm_prefetch(
+                                            next_ptr.add(64),
+                                            core::arch::x86_64::_MM_HINT_T0,
+                                        );
+                                        core::arch::x86_64::_mm_prefetch(
+                                            next_ptr.add(128),
+                                            core::arch::x86_64::_MM_HINT_T0,
+                                        );
+                                        core::arch::x86_64::_mm_prefetch(
+                                            next_ptr.add(192),
+                                            core::arch::x86_64::_MM_HINT_T0,
+                                        );
+                                    }
+                                }
+
                                 let item = unsafe { *filtered_active.get_unchecked(i) };
                                 let orig_idx = item.orig_idx;
                                 let g = item.g as usize;

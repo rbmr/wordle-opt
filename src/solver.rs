@@ -2625,6 +2625,22 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 sort_guess_tuples(&mut phase1_tuples);
 
                 for (idx, &tuple) in phase1_tuples.iter().enumerate() {
+                    if idx + 1 < phase1_tuples.len() {
+                        let next_g = unsafe { phase1_tuples.get_unchecked(idx + 1).g as usize };
+                        let first_cand = unsafe { *set.get_unchecked(0) };
+                        #[cfg(target_arch = "x86_64")]
+                        unsafe {
+                            let next_ptr = self
+                                .matrix
+                                .data_ptr::<Elem>()
+                                .add(next_g * self.matrix.num_candidates + first_cand)
+                                as *const i8;
+                            core::arch::x86_64::_mm_prefetch(
+                                next_ptr,
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+                    }
                     let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                     if self.current_cost_so_far + local_lb >= current_global_beta {
                         cut_by_global = true;
@@ -3031,6 +3047,22 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     sort_guess_tuples(&mut phase2_tuples);
 
                     for (idx, &tuple) in phase2_tuples.iter().enumerate() {
+                        if idx + 1 < phase2_tuples.len() {
+                            let next_g = unsafe { phase2_tuples.get_unchecked(idx + 1).g as usize };
+                            let first_cand = unsafe { *set.get_unchecked(0) };
+                            #[cfg(target_arch = "x86_64")]
+                            unsafe {
+                                let next_ptr = self
+                                    .matrix
+                                    .data_ptr::<Elem>()
+                                    .add(next_g * self.matrix.num_candidates + first_cand)
+                                    as *const i8;
+                                core::arch::x86_64::_mm_prefetch(
+                                    next_ptr,
+                                    core::arch::x86_64::_MM_HINT_T0,
+                                );
+                            }
+                        }
                         let current_global_beta = self.global_beta.load(Ordering::Relaxed);
                         if self.current_cost_so_far + local_lb >= current_global_beta {
                             cut_by_global = true;
