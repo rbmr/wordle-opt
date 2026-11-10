@@ -3810,96 +3810,21 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 5]>::uninit();
             let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
 
+            let mut responses = [0u16; 5];
             for m in 0..M {
                 let mut word3 = unsafe { *seen3.get_unchecked(m) };
                 while word3 != 0 {
                     let bit_idx = word3.trailing_zeros() as usize;
-                    let r = ((m << 6) | bit_idx) as u16;
-                    word3 &= word3 - 1;
-
-                    let mut count = 0u16;
-                    let mut cand_idx = 0;
-                    while cand_idx + 3 < c_len {
-                        let r0 = unsafe { *r_buf_ptr.add(cand_idx) };
-                        let r1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
-                        let r2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
-                        let r3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
-                        count += (r0 == r) as u16
-                            + (r1 == r) as u16
-                            + (r2 == r) as u16
-                            + (r3 == r) as u16;
-                        cand_idx += 4;
-                    }
-                    while cand_idx < c_len {
-                        if unsafe { *r_buf_ptr.add(cand_idx) } == r {
-                            count += 1;
-                        }
-                        cand_idx += 1;
-                    }
-                    let p_len = count as usize;
-                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                    cost += lb - (2 * p_len - 1) as u32;
-                    unsafe {
-                        *eval_entries_ptr.add(num_eval) = EvalEntry {
-                            hash: 0,
-                            used_val: 0,
-                            r,
-                            count,
-                            is_exact: false,
-                        };
-                    }
+                    responses[num_eval] = ((m << 6) | bit_idx) as u16;
                     num_eval += 1;
+                    word3 &= word3 - 1;
                 }
-            }
-
-            if cost >= cutoff {
-                self.local_metrics.pruned_by_bounds += 1;
-                return cost;
             }
 
             if num_eval == 1 {
-                let entry = unsafe { &mut *eval_entries_ptr };
-                let target_r = entry.r;
-                let mut hash = 0u64;
-                let mut cand_idx = 0;
-                while cand_idx + 3 < c_len {
-                    let r0 = unsafe { *r_buf_ptr.add(cand_idx) };
-                    let r1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
-                    let r2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
-                    let r3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
-                    if r0 == target_r {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        hash ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                    if r1 == target_r {
-                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
-                        hash ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                    if r2 == target_r {
-                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
-                        hash ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                    if r3 == target_r {
-                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
-                        hash ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                    cand_idx += 4;
-                }
-                while cand_idx < c_len {
-                    if unsafe { *r_buf_ptr.add(cand_idx) } == target_r {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        hash ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                    cand_idx += 1;
-                }
-                entry.hash = hash;
-            } else if num_eval == 2 {
-                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
-                let r0 = e0.r;
-                let mut h0 = 0u64;
-                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
-                let r1 = e1.r;
-                let mut h1 = 0u64;
+                let r0 = responses[0];
+                let mut count0 = 0u16;
+                let mut hash0 = 0u64;
                 let mut cand_idx = 0;
                 while cand_idx + 3 < c_len {
                     let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
@@ -3907,175 +3832,208 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
                     let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
                     if r_0 == r0 {
+                        count0 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r_0 == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
                     }
                     if r_1 == r0 {
+                        count0 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx + 1) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r_1 == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
                     }
                     if r_2 == r0 {
+                        count0 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx + 2) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r_2 == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
                     }
                     if r_3 == r0 {
+                        count0 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx + 3) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
+                }
+                while cand_idx < c_len {
+                    if unsafe { *r_buf_ptr.add(cand_idx) } == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 1;
+                }
+                let p_len = count0 as usize;
+                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                cost += lb - (2 * p_len - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                unsafe {
+                    *eval_entries_ptr = EvalEntry {
+                        hash: hash0,
+                        used_val: 0,
+                        r: r0,
+                        count: count0,
+                        is_exact: false,
+                    };
+                }
+            } else if num_eval == 2 {
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r_1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r_0 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_1 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_2 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_3 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
                     } else if r_3 == r1 {
+                        count1 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx + 3) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
                     }
                     cand_idx += 4;
                 }
                 while cand_idx < c_len {
                     let r = unsafe { *r_buf_ptr.add(cand_idx) };
                     if r == r0 {
+                        count0 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
                     } else if r == r1 {
+                        count1 += 1;
                         let c = unsafe { *set_ptr.add(cand_idx) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
                     }
                     cand_idx += 1;
                 }
-                e0.hash = h0;
-                e1.hash = h1;
-            } else if num_eval == 3 {
-                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
-                let r0 = e0.r;
-                let mut h0 = 0u64;
-                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
-                let r1 = e1.r;
-                let mut h1 = 0u64;
-                let e2 = unsafe { &mut *eval_entries_ptr.add(2) };
-                let r2 = e2.r;
-                let mut h2 = 0u64;
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
-                    if r == r0 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r2 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h2 ^= unsafe { *zobrist_ptr.add(c) };
-                    }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
                 }
-                e0.hash = h0;
-                e1.hash = h1;
-                e2.hash = h2;
-            } else if num_eval == 4 {
-                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
-                let r0 = e0.r;
-                let mut h0 = 0u64;
-                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
-                let r1 = e1.r;
-                let mut h1 = 0u64;
-                let e2 = unsafe { &mut *eval_entries_ptr.add(2) };
-                let r2 = e2.r;
-                let mut h2 = 0u64;
-                let e3 = unsafe { &mut *eval_entries_ptr.add(3) };
-                let r3 = e3.r;
-                let mut h3 = 0u64;
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
-                    if r == r0 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r2 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h2 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r3 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h3 ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                }
-                e0.hash = h0;
-                e1.hash = h1;
-                e2.hash = h2;
-                e3.hash = h3;
-            } else if num_eval == 5 {
-                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
-                let r0 = e0.r;
-                let mut h0 = 0u64;
-                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
-                let r1 = e1.r;
-                let mut h1 = 0u64;
-                let e2 = unsafe { &mut *eval_entries_ptr.add(2) };
-                let r2 = e2.r;
-                let mut h2 = 0u64;
-                let e3 = unsafe { &mut *eval_entries_ptr.add(3) };
-                let r3 = e3.r;
-                let mut h3 = 0u64;
-                let e4 = unsafe { &mut *eval_entries_ptr.add(4) };
-                let r4 = e4.r;
-                let mut h4 = 0u64;
-                for cand_idx in 0..c_len {
-                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
-                    if r == r0 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h0 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r1 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h1 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r2 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h2 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r3 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h3 ^= unsafe { *zobrist_ptr.add(c) };
-                    } else if r == r4 {
-                        let c = unsafe { *set_ptr.add(cand_idx) };
-                        h4 ^= unsafe { *zobrist_ptr.add(c) };
-                    }
-                }
-                e0.hash = h0;
-                e1.hash = h1;
-                e2.hash = h2;
-                e3.hash = h3;
-                e4.hash = h4;
-            } else {
-                for i in 0..num_eval {
-                    let entry = unsafe { &mut *eval_entries_ptr.add(i) };
-                    let target_r = entry.r;
-                    let mut hash = 0u64;
-                    for cand_idx in 0..c_len {
-                        if unsafe { *r_buf_ptr.add(cand_idx) } == target_r {
-                            let c = unsafe { *set_ptr.add(cand_idx) };
-                            hash ^= unsafe { *zobrist_ptr.add(c) };
-                        }
-                    }
-                    entry.hash = hash;
-                }
-            }
-
-            if num_eval == 2 {
-                let e0 = unsafe { *eval_entries_ptr.add(0) };
-                let e1 = unsafe { *eval_entries_ptr.add(1) };
-                if e0.count < e1.count {
-                    unsafe {
+                let e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                unsafe {
+                    if count0 >= count1 {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                    } else {
                         *eval_entries_ptr.add(0) = e1;
                         *eval_entries_ptr.add(1) = e0;
                     }
                 }
             } else if num_eval == 3 {
-                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
-                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
-                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let r2 = responses[2];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut count2 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut hash2 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                let p_len2 = count2 as usize;
+                let lb2 = unsafe { *parent_cap_bounds_ptr.add(p_len2) };
+                cost += lb2 - (2 * p_len2 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let mut e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let mut e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                let mut e2 = EvalEntry {
+                    hash: hash2,
+                    used_val: 0,
+                    r: r2,
+                    count: count2,
+                    is_exact: false,
+                };
                 if e0.count < e1.count {
                     std::mem::swap(&mut e0, &mut e1);
                 }
@@ -4091,10 +4049,82 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *eval_entries_ptr.add(2) = e2;
                 }
             } else if num_eval == 4 {
-                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
-                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
-                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
-                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let r2 = responses[2];
+                let r3 = responses[3];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut count2 = 0u16;
+                let mut count3 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut hash2 = 0u64;
+                let mut hash3 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                let p_len2 = count2 as usize;
+                let lb2 = unsafe { *parent_cap_bounds_ptr.add(p_len2) };
+                cost += lb2 - (2 * p_len2 - 1) as u32;
+                let p_len3 = count3 as usize;
+                let lb3 = unsafe { *parent_cap_bounds_ptr.add(p_len3) };
+                cost += lb3 - (2 * p_len3 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let mut e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let mut e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                let mut e2 = EvalEntry {
+                    hash: hash2,
+                    used_val: 0,
+                    r: r2,
+                    count: count2,
+                    is_exact: false,
+                };
+                let mut e3 = EvalEntry {
+                    hash: hash3,
+                    used_val: 0,
+                    r: r3,
+                    count: count3,
+                    is_exact: false,
+                };
                 if e0.count < e1.count {
                     std::mem::swap(&mut e0, &mut e1);
                 }
@@ -4117,11 +4147,99 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *eval_entries_ptr.add(3) = e3;
                 }
             } else if num_eval == 5 {
-                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
-                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
-                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
-                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
-                let mut e4 = unsafe { *eval_entries_ptr.add(4) };
+                let r0 = responses[0];
+                let r1 = responses[1];
+                let r2 = responses[2];
+                let r3 = responses[3];
+                let r4 = responses[4];
+                let mut count0 = 0u16;
+                let mut count1 = 0u16;
+                let mut count2 = 0u16;
+                let mut count3 = 0u16;
+                let mut count4 = 0u16;
+                let mut hash0 = 0u64;
+                let mut hash1 = 0u64;
+                let mut hash2 = 0u64;
+                let mut hash3 = 0u64;
+                let mut hash4 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r4 {
+                        count4 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash4 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                let p_len0 = count0 as usize;
+                let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
+                cost += lb0 - (2 * p_len0 - 1) as u32;
+                let p_len1 = count1 as usize;
+                let lb1 = unsafe { *parent_cap_bounds_ptr.add(p_len1) };
+                cost += lb1 - (2 * p_len1 - 1) as u32;
+                let p_len2 = count2 as usize;
+                let lb2 = unsafe { *parent_cap_bounds_ptr.add(p_len2) };
+                cost += lb2 - (2 * p_len2 - 1) as u32;
+                let p_len3 = count3 as usize;
+                let lb3 = unsafe { *parent_cap_bounds_ptr.add(p_len3) };
+                cost += lb3 - (2 * p_len3 - 1) as u32;
+                let p_len4 = count4 as usize;
+                let lb4 = unsafe { *parent_cap_bounds_ptr.add(p_len4) };
+                cost += lb4 - (2 * p_len4 - 1) as u32;
+                if cost >= cutoff {
+                    self.local_metrics.pruned_by_bounds += 1;
+                    return cost;
+                }
+                let mut e0 = EvalEntry {
+                    hash: hash0,
+                    used_val: 0,
+                    r: r0,
+                    count: count0,
+                    is_exact: false,
+                };
+                let mut e1 = EvalEntry {
+                    hash: hash1,
+                    used_val: 0,
+                    r: r1,
+                    count: count1,
+                    is_exact: false,
+                };
+                let mut e2 = EvalEntry {
+                    hash: hash2,
+                    used_val: 0,
+                    r: r2,
+                    count: count2,
+                    is_exact: false,
+                };
+                let mut e3 = EvalEntry {
+                    hash: hash3,
+                    used_val: 0,
+                    r: r3,
+                    count: count3,
+                    is_exact: false,
+                };
+                let mut e4 = EvalEntry {
+                    hash: hash4,
+                    used_val: 0,
+                    r: r4,
+                    count: count4,
+                    is_exact: false,
+                };
                 if e0.count < e1.count {
                     std::mem::swap(&mut e0, &mut e1);
                 }
