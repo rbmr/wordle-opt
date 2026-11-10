@@ -4363,6 +4363,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut num_eval = 0;
 
             let mut seen = [0u64; M];
+            let mut seen_ge_3 = [0u64; M];
+            let mut has_size_ge_3 = false;
 
             struct GuessCleanup<const M: usize> {
                 counts_ptr: *mut u16,
@@ -4423,14 +4425,54 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
                         *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
 
-                        *counts_ptr.add(r0) += 1;
-                        *counts_ptr.add(r1) += 1;
-                        *counts_ptr.add(r2) += 1;
-                        *counts_ptr.add(r3) += 1;
-                        *counts_ptr.add(r4) += 1;
-                        *counts_ptr.add(r5) += 1;
-                        *counts_ptr.add(r6) += 1;
-                        *counts_ptr.add(r7) += 1;
+                        let cnt0 = *counts_ptr.add(r0) + 1;
+                        *counts_ptr.add(r0) = cnt0;
+                        if cnt0 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+                        }
+                        let cnt1 = *counts_ptr.add(r1) + 1;
+                        *counts_ptr.add(r1) = cnt1;
+                        if cnt1 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
+                        }
+                        let cnt2 = *counts_ptr.add(r2) + 1;
+                        *counts_ptr.add(r2) = cnt2;
+                        if cnt2 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
+                        }
+                        let cnt3 = *counts_ptr.add(r3) + 1;
+                        *counts_ptr.add(r3) = cnt3;
+                        if cnt3 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
+                        }
+                        let cnt4 = *counts_ptr.add(r4) + 1;
+                        *counts_ptr.add(r4) = cnt4;
+                        if cnt4 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
+                        }
+                        let cnt5 = *counts_ptr.add(r5) + 1;
+                        *counts_ptr.add(r5) = cnt5;
+                        if cnt5 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
+                        }
+                        let cnt6 = *counts_ptr.add(r6) + 1;
+                        *counts_ptr.add(r6) = cnt6;
+                        if cnt6 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
+                        }
+                        let cnt7 = *counts_ptr.add(r7) + 1;
+                        *counts_ptr.add(r7) = cnt7;
+                        if cnt7 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
+                        }
                     }
                     i += 8;
                 }
@@ -4438,7 +4480,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r = unsafe { *g_u8_ptr.add(i) as usize };
                     unsafe {
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        *counts_ptr.add(r) += 1;
+                        let cnt = *counts_ptr.add(r) + 1;
+                        *counts_ptr.add(r) = cnt;
+                        if cnt == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                        }
                     }
                     i += 1;
                 }
@@ -4471,14 +4518,54 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *seen.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
                         *seen.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
 
-                        *counts_ptr.add(r0) += 1;
-                        *counts_ptr.add(r1) += 1;
-                        *counts_ptr.add(r2) += 1;
-                        *counts_ptr.add(r3) += 1;
-                        *counts_ptr.add(r4) += 1;
-                        *counts_ptr.add(r5) += 1;
-                        *counts_ptr.add(r6) += 1;
-                        *counts_ptr.add(r7) += 1;
+                        let cnt0 = *counts_ptr.add(r0) + 1;
+                        *counts_ptr.add(r0) = cnt0;
+                        if cnt0 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r0 >> 6) |= 1u64 << (r0 & 63);
+                        }
+                        let cnt1 = *counts_ptr.add(r1) + 1;
+                        *counts_ptr.add(r1) = cnt1;
+                        if cnt1 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r1 >> 6) |= 1u64 << (r1 & 63);
+                        }
+                        let cnt2 = *counts_ptr.add(r2) + 1;
+                        *counts_ptr.add(r2) = cnt2;
+                        if cnt2 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r2 >> 6) |= 1u64 << (r2 & 63);
+                        }
+                        let cnt3 = *counts_ptr.add(r3) + 1;
+                        *counts_ptr.add(r3) = cnt3;
+                        if cnt3 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r3 >> 6) |= 1u64 << (r3 & 63);
+                        }
+                        let cnt4 = *counts_ptr.add(r4) + 1;
+                        *counts_ptr.add(r4) = cnt4;
+                        if cnt4 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r4 >> 6) |= 1u64 << (r4 & 63);
+                        }
+                        let cnt5 = *counts_ptr.add(r5) + 1;
+                        *counts_ptr.add(r5) = cnt5;
+                        if cnt5 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r5 >> 6) |= 1u64 << (r5 & 63);
+                        }
+                        let cnt6 = *counts_ptr.add(r6) + 1;
+                        *counts_ptr.add(r6) = cnt6;
+                        if cnt6 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r6 >> 6) |= 1u64 << (r6 & 63);
+                        }
+                        let cnt7 = *counts_ptr.add(r7) + 1;
+                        *counts_ptr.add(r7) = cnt7;
+                        if cnt7 == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r7 >> 6) |= 1u64 << (r7 & 63);
+                        }
                     }
                     i += 8;
                 }
@@ -4487,7 +4574,12 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
                     unsafe {
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
-                        *counts_ptr.add(r) += 1;
+                        let cnt = *counts_ptr.add(r) + 1;
+                        *counts_ptr.add(r) = cnt;
+                        if cnt == 3 {
+                            has_size_ge_3 = true;
+                            *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
+                        }
                     }
                     i += 1;
                 }
@@ -4510,30 +4602,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.local_metrics.pruned_by_bounds += 1;
                 return cost;
             }
-            if c_len - total_buckets as usize <= 1 {
+            if !has_size_ge_3 {
                 return cost;
             }
 
             for m in 0..M {
-                let mut word = unsafe { *seen.get_unchecked(m) };
-                while word != 0 {
-                    let bit_idx = word.trailing_zeros() as usize;
+                let mut word3 = unsafe { *seen_ge_3.get_unchecked(m) };
+                while word3 != 0 {
+                    let bit_idx = word3.trailing_zeros() as usize;
                     let r = (m << 6) | bit_idx;
-                    word &= word - 1;
+                    word3 &= word3 - 1;
                     let p_len = unsafe { *counts_ptr.add(r) as usize };
-                    if p_len > 2 && r != WIN {
-                        let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                        cost += lb - (2 * p_len - 1) as u32;
-                        if cost >= cutoff {
-                            self.local_metrics.pruned_by_bounds += 1;
-                            return cost;
-                        }
-                        let entry = ((p_len as u32) << 16) | ((!r as u16) as u32);
-                        unsafe {
-                            *eval_entries_ptr.add(num_eval) = entry;
-                        }
-                        num_eval += 1;
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    cost += lb - (2 * p_len - 1) as u32;
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        return cost;
                     }
+                    let entry = ((p_len as u32) << 16) | ((!r as u16) as u32);
+                    unsafe {
+                        *eval_entries_ptr.add(num_eval) = entry;
+                    }
+                    num_eval += 1;
                 }
             }
 
