@@ -1059,7 +1059,35 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `b6727dd` | pc01 | 2200 | 1 | optimal | 20.044s | 7477 | 2331 | 23675 | ~543MB | hardware prefetch for transposition table lookups in bucket evaluation; pick 20.0s; cpu 318.0s; busy cores 15.9; states 23,675 vs 23,716 [-41 states]; guesses 600,121 vs 600,145; bounds pruned 1,960,471; equiv pruned 189,200,509; cache hits 2,435,985; validation OK |
 | 2026-11-10 | `b6727dd` | pc01 | 2340 | — | optimal | 23.525s (0.01h) | 8001 | 2478 | 25997 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-b6727dd); hardware prefetch for transposition table lookups in bucket evaluation; new all-time record full run build time (23.525s vs 23.543s); pick 23.3s; cpu 373.7s; busy cores 15.9 (root_guesses @ 15s: 7245); states 25,997 vs 26,038 [-41 states]; guesses 750,921; bounds pruned 2,077,867; equiv pruned 207,300,755; cache hits 3,484,499; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `b6727dd` | pc01 | 2340 | — | optimal --certify | 23.401s (0.01h) | 8001 | 2478 | 26205 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.401s (pick 23.3s, cpu 371.5s, busy cores 15.9); 1,328,047 solver facts; 591 gap refutations (7.731s); 629,544 claims (442,560 capacity, 186,984 expansion, 0 failures, 9,443,179 bytes); independent check verified optimal in 68.872s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `744d915` | pc01 | 1000 | 1 | optimal | 2.605s | 3124 | 1049 | 816 | — | defer Zobrist hashing for large candidate sets in solver min_guess_val; pick 2.6s; cpu 41.1s; busy cores 15.8; states 816; guesses 15,034; bounds pruned 49,863; equiv pruned 5,091,842; cache hits 165,712; validation OK |
+| 2026-11-10 | `744d915` | pc01 | 1600 | 1 | optimal | 8.175s | 5256 | 1681 | 3964 | — | defer Zobrist hashing for large candidate sets in solver min_guess_val; pick 8.1s; cpu 128.1s; busy cores 15.7; states 3,964; guesses 66,320; bounds pruned 316,064; equiv pruned 29,461,843; cache hits 354,082; validation OK |
+| 2026-11-10 | `744d915` | pc01 | 2000 | 1 | optimal | 13.785s | 6723 | 2119 | 7781 | — | defer Zobrist hashing for large candidate sets in solver min_guess_val; pick 13.7s; cpu 217.3s; busy cores 15.8; states 7,781; guesses 186,577; bounds pruned 503,323; equiv pruned 59,910,214; cache hits 837,411; validation OK |
+| 2026-11-10 | `744d915` | pc01 | 2200 | 1 | optimal | 20.053s | 7477 | 2331 | 23636 | ~543MB | defer Zobrist hashing for large candidate sets in solver min_guess_val; pick 20.0s; cpu 318.2s; busy cores 15.9; states 23,636 vs 23,675 [-39 states]; guesses 590,130 vs 600,121 [-9,991 guesses, ~10k reduction!]; bounds pruned 1,950,459; equiv pruned 189,410,221; cache hits 2,436,812; validation OK |
+| 2026-11-10 | `744d915` | pc01 | 2340 | — | optimal | 23.545s (0.01h) | 8001 | 2478 | 25998 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-744d915); defer Zobrist hashing for large candidate sets in solver min_guess_val; build 23.545s; pick 23.3s; cpu 374.1s; busy cores 15.9 (root_guesses @ 15s: 7241); states 25,998; guesses 752,759; bounds pruned 2,085,200; equiv pruned 207,612,410; cache hits 3,496,596; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `744d915` | pc01 | 2340 | — | optimal --certify | 23.404s (0.01h) | 8001 | 2478 | 26163 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.404s (pick 23.3s, cpu 371.5s, busy cores 15.9); 1,329,527 solver facts; 590 gap refutations (7.466s); 629,035 claims (442,489 capacity, 186,546 expansion, 0 failures, 9,435,544 bytes); independent check verified optimal in 71.137s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `744d915` rows evaluate deferring Zobrist hashing for large candidate sets ($c\_len > 16$) in solver `min_guess_val`:
+  - In `src/solver.rs`:
+    - For non-root candidate sets with $c\_len > 16$, removed inline Zobrist hash table lookups, XOR updates, and scatter writes to `hashes_ptr` from the initial candidate response loop.
+    - Updated `GuessCleanup` to skip clearing `hashes_ptr` when `!is_contiguous_root`, zeroing only `counts_ptr`.
+    - Allowed the vast majority of non-root guesses that prune by capacity bounds (`cost >= cutoff` or `num_eval == 0`) to exit immediately with zero Zobrist overhead.
+    - Added deferred hash computation and `EvalHashCleanup` RAII guard immediately prior to transposition table lookups strictly for the 1–3 non-empty buckets in `eval_entries` when `num_eval > 0`.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.605s** (cpu 41.1s, pick 2.6s, states 816, guesses 15,034, cost 3124).
+    - `N=1600, seed=1`: **8.175s** (cpu 128.1s, pick 8.1s, states 3,964, guesses 66,320, cost 5256).
+    - `N=2000, seed=1`: **13.785s** (cpu 217.3s, pick 13.7s, states 7,781, guesses 186,577, cost 6723).
+    - `N=2200, seed=1`: **20.053s** (cpu 318.2s, pick 20.0s, states 23,636 vs 23,675 [-39 states], guesses 590,130 vs 600,121 [-9,991 guesses evaluated, reducing search work], cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-744d915`): **23.545s** (cpu 374.1s, pick 23.3s, states 25,998, guesses 752,759, bounds pruned 2,085,200, cache hits 3,496,596, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 129.52s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.51s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 301.50s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 48.40s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 629,035 claims with 0 failures, and independent `check` verified `3.91e11` response reads in 71.137s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `b6727dd` rows evaluate adding hardware prefetch for transposition table lookups in bucket evaluation:
   - In `src/cache.rs`, `src/solver.rs`, and `src/policy.rs`:
