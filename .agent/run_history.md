@@ -1178,7 +1178,35 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `b16cc2f` | pc01 | 2200 | 1 | optimal | 19.925s | 7477 | 2331 | 23622 | ~543MB | buffer partition candidate responses in state evaluation; build 19.925s; pick 19.8s; cpu 316.1s; busy cores 15.9; states 23,622; guesses 599,685; bounds pruned 1,961,192; equiv pruned 188,800,445; cache hits 2,437,886; validation OK |
 | 2026-11-10 | `b16cc2f` | pc01 | 2340 | — | optimal | 23.390s (0.01h) | 8001 | 2478 | 25990 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-b16cc2f); buffer partition candidate responses in state evaluation; build 23.390s; pick 23.1s; cpu 371.6s; busy cores 15.9; states 25,990; guesses 752,235; bounds pruned 2,084,999; equiv pruned 207,522,940; cache hits 3,493,200; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `b16cc2f` | pc01 | 2340 | — | optimal --certify | 23.479s (0.01h) | 8001 | 2478 | 26189 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.479s (pick 23.2s, cpu 373.1s, busy cores 15.9); 1,335,463 solver facts; 589 gap refutations (7.070s); 634,764 claims (445,736 capacity, 189,028 expansion, 0 failures, 9,521,479 bytes); independent check verified optimal in 57.621s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 500 | 1 | optimal | 0.340s | 1453 | 517 | 102 | — | buffer candidate responses in guess evaluation; build 0.340s; cpu 5.1s; busy cores 15.0; states 102; guesses 8432; bounds pruned 8909; equiv pruned 285711; cache hits 57924; validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 1000 | 1 | optimal | 2.599s | 3124 | 1049 | 788 | — | buffer candidate responses in guess evaluation; pick 2.6s; cpu 40.9s; busy cores 15.7; states 788 (down from 828: -40 states); guesses 14,881 (down from 15,132: -251 guesses); bounds pruned 50,021; equiv pruned 4,829,559; cache hits 165,229; validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 1600 | 1 | optimal | 8.152s | 5256 | 1681 | 3948 | — | buffer candidate responses in guess evaluation; pick 8.1s; cpu 127.7s; busy cores 15.7; states 3948 (down from 3954); guesses 66,204 (down from 66,258); bounds pruned 314,662; equiv pruned 29,499,274; cache hits 353,934; validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 2000 | 1 | optimal | 13.723s | 6723 | 2112 | 7794 | — | buffer candidate responses in guess evaluation; pick 13.6s; cpu 216.2s; busy cores 15.8; states 7794; guesses 185,660 (down from 185,685); bounds pruned 501,276; equiv pruned 59,796,502; cache hits 839,040; validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 2200 | 1 | optimal | 19.921s | 7477 | 2327 | 23642 | ~543MB | buffer candidate responses in guess evaluation; build 19.921s; pick 19.8s; cpu 316.2s; busy cores 15.9; states 23,642; guesses 600,344; bounds pruned 1,959,134; equiv pruned 189,043,085; cache hits 2,437,869; validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 2340 | — | optimal | 23.341s (0.01h) | 8001 | 2478 | 25966 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-bedf300); buffer candidate responses in guess evaluation; build 23.341s; pick 23.1s; cpu 370.9s; busy cores 15.9; states 25,966 (down from 25,990: -24 states); guesses 750,908 (down from 752,235: -1,327 guesses); bounds pruned 2,082,887; equiv pruned 207,291,022; cache hits 3,485,405; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `bedf300` | pc01 | 2340 | — | optimal --certify | 23.215s (0.01h) | 8001 | 2478 | 26189 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.215s (pick 23.1s, cpu 368.6s, busy cores 15.9); 1,329,373 solver facts; 590 gap refutations (7.125s); 631,728 claims (444,006 capacity, 187,722 expansion, 0 failures, 9,475,939 bytes); independent check verified optimal in 59.286s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `bedf300` rows evaluate buffering candidate responses in `SpecializedSolver::min_guess_val_inner` for bounded candidate partitions ($c\_len \le 256$ when `!is_contiguous_root`):
+  - In `src/solver.rs`:
+    - Added stack buffer `r_buf = MaybeUninit::<[u16; 256]>::uninit()`.
+    - In Pass 1 (candidate counting), when `can_buffer = c_len <= 256 && !is_contiguous_root`, cached computed responses into `*r_buf_ptr.add(i)` alongside bucket counting and `seen_ge_3` tracking.
+    - In Pass 2 (`_eval_hash_cleanup` for Zobrist hash accumulation across `num_eval` 1 to >6), read responses directly from `r_buf_ptr` using 64-bit unaligned loads (4 responses per read). Candidate indices in non-matching buckets bypass `set_ptr` and `zobrist_ptr` memory loads completely.
+    - In Pass 3 (counting sort), read responses directly from `r_buf_ptr` using 64-bit unaligned loads, eliminating scattered memory gathers from `matrix.data`.
+    - Maintained fallback path for $c\_len > 256$.
+  - Benchmarks on `pc01`:
+    - `N=500, seed=1`: **0.340s** (cpu 5.1s, states 102, guesses 8432, bounds pruned 8909, cost 1453).
+    - `N=1000, seed=1`: **2.599s** (cpu 40.9s, pick 2.6s, states 788 [-40 states], guesses 14,881 [-251 guesses], bounds pruned 50,021, cost 3124).
+    - `N=1600, seed=1`: **8.152s** (cpu 127.7s, pick 8.1s, states 3948, guesses 66,204, bounds pruned 314,662, cost 5256).
+    - `N=2000, seed=1`: **13.723s** (cpu 216.2s, pick 13.6s, states 7794, guesses 185,660, bounds pruned 501,276, cost 6723).
+    - `N=2200, seed=1`: **19.921s** (cpu 316.2s, pick 19.8s, states 23,642, guesses 600,344, bounds pruned 1,959,134, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-bedf300`): **23.341s** (cpu 370.9s, pick 23.1s, states 25,966 [-24 states], guesses 750,908 [-1,327 guesses], bounds pruned 2,082,887, equiv pruned 207,291,022, cache hits 3,485,405, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+    - Full `N=2340` Certificate Generation + Independent Check: Solve in 23.215s (cpu 368.6s), 1,329,373 solver facts, 590 gap refutations in 7.125s, 631,728 claims assembled in 83.054s (0 failures, 9,475,939 bytes). Independent `check` verified all 3.92e11 response reads in 59.286s (`CERTIFICATE VALID: the tree is optimal`).
+  - Full Ignored Audit Suite on `pc01`:
+    - `full_scale`: passed in 127.75s
+    - `parallel_consistency`: passed in 101.89s
+    - `published_optima`: passed in 297.29s
+    - `tt_audit` (`--features tt-audit`): passed in 50.35s
 
 - The `b16cc2f` rows evaluate buffering partition candidate responses in `SpecializedSolver::min_state_val_with_hash` ($c\_len \le 256$):
   - In `src/solver.rs`:
