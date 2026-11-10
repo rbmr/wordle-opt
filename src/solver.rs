@@ -6649,6 +6649,82 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     if is_contiguous_root {
                         let g_u8_ptr = g_ptr as *const u8;
                         let mut cand_idx = 0;
+                        while cand_idx + 15 < c_len {
+                            let r_u64_0 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let r_u64_1 = unsafe {
+                                (g_u8_ptr.add(cand_idx + 8) as *const u64).read_unaligned()
+                            };
+                            let b0 = (r_u64_0 & 0xFF) as usize;
+                            let b1 = ((r_u64_0 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64_0 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64_0 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64_0 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64_0 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64_0 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64_0 >> 56) as usize;
+
+                            let b8 = (r_u64_1 & 0xFF) as usize;
+                            let b9 = ((r_u64_1 >> 8) & 0xFF) as usize;
+                            let b10 = ((r_u64_1 >> 16) & 0xFF) as usize;
+                            let b11 = ((r_u64_1 >> 24) & 0xFF) as usize;
+                            let b12 = ((r_u64_1 >> 32) & 0xFF) as usize;
+                            let b13 = ((r_u64_1 >> 40) & 0xFF) as usize;
+                            let b14 = ((r_u64_1 >> 48) & 0xFF) as usize;
+                            let b15 = (r_u64_1 >> 56) as usize;
+
+                            unsafe {
+                                if *counts_ptr.add(b0) > 2 {
+                                    *hashes_ptr.add(b0) ^= *zobrist_ptr.add(cand_idx);
+                                }
+                                if *counts_ptr.add(b1) > 2 {
+                                    *hashes_ptr.add(b1) ^= *zobrist_ptr.add(cand_idx + 1);
+                                }
+                                if *counts_ptr.add(b2) > 2 {
+                                    *hashes_ptr.add(b2) ^= *zobrist_ptr.add(cand_idx + 2);
+                                }
+                                if *counts_ptr.add(b3) > 2 {
+                                    *hashes_ptr.add(b3) ^= *zobrist_ptr.add(cand_idx + 3);
+                                }
+                                if *counts_ptr.add(b4) > 2 {
+                                    *hashes_ptr.add(b4) ^= *zobrist_ptr.add(cand_idx + 4);
+                                }
+                                if *counts_ptr.add(b5) > 2 {
+                                    *hashes_ptr.add(b5) ^= *zobrist_ptr.add(cand_idx + 5);
+                                }
+                                if *counts_ptr.add(b6) > 2 {
+                                    *hashes_ptr.add(b6) ^= *zobrist_ptr.add(cand_idx + 6);
+                                }
+                                if *counts_ptr.add(b7) > 2 {
+                                    *hashes_ptr.add(b7) ^= *zobrist_ptr.add(cand_idx + 7);
+                                }
+                                if *counts_ptr.add(b8) > 2 {
+                                    *hashes_ptr.add(b8) ^= *zobrist_ptr.add(cand_idx + 8);
+                                }
+                                if *counts_ptr.add(b9) > 2 {
+                                    *hashes_ptr.add(b9) ^= *zobrist_ptr.add(cand_idx + 9);
+                                }
+                                if *counts_ptr.add(b10) > 2 {
+                                    *hashes_ptr.add(b10) ^= *zobrist_ptr.add(cand_idx + 10);
+                                }
+                                if *counts_ptr.add(b11) > 2 {
+                                    *hashes_ptr.add(b11) ^= *zobrist_ptr.add(cand_idx + 11);
+                                }
+                                if *counts_ptr.add(b12) > 2 {
+                                    *hashes_ptr.add(b12) ^= *zobrist_ptr.add(cand_idx + 12);
+                                }
+                                if *counts_ptr.add(b13) > 2 {
+                                    *hashes_ptr.add(b13) ^= *zobrist_ptr.add(cand_idx + 13);
+                                }
+                                if *counts_ptr.add(b14) > 2 {
+                                    *hashes_ptr.add(b14) ^= *zobrist_ptr.add(cand_idx + 14);
+                                }
+                                if *counts_ptr.add(b15) > 2 {
+                                    *hashes_ptr.add(b15) ^= *zobrist_ptr.add(cand_idx + 15);
+                                }
+                            }
+                            cand_idx += 16;
+                        }
                         while cand_idx + 7 < c_len {
                             let r_u64 =
                                 unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
@@ -6661,28 +6737,28 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let b6 = ((r_u64 >> 48) & 0xFF) as usize;
                             let b7 = (r_u64 >> 56) as usize;
                             unsafe {
-                                if *counts_ptr.add(b0) > 2 && b0 != WIN {
+                                if *counts_ptr.add(b0) > 2 {
                                     *hashes_ptr.add(b0) ^= *zobrist_ptr.add(cand_idx);
                                 }
-                                if *counts_ptr.add(b1) > 2 && b1 != WIN {
+                                if *counts_ptr.add(b1) > 2 {
                                     *hashes_ptr.add(b1) ^= *zobrist_ptr.add(cand_idx + 1);
                                 }
-                                if *counts_ptr.add(b2) > 2 && b2 != WIN {
+                                if *counts_ptr.add(b2) > 2 {
                                     *hashes_ptr.add(b2) ^= *zobrist_ptr.add(cand_idx + 2);
                                 }
-                                if *counts_ptr.add(b3) > 2 && b3 != WIN {
+                                if *counts_ptr.add(b3) > 2 {
                                     *hashes_ptr.add(b3) ^= *zobrist_ptr.add(cand_idx + 3);
                                 }
-                                if *counts_ptr.add(b4) > 2 && b4 != WIN {
+                                if *counts_ptr.add(b4) > 2 {
                                     *hashes_ptr.add(b4) ^= *zobrist_ptr.add(cand_idx + 4);
                                 }
-                                if *counts_ptr.add(b5) > 2 && b5 != WIN {
+                                if *counts_ptr.add(b5) > 2 {
                                     *hashes_ptr.add(b5) ^= *zobrist_ptr.add(cand_idx + 5);
                                 }
-                                if *counts_ptr.add(b6) > 2 && b6 != WIN {
+                                if *counts_ptr.add(b6) > 2 {
                                     *hashes_ptr.add(b6) ^= *zobrist_ptr.add(cand_idx + 6);
                                 }
-                                if *counts_ptr.add(b7) > 2 && b7 != WIN {
+                                if *counts_ptr.add(b7) > 2 {
                                     *hashes_ptr.add(b7) ^= *zobrist_ptr.add(cand_idx + 7);
                                 }
                             }
@@ -6690,7 +6766,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         while cand_idx < c_len {
                             let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
-                            if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
+                            if unsafe { *counts_ptr.add(r) } > 2 {
                                 unsafe {
                                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(cand_idx);
                                 }
@@ -6699,6 +6775,56 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     } else if can_buffer {
                         let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64_0 =
+                                unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let r_u64_1 = unsafe {
+                                (r_buf_ptr.add(cand_idx + 4) as *const u64).read_unaligned()
+                            };
+                            let r0 = (r_u64_0 & 0xFFFF) as usize;
+                            let r1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
+                            let r2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
+                            let r3 = (r_u64_0 >> 48) as usize;
+                            let r4 = (r_u64_1 & 0xFFFF) as usize;
+                            let r5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
+                            let r6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
+                            let r7 = (r_u64_1 >> 48) as usize;
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 {
+                                    let c0 = *set_ptr.add(cand_idx);
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 {
+                                    let c1 = *set_ptr.add(cand_idx + 1);
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 {
+                                    let c2 = *set_ptr.add(cand_idx + 2);
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 {
+                                    let c3 = *set_ptr.add(cand_idx + 3);
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                                if *counts_ptr.add(r4) > 2 {
+                                    let c4 = *set_ptr.add(cand_idx + 4);
+                                    *hashes_ptr.add(r4) ^= *zobrist_ptr.add(c4);
+                                }
+                                if *counts_ptr.add(r5) > 2 {
+                                    let c5 = *set_ptr.add(cand_idx + 5);
+                                    *hashes_ptr.add(r5) ^= *zobrist_ptr.add(c5);
+                                }
+                                if *counts_ptr.add(r6) > 2 {
+                                    let c6 = *set_ptr.add(cand_idx + 6);
+                                    *hashes_ptr.add(r6) ^= *zobrist_ptr.add(c6);
+                                }
+                                if *counts_ptr.add(r7) > 2 {
+                                    let c7 = *set_ptr.add(cand_idx + 7);
+                                    *hashes_ptr.add(r7) ^= *zobrist_ptr.add(c7);
+                                }
+                            }
+                            cand_idx += 8;
+                        }
                         while cand_idx + 3 < c_len {
                             let r_u64 =
                                 unsafe { (r_buf_ptr.add(cand_idx) as *const u64).read_unaligned() };
@@ -6707,19 +6833,19 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let r2 = ((r_u64 >> 32) & 0xFFFF) as usize;
                             let r3 = (r_u64 >> 48) as usize;
                             unsafe {
-                                if *counts_ptr.add(r0) > 2 && r0 != WIN {
+                                if *counts_ptr.add(r0) > 2 {
                                     let c0 = *set_ptr.add(cand_idx);
                                     *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
                                 }
-                                if *counts_ptr.add(r1) > 2 && r1 != WIN {
+                                if *counts_ptr.add(r1) > 2 {
                                     let c1 = *set_ptr.add(cand_idx + 1);
                                     *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
                                 }
-                                if *counts_ptr.add(r2) > 2 && r2 != WIN {
+                                if *counts_ptr.add(r2) > 2 {
                                     let c2 = *set_ptr.add(cand_idx + 2);
                                     *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
                                 }
-                                if *counts_ptr.add(r3) > 2 && r3 != WIN {
+                                if *counts_ptr.add(r3) > 2 {
                                     let c3 = *set_ptr.add(cand_idx + 3);
                                     *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
                                 }
@@ -6728,7 +6854,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         while cand_idx < c_len {
                             let r = unsafe { *r_buf_ptr.add(cand_idx) as usize };
-                            if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
+                            if unsafe { *counts_ptr.add(r) } > 2 {
                                 let c = unsafe { *set_ptr.add(cand_idx) };
                                 unsafe {
                                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
@@ -6738,6 +6864,51 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                     } else {
                         let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let c2 = unsafe { *set_ptr.add(cand_idx + 2) };
+                            let c3 = unsafe { *set_ptr.add(cand_idx + 3) };
+                            let c4 = unsafe { *set_ptr.add(cand_idx + 4) };
+                            let c5 = unsafe { *set_ptr.add(cand_idx + 5) };
+                            let c6 = unsafe { *set_ptr.add(cand_idx + 6) };
+                            let c7 = unsafe { *set_ptr.add(cand_idx + 7) };
+                            let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                            let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                            let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                            let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                            let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                            let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+                            unsafe {
+                                if *counts_ptr.add(r0) > 2 {
+                                    *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
+                                }
+                                if *counts_ptr.add(r1) > 2 {
+                                    *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
+                                }
+                                if *counts_ptr.add(r2) > 2 {
+                                    *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
+                                }
+                                if *counts_ptr.add(r3) > 2 {
+                                    *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
+                                }
+                                if *counts_ptr.add(r4) > 2 {
+                                    *hashes_ptr.add(r4) ^= *zobrist_ptr.add(c4);
+                                }
+                                if *counts_ptr.add(r5) > 2 {
+                                    *hashes_ptr.add(r5) ^= *zobrist_ptr.add(c5);
+                                }
+                                if *counts_ptr.add(r6) > 2 {
+                                    *hashes_ptr.add(r6) ^= *zobrist_ptr.add(c6);
+                                }
+                                if *counts_ptr.add(r7) > 2 {
+                                    *hashes_ptr.add(r7) ^= *zobrist_ptr.add(c7);
+                                }
+                            }
+                            cand_idx += 8;
+                        }
                         while cand_idx + 3 < c_len {
                             let c0 = unsafe { *set_ptr.add(cand_idx) };
                             let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
@@ -6748,16 +6919,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
                             let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
                             unsafe {
-                                if *counts_ptr.add(r0) > 2 && r0 != WIN {
+                                if *counts_ptr.add(r0) > 2 {
                                     *hashes_ptr.add(r0) ^= *zobrist_ptr.add(c0);
                                 }
-                                if *counts_ptr.add(r1) > 2 && r1 != WIN {
+                                if *counts_ptr.add(r1) > 2 {
                                     *hashes_ptr.add(r1) ^= *zobrist_ptr.add(c1);
                                 }
-                                if *counts_ptr.add(r2) > 2 && r2 != WIN {
+                                if *counts_ptr.add(r2) > 2 {
                                     *hashes_ptr.add(r2) ^= *zobrist_ptr.add(c2);
                                 }
-                                if *counts_ptr.add(r3) > 2 && r3 != WIN {
+                                if *counts_ptr.add(r3) > 2 {
                                     *hashes_ptr.add(r3) ^= *zobrist_ptr.add(c3);
                                 }
                             }
@@ -6766,7 +6937,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         while cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
-                            if unsafe { *counts_ptr.add(r) } > 2 && r != WIN {
+                            if unsafe { *counts_ptr.add(r) } > 2 {
                                 unsafe {
                                     *hashes_ptr.add(r) ^= *zobrist_ptr.add(c);
                                 }
