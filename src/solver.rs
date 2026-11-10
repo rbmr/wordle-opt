@@ -1579,35 +1579,136 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         unsafe {
             std::ptr::copy_nonoverlapping(c_tab0, dummy_ptr, R);
         }
-        for c_idx in 1..c_len {
-            let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
-            let mut r = 0;
-            while r + 15 < R {
-                unsafe {
-                    *dummy_ptr.add(r) ^= *c_tab.add(r);
-                    *dummy_ptr.add(r + 1) ^= *c_tab.add(r + 1);
-                    *dummy_ptr.add(r + 2) ^= *c_tab.add(r + 2);
-                    *dummy_ptr.add(r + 3) ^= *c_tab.add(r + 3);
-                    *dummy_ptr.add(r + 4) ^= *c_tab.add(r + 4);
-                    *dummy_ptr.add(r + 5) ^= *c_tab.add(r + 5);
-                    *dummy_ptr.add(r + 6) ^= *c_tab.add(r + 6);
-                    *dummy_ptr.add(r + 7) ^= *c_tab.add(r + 7);
-                    *dummy_ptr.add(r + 8) ^= *c_tab.add(r + 8);
-                    *dummy_ptr.add(r + 9) ^= *c_tab.add(r + 9);
-                    *dummy_ptr.add(r + 10) ^= *c_tab.add(r + 10);
-                    *dummy_ptr.add(r + 11) ^= *c_tab.add(r + 11);
-                    *dummy_ptr.add(r + 12) ^= *c_tab.add(r + 12);
-                    *dummy_ptr.add(r + 13) ^= *c_tab.add(r + 13);
-                    *dummy_ptr.add(r + 14) ^= *c_tab.add(r + 14);
-                    *dummy_ptr.add(r + 15) ^= *c_tab.add(r + 15);
+        #[inline(always)]
+        #[allow(dead_code)]
+        unsafe fn accumulate_dummy_projs_scalar(
+            dummy_ptr: *mut u64,
+            c_table_ptrs_ptr: *const *const u64,
+            c_len: usize,
+            len: usize,
+        ) {
+            for c_idx in 1..c_len {
+                let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                let mut r = 0;
+                while r + 15 < len {
+                    unsafe {
+                        *dummy_ptr.add(r) ^= *c_tab.add(r);
+                        *dummy_ptr.add(r + 1) ^= *c_tab.add(r + 1);
+                        *dummy_ptr.add(r + 2) ^= *c_tab.add(r + 2);
+                        *dummy_ptr.add(r + 3) ^= *c_tab.add(r + 3);
+                        *dummy_ptr.add(r + 4) ^= *c_tab.add(r + 4);
+                        *dummy_ptr.add(r + 5) ^= *c_tab.add(r + 5);
+                        *dummy_ptr.add(r + 6) ^= *c_tab.add(r + 6);
+                        *dummy_ptr.add(r + 7) ^= *c_tab.add(r + 7);
+                        *dummy_ptr.add(r + 8) ^= *c_tab.add(r + 8);
+                        *dummy_ptr.add(r + 9) ^= *c_tab.add(r + 9);
+                        *dummy_ptr.add(r + 10) ^= *c_tab.add(r + 10);
+                        *dummy_ptr.add(r + 11) ^= *c_tab.add(r + 11);
+                        *dummy_ptr.add(r + 12) ^= *c_tab.add(r + 12);
+                        *dummy_ptr.add(r + 13) ^= *c_tab.add(r + 13);
+                        *dummy_ptr.add(r + 14) ^= *c_tab.add(r + 14);
+                        *dummy_ptr.add(r + 15) ^= *c_tab.add(r + 15);
+                    }
+                    r += 16;
                 }
-                r += 16;
+                while r < len {
+                    unsafe {
+                        *dummy_ptr.add(r) ^= *c_tab.add(r);
+                    }
+                    r += 1;
+                }
             }
-            while r < R {
-                unsafe {
-                    *dummy_ptr.add(r) ^= *c_tab.add(r);
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            #[target_feature(enable = "avx2")]
+            unsafe fn accumulate_dummy_projs_avx2(
+                dummy_ptr: *mut u64,
+                c_table_ptrs_ptr: *const *const u64,
+                c_len: usize,
+                len: usize,
+            ) {
+                use std::arch::x86_64::*;
+                for c_idx in 1..c_len {
+                    let c_tab = unsafe { *c_table_ptrs_ptr.add(c_idx) };
+                    let mut r = 0;
+                    while r + 15 < len {
+                        unsafe {
+                            let d0 = _mm256_loadu_si256(dummy_ptr.add(r) as *const __m256i);
+                            let t0 = _mm256_loadu_si256(c_tab.add(r) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r) as *mut __m256i,
+                                _mm256_xor_si256(d0, t0),
+                            );
+
+                            let d1 = _mm256_loadu_si256(dummy_ptr.add(r + 4) as *const __m256i);
+                            let t1 = _mm256_loadu_si256(c_tab.add(r + 4) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r + 4) as *mut __m256i,
+                                _mm256_xor_si256(d1, t1),
+                            );
+
+                            let d2 = _mm256_loadu_si256(dummy_ptr.add(r + 8) as *const __m256i);
+                            let t2 = _mm256_loadu_si256(c_tab.add(r + 8) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r + 8) as *mut __m256i,
+                                _mm256_xor_si256(d2, t2),
+                            );
+
+                            let d3 = _mm256_loadu_si256(dummy_ptr.add(r + 12) as *const __m256i);
+                            let t3 = _mm256_loadu_si256(c_tab.add(r + 12) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r + 12) as *mut __m256i,
+                                _mm256_xor_si256(d3, t3),
+                            );
+                        }
+
+                        r += 16;
+                    }
+                    while r + 3 < len {
+                        unsafe {
+                            let d = _mm256_loadu_si256(dummy_ptr.add(r) as *const __m256i);
+                            let t = _mm256_loadu_si256(c_tab.add(r) as *const __m256i);
+                            _mm256_storeu_si256(
+                                dummy_ptr.add(r) as *mut __m256i,
+                                _mm256_xor_si256(d, t),
+                            );
+                        }
+                        r += 4;
+                    }
+                    while r < len {
+                        unsafe {
+                            *dummy_ptr.add(r) ^= *c_tab.add(r);
+                        }
+                        r += 1;
+                    }
                 }
-                r += 1;
+            }
+
+            #[cfg(target_feature = "avx2")]
+            {
+                unsafe {
+                    accumulate_dummy_projs_avx2(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+                }
+            }
+            #[cfg(not(target_feature = "avx2"))]
+            {
+                if is_x86_feature_detected!("avx2") {
+                    unsafe {
+                        accumulate_dummy_projs_avx2(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+                    }
+                } else {
+                    unsafe {
+                        accumulate_dummy_projs_scalar(dummy_ptr, c_table_ptrs_ptr, c_len, R);
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            unsafe {
+                accumulate_dummy_projs_scalar(dummy_ptr, c_table_ptrs_ptr, c_len, R);
             }
         }
 
