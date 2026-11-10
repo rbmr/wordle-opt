@@ -3836,6 +3836,105 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
                 e0.hash = h0;
                 e1.hash = h1;
+            } else if num_eval == 3 {
+                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
+                let r0 = e0.r;
+                let mut h0 = 0u64;
+                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
+                let r1 = e1.r;
+                let mut h1 = 0u64;
+                let e2 = unsafe { &mut *eval_entries_ptr.add(2) };
+                let r2 = e2.r;
+                let mut h2 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                e0.hash = h0;
+                e1.hash = h1;
+                e2.hash = h2;
+            } else if num_eval == 4 {
+                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
+                let r0 = e0.r;
+                let mut h0 = 0u64;
+                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
+                let r1 = e1.r;
+                let mut h1 = 0u64;
+                let e2 = unsafe { &mut *eval_entries_ptr.add(2) };
+                let r2 = e2.r;
+                let mut h2 = 0u64;
+                let e3 = unsafe { &mut *eval_entries_ptr.add(3) };
+                let r3 = e3.r;
+                let mut h3 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r3 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                e0.hash = h0;
+                e1.hash = h1;
+                e2.hash = h2;
+                e3.hash = h3;
+            } else if num_eval == 5 {
+                let e0 = unsafe { &mut *eval_entries_ptr.add(0) };
+                let r0 = e0.r;
+                let mut h0 = 0u64;
+                let e1 = unsafe { &mut *eval_entries_ptr.add(1) };
+                let r1 = e1.r;
+                let mut h1 = 0u64;
+                let e2 = unsafe { &mut *eval_entries_ptr.add(2) };
+                let r2 = e2.r;
+                let mut h2 = 0u64;
+                let e3 = unsafe { &mut *eval_entries_ptr.add(3) };
+                let r3 = e3.r;
+                let mut h3 = 0u64;
+                let e4 = unsafe { &mut *eval_entries_ptr.add(4) };
+                let r4 = e4.r;
+                let mut h4 = 0u64;
+                for cand_idx in 0..c_len {
+                    let r = unsafe { *r_buf_ptr.add(cand_idx) };
+                    if r == r0 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r1 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r2 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r3 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h3 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r == r4 {
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        h4 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                }
+                e0.hash = h0;
+                e1.hash = h1;
+                e2.hash = h2;
+                e3.hash = h3;
+                e4.hash = h4;
             } else {
                 for i in 0..num_eval {
                     let entry = unsafe { &mut *eval_entries_ptr.add(i) };
@@ -3878,7 +3977,73 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *eval_entries_ptr.add(1) = e1;
                     *eval_entries_ptr.add(2) = e2;
                 }
-            } else if num_eval >= 4 {
+            } else if num_eval == 4 {
+                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e2.count < e3.count {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.count < e2.count {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.count < e3.count {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
+                }
+            } else if num_eval == 5 {
+                let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                let mut e4 = unsafe { *eval_entries_ptr.add(4) };
+                if e0.count < e1.count {
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                if e3.count < e4.count {
+                    std::mem::swap(&mut e3, &mut e4);
+                }
+                if e2.count < e4.count {
+                    std::mem::swap(&mut e2, &mut e4);
+                }
+                if e2.count < e3.count {
+                    std::mem::swap(&mut e2, &mut e3);
+                }
+                if e0.count < e3.count {
+                    std::mem::swap(&mut e0, &mut e3);
+                }
+                if e1.count < e4.count {
+                    std::mem::swap(&mut e1, &mut e4);
+                }
+                if e0.count < e2.count {
+                    std::mem::swap(&mut e0, &mut e2);
+                }
+                if e1.count < e3.count {
+                    std::mem::swap(&mut e1, &mut e3);
+                }
+                if e1.count < e2.count {
+                    std::mem::swap(&mut e1, &mut e2);
+                }
+                unsafe {
+                    *eval_entries_ptr.add(0) = e0;
+                    *eval_entries_ptr.add(1) = e1;
+                    *eval_entries_ptr.add(2) = e2;
+                    *eval_entries_ptr.add(3) = e3;
+                    *eval_entries_ptr.add(4) = e4;
+                }
+            } else if num_eval > 5 {
                 for j in 1..num_eval {
                     let key = unsafe { *eval_entries_ptr.add(j) };
                     let mut k = j;
@@ -3900,10 +4065,30 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
 
             let mut small_offsets = [0u8; 5];
-            let mut current_off = 0u8;
-            for j in 0..num_eval {
-                small_offsets[j] = current_off;
-                current_off += unsafe { (*eval_entries_ptr.add(j)).count } as u8;
+            match num_eval {
+                1 => {}
+                2 => {
+                    small_offsets[1] = unsafe { (*eval_entries_ptr).count as u8 };
+                }
+                3 => {
+                    let c0 = unsafe { (*eval_entries_ptr).count as u8 };
+                    small_offsets[1] = c0;
+                    small_offsets[2] = c0 + unsafe { (*eval_entries_ptr.add(1)).count as u8 };
+                }
+                4 => {
+                    let c0 = unsafe { (*eval_entries_ptr).count as u8 };
+                    let c1 = c0 + unsafe { (*eval_entries_ptr.add(1)).count as u8 };
+                    small_offsets[1] = c0;
+                    small_offsets[2] = c1;
+                    small_offsets[3] = c1 + unsafe { (*eval_entries_ptr.add(2)).count as u8 };
+                }
+                _ => {
+                    let mut current_off = 0u8;
+                    for j in 0..num_eval {
+                        small_offsets[j] = current_off;
+                        current_off += unsafe { (*eval_entries_ptr.add(j)).count } as u8;
+                    }
+                }
             }
 
             let mut small_p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
@@ -7337,6 +7522,172 @@ mod solver_cache_tests {
                     assert_eq!(
                         tuples[i].lb, i as u32,
                         "Sorting network failed for len {}",
+                        n
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_eval_entries_sorting_networks() {
+        fn permute(arr: &mut [u16], l: usize, r: usize, results: &mut Vec<Vec<u16>>) {
+            if l == r {
+                results.push(arr.to_vec());
+            } else {
+                for i in l..=r {
+                    arr.swap(l, i);
+                    permute(arr, l + 1, r, results);
+                    arr.swap(l, i);
+                }
+            }
+        }
+
+        for n in 2..=5 {
+            let mut base: Vec<u16> = (0..n as u16).collect();
+            let mut perms = Vec::new();
+            permute(&mut base, 0, n - 1, &mut perms);
+            for p in perms {
+                let mut entries = [
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                    EvalEntry {
+                        hash: 0,
+                        used_val: 0,
+                        r: 0,
+                        count: 0,
+                        is_exact: false,
+                    },
+                ];
+                for i in 0..n {
+                    entries[i].count = p[i];
+                }
+                let eval_entries_ptr = entries.as_mut_ptr();
+                if n == 2 {
+                    let e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let e1 = unsafe { *eval_entries_ptr.add(1) };
+                    if e0.count < e1.count {
+                        unsafe {
+                            *eval_entries_ptr.add(0) = e1;
+                            *eval_entries_ptr.add(1) = e0;
+                        }
+                    }
+                } else if n == 3 {
+                    let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                    let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    if e1.count < e2.count {
+                        std::mem::swap(&mut e1, &mut e2);
+                    }
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                        *eval_entries_ptr.add(2) = e2;
+                    }
+                } else if n == 4 {
+                    let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                    let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                    let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    if e2.count < e3.count {
+                        std::mem::swap(&mut e2, &mut e3);
+                    }
+                    if e0.count < e2.count {
+                        std::mem::swap(&mut e0, &mut e2);
+                    }
+                    if e1.count < e3.count {
+                        std::mem::swap(&mut e1, &mut e3);
+                    }
+                    if e1.count < e2.count {
+                        std::mem::swap(&mut e1, &mut e2);
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                        *eval_entries_ptr.add(2) = e2;
+                        *eval_entries_ptr.add(3) = e3;
+                    }
+                } else if n == 5 {
+                    let mut e0 = unsafe { *eval_entries_ptr.add(0) };
+                    let mut e1 = unsafe { *eval_entries_ptr.add(1) };
+                    let mut e2 = unsafe { *eval_entries_ptr.add(2) };
+                    let mut e3 = unsafe { *eval_entries_ptr.add(3) };
+                    let mut e4 = unsafe { *eval_entries_ptr.add(4) };
+                    if e0.count < e1.count {
+                        std::mem::swap(&mut e0, &mut e1);
+                    }
+                    if e3.count < e4.count {
+                        std::mem::swap(&mut e3, &mut e4);
+                    }
+                    if e2.count < e4.count {
+                        std::mem::swap(&mut e2, &mut e4);
+                    }
+                    if e2.count < e3.count {
+                        std::mem::swap(&mut e2, &mut e3);
+                    }
+                    if e0.count < e3.count {
+                        std::mem::swap(&mut e0, &mut e3);
+                    }
+                    if e1.count < e4.count {
+                        std::mem::swap(&mut e1, &mut e4);
+                    }
+                    if e0.count < e2.count {
+                        std::mem::swap(&mut e0, &mut e2);
+                    }
+                    if e1.count < e3.count {
+                        std::mem::swap(&mut e1, &mut e3);
+                    }
+                    if e1.count < e2.count {
+                        std::mem::swap(&mut e1, &mut e2);
+                    }
+                    unsafe {
+                        *eval_entries_ptr.add(0) = e0;
+                        *eval_entries_ptr.add(1) = e1;
+                        *eval_entries_ptr.add(2) = e2;
+                        *eval_entries_ptr.add(3) = e3;
+                        *eval_entries_ptr.add(4) = e4;
+                    }
+                }
+                for i in 0..n {
+                    assert_eq!(
+                        entries[i].count,
+                        (n - 1 - i) as u16,
+                        "EvalEntry sorting network failed for len {}",
                         n
                     );
                 }
