@@ -1192,7 +1192,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `1184749` | pc01 | 2200 | 1 | optimal | 19.920s | 7477 | 2331 | 23638 | ~543MB | track bucket count and multiplicity-three responses incrementally in guess evaluation; build 19.920s; pick 19.8s; cpu 316.1s; busy cores 15.9; states 23,638 (down from 23,642); guesses 598,469; bounds pruned 1,957,278; equiv pruned 188,978,001; cache hits 2,426,845; validation OK |
 | 2026-11-10 | `1184749` | pc01 | 2340 | — | optimal | 23.355s (0.01h) | 8001 | 2478 | 26003 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-1184749); track bucket count and multiplicity-three responses incrementally in guess evaluation; build 23.355s; pick 23.1s; cpu 371.3s; busy cores 15.9 (root_guesses @ 15s: 7377); states 26,003; guesses 752,384; bounds pruned 2,086,509; equiv pruned 207,514,390; cache hits 3,489,549; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `1184749` | pc01 | 2340 | — | optimal --certify | 23.281s (0.01h) | 8001 | 2478 | 26194 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.281s (pick 23.2s, cpu 369.5s, busy cores 15.9); 1,328,019 solver facts; 590 gap refutations (7.257s); 633,861 claims (445,420 capacity, 188,441 expansion, 0 failures, 9,507,934 bytes); independent check verified optimal in 60.439s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 500 | 1 | optimal | 0.347s | 1453 | 517 | 100 | — | defer seen bitmask updates to first bucket observation in large partition guess evaluation; build 0.347s; cpu 5.1s; busy cores 14.8; states 100; guesses 8429; bounds pruned 8900; equiv pruned 281288; cache hits 57978; validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 1000 | 1 | optimal | 2.602s | 3124 | 1049 | 822 | — | defer seen bitmask updates to first bucket observation in large partition guess evaluation; pick 2.6s; cpu 41.1s; busy cores 15.8; states 822; guesses 15111; bounds pruned 49432; equiv pruned 5067918; cache hits 165651; validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 1600 | 1 | optimal | 8.155s | 5256 | 1681 | 3949 | — | defer seen bitmask updates to first bucket observation in large partition guess evaluation; pick 8.1s; cpu 127.8s; busy cores 15.7; states 3949; guesses 66238; bounds pruned 316224; equiv pruned 29512461; cache hits 353965; validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 2000 | 1 | optimal | 13.727s | 6723 | 2119 | 7773 | — | defer seen bitmask updates to first bucket observation in large partition guess evaluation; pick 13.6s; cpu 216.1s; busy cores 15.7; states 7773 (down from 7785); guesses 186194; bounds pruned 503121; equiv pruned 59644426; cache hits 838860; validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 2200 | 1 | optimal | 19.906s | 7477 | 2331 | 23623 | ~543MB | defer seen bitmask updates to first bucket observation in large partition guess evaluation; build 19.906s; pick 19.8s; cpu 316.0s; busy cores 15.9; states 23623 (down from 23638); guesses 599772; bounds pruned 1957139; equiv pruned 188835532; cache hits 2434193; validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 2340 | — | optimal | 23.336s (0.01h) | 8001 | 2478 | 26022 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-66de2d7); defer seen bitmask updates to first bucket observation in large partition guess evaluation; build 23.336s; pick 23.1s; cpu 370.9s; busy cores 15.9 (root_guesses @ 15s: 7373); states 26022; guesses 753539; bounds pruned 2088060; equiv pruned 207613264; cache hits 3497824; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `66de2d7` | pc01 | 2340 | — | optimal --certify | 23.261s (0.01h) | 8001 | 2478 | 26206 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.261s (pick 23.2s, cpu 369.3s, busy cores 15.9); 1,328,074 solver facts; 589 gap refutations (7.203s); 634,855 claims (445,844 capacity, 189,011 expansion, 0 failures, 9,522,844 bytes); independent check verified optimal in 73.437s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `66de2d7` rows evaluate deferring `seen` bitmask updates to bucket first-observation in `SpecializedSolver::min_guess_val_inner` for candidate sets $c\_len > 16$:
+  - In `src/solver.rs`:
+    - In `SpecializedSolver::min_guess_val_inner` for candidate sets with $c\_len > 16$:
+      - Deferred `*seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63)` into `if cnt == 1` across all three paths: `is_contiguous_root` (unrolled 8-way and tail), `can_buffer` (unrolled 8-way and tail), and general fallback (unrolled 8-way and tail).
+      - Completely eliminated unconditional `seen` bitmask updates and memory writes across all iterations where `cnt > 1`, saving millions of redundant memory writes and bit operations per solve while preserving exact `GuessCleanup::drop` and `has_win` semantics.
+  - Benchmarks on `pc01`:
+    - `N=500, seed=1`: **0.347s** (cpu 5.1s, states 100, guesses 8429, bounds pruned 8900, cost 1453).
+    - `N=1000, seed=1`: **2.602s** (cpu 41.1s, pick 2.6s, states 822, guesses 15111, bounds pruned 49432, cost 3124).
+    - `N=1600, seed=1`: **8.155s** (cpu 127.8s, pick 8.1s, states 3949, guesses 66238, bounds pruned 316224, cost 5256).
+    - `N=2000, seed=1`: **13.727s** (cpu 216.1s, pick 13.6s, states 7773 [down from 7785: -12 states], guesses 186194, bounds pruned 503121, cost 6723).
+    - `N=2200, seed=1`: **19.906s** (cpu 316.0s, pick 19.8s, states 23623 [down from 23638: -15 states], guesses 599772, bounds pruned 1957139, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-66de2d7`): **23.336s** (cpu 370.9s, pick 23.1s, states 26022, guesses 753539, bounds pruned 2088060, equiv pruned 207613264, cache hits 3497824, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+    - Full `N=2340` Certificate Generation + Independent Check: Solve in 23.261s (cpu 369.3s), 1,328,074 solver facts, 589 gap refutations in 7.203s, 634,855 claims assembled in 81.423s (0 failures, 9,522,844 bytes). Independent `check` verified all 3.93e11 response reads in 73.437s (`CERTIFICATE VALID: the tree is optimal`).
+  - Full Ignored Audit Suite on `pc01`:
+    - `full_scale`: passed in 128.82s
+    - `parallel_consistency`: passed in 101.76s
+    - `published_optima`: passed in 298.10s
+    - `tt_audit` (`--features tt-audit`): passed in 46.55s
 
 - The `1184749` rows evaluate tracking unique bucket counts and multiplicity-three responses incrementally during candidate loops in `SpecializedSolver::min_guess_val_inner`:
   - In `src/solver.rs`:
