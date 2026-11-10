@@ -3698,65 +3698,77 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         let g_ptr = unsafe { self.matrix.data_ptr::<Elem>().add(g_offset) };
 
         if c_len <= 16 {
-            #[derive(Clone, Copy)]
-            struct LocalCount {
-                r: u16,
-                count: u16,
-            }
-
             let set_ptr = set.as_ptr();
-
-            let mut local_counts = std::mem::MaybeUninit::<[LocalCount; 16]>::uninit();
-            let local_counts_ptr = local_counts.as_mut_ptr() as *mut LocalCount;
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
             let mut r_buf = std::mem::MaybeUninit::<[u16; 16]>::uninit();
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
-            let mut r_to_idx = std::mem::MaybeUninit::<[u8; R]>::uninit();
-            let r_to_idx_ptr = r_to_idx.as_mut_ptr() as *mut u8;
 
             let mut seen = [0u64; M];
-            let mut num_non_empty = 0usize;
-            let mut prev_idx = 0usize;
+            let mut seen2 = [0u64; M];
+            let mut has_size_ge_3 = false;
 
-            for cand_idx in 0..c_len {
+            let mut cand_idx = 0;
+            while cand_idx + 1 < c_len {
+                let c0 = unsafe { *set_ptr.add(cand_idx) };
+                let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                let r0 = unsafe { (*g_ptr.add(c0)).to_u16() };
+                let r1 = unsafe { (*g_ptr.add(c1)).to_u16() };
+                unsafe {
+                    *r_buf_ptr.add(cand_idx) = r0;
+                    *r_buf_ptr.add(cand_idx + 1) = r1;
+                }
+                let w0 = (r0 as usize) >> 6;
+                let b0 = 1u64 << (r0 & 63);
+                let word0 = unsafe { seen.get_unchecked_mut(w0) };
+                if (*word0 & b0) != 0 {
+                    let word2_0 = unsafe { seen2.get_unchecked_mut(w0) };
+                    if (*word2_0 & b0) != 0 {
+                        has_size_ge_3 = true;
+                    } else {
+                        *word2_0 |= b0;
+                    }
+                } else {
+                    *word0 |= b0;
+                }
+                let w1 = (r1 as usize) >> 6;
+                let b1 = 1u64 << (r1 & 63);
+                let word1 = unsafe { seen.get_unchecked_mut(w1) };
+                if (*word1 & b1) != 0 {
+                    let word2_1 = unsafe { seen2.get_unchecked_mut(w1) };
+                    if (*word2_1 & b1) != 0 {
+                        has_size_ge_3 = true;
+                    } else {
+                        *word2_1 |= b1;
+                    }
+                } else {
+                    *word1 |= b1;
+                }
+                cand_idx += 2;
+            }
+            if cand_idx < c_len {
                 let c = unsafe { *set_ptr.add(cand_idx) };
                 let r = unsafe { (*g_ptr.add(c)).to_u16() };
                 unsafe {
                     *r_buf_ptr.add(cand_idx) = r;
                 }
-                let word_idx = (r as usize) >> 6;
-                let bit = 1u64 << (r & 63);
-                let word = unsafe { seen.get_unchecked_mut(word_idx) };
-                if (*word & bit) == 0 {
-                    *word |= bit;
-                    prev_idx = num_non_empty;
-                    unsafe {
-                        if R <= 256 {
-                            *r_to_idx_ptr.add(r as usize) = num_non_empty as u8;
-                        }
-                        *local_counts_ptr.add(num_non_empty) = LocalCount { r, count: 1 };
-                    }
-                    num_non_empty += 1;
-                } else {
-                    let target_idx = if R <= 256 {
-                        unsafe { *r_to_idx_ptr.add(r as usize) as usize }
+                let w = (r as usize) >> 6;
+                let b = 1u64 << (r & 63);
+                let word = unsafe { seen.get_unchecked_mut(w) };
+                if (*word & b) != 0 {
+                    let word2 = unsafe { seen2.get_unchecked_mut(w) };
+                    if (*word2 & b) != 0 {
+                        has_size_ge_3 = true;
                     } else {
-                        let mut target_idx = prev_idx;
-                        if unsafe { (*local_counts_ptr.add(target_idx)).r } != r {
-                            for i in 0..num_non_empty {
-                                if unsafe { (*local_counts_ptr.add(i)).r } == r {
-                                    target_idx = i;
-                                    prev_idx = i;
-                                    break;
-                                }
-                            }
-                        }
-                        target_idx
-                    };
-                    unsafe {
-                        (*local_counts_ptr.add(target_idx)).count += 1;
+                        *word2 |= b;
                     }
+                } else {
+                    *word |= b;
                 }
+            }
+
+            let mut num_non_empty = 0usize;
+            for m in 0..M {
+                num_non_empty += unsafe { *seen.get_unchecked(m) }.count_ones() as usize;
             }
 
             if num_non_empty <= 1 {
@@ -3770,7 +3782,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.local_metrics.pruned_by_bounds += 1;
                 return cost;
             }
-            if c_len - num_non_empty <= 1 {
+            if !has_size_ge_3 {
                 return cost;
             }
 
@@ -3778,31 +3790,39 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut eval_entries = std::mem::MaybeUninit::<[EvalEntry; 5]>::uninit();
             let eval_entries_ptr = eval_entries.as_mut_ptr() as *mut EvalEntry;
 
-            for i in 0..num_non_empty {
-                let entry = unsafe { *local_counts_ptr.add(i) };
-                if entry.count > 2 {
-                    let p_len = entry.count as usize;
-                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                    cost += lb - (2 * p_len - 1) as u32;
-                    unsafe {
-                        *eval_entries_ptr.add(num_eval) = EvalEntry {
-                            hash: 0,
-                            used_val: 0,
-                            r: entry.r,
-                            count: entry.count,
-                            is_exact: false,
-                        };
+            for m in 0..M {
+                let mut word2 = unsafe { *seen2.get_unchecked(m) };
+                while word2 != 0 {
+                    let bit_idx = word2.trailing_zeros() as usize;
+                    let r = ((m << 6) | bit_idx) as u16;
+                    word2 &= word2 - 1;
+
+                    let mut count = 0u16;
+                    for cand_idx in 0..c_len {
+                        if unsafe { *r_buf_ptr.add(cand_idx) } == r {
+                            count += 1;
+                        }
                     }
-                    num_eval += 1;
+                    if count > 2 {
+                        let p_len = count as usize;
+                        let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                        cost += lb - (2 * p_len - 1) as u32;
+                        unsafe {
+                            *eval_entries_ptr.add(num_eval) = EvalEntry {
+                                hash: 0,
+                                used_val: 0,
+                                r,
+                                count,
+                                is_exact: false,
+                            };
+                        }
+                        num_eval += 1;
+                    }
                 }
             }
 
             if cost >= cutoff {
                 self.local_metrics.pruned_by_bounds += 1;
-                return cost;
-            }
-
-            if num_eval == 0 {
                 return cost;
             }
 
@@ -4043,25 +4063,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     *eval_entries_ptr.add(3) = e3;
                     *eval_entries_ptr.add(4) = e4;
                 }
-            } else if num_eval > 5 {
-                for j in 1..num_eval {
-                    let key = unsafe { *eval_entries_ptr.add(j) };
-                    let mut k = j;
-                    while k > 0 {
-                        let prev = unsafe { *eval_entries_ptr.add(k - 1) };
-                        if prev.count < key.count {
-                            unsafe {
-                                *eval_entries_ptr.add(k) = prev;
-                            }
-                            k -= 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    unsafe {
-                        *eval_entries_ptr.add(k) = key;
-                    }
-                }
             }
 
             let mut small_offsets = [0u8; 5];
@@ -4082,13 +4083,17 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     small_offsets[2] = c1;
                     small_offsets[3] = c1 + unsafe { (*eval_entries_ptr.add(2)).count as u8 };
                 }
-                _ => {
-                    let mut current_off = 0u8;
-                    for j in 0..num_eval {
-                        small_offsets[j] = current_off;
-                        current_off += unsafe { (*eval_entries_ptr.add(j)).count } as u8;
-                    }
+                5 => {
+                    let c0 = unsafe { (*eval_entries_ptr).count as u8 };
+                    let c1 = c0 + unsafe { (*eval_entries_ptr.add(1)).count as u8 };
+                    let c2 = c1 + unsafe { (*eval_entries_ptr.add(2)).count as u8 };
+                    let c3 = c2 + unsafe { (*eval_entries_ptr.add(3)).count as u8 };
+                    small_offsets[1] = c0;
+                    small_offsets[2] = c1;
+                    small_offsets[3] = c2;
+                    small_offsets[4] = c3;
                 }
+                _ => {}
             }
 
             let mut small_p = std::mem::MaybeUninit::<[usize; 16]>::uninit();
