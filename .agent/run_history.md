@@ -1083,7 +1083,33 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `20210f0` | pc01 | 2200 | 1 | optimal | 20.091s | 7477 | 2331 | 23666 | ~543MB | vectorize dummy projection accumulation in get_or_compute_active_guesses with AVX2; pick 20.0s; cpu 318.9s; busy cores 15.9; states 23,666; guesses 600,470; bounds pruned 1,963,473; equiv pruned 189,104,357; cache hits 2,437,344; validation OK |
 | 2026-11-10 | `20210f0` | pc01 | 2340 | — | optimal | 23.555s (0.01h) | 8001 | 2478 | 26020 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-20210f0); vectorize dummy projection accumulation in get_or_compute_active_guesses with AVX2; build 23.555s; pick 23.3s; cpu 374.3s; busy cores 15.9 (root_guesses @ 15s: 7205); states 26,020; guesses 750,849 (down from 752,279: -1,430 guesses); bounds pruned 2,086,272; equiv pruned 207,402,511; cache hits 3,483,318; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `20210f0` | pc01 | 2340 | — | optimal --certify | 23.310s (0.01h) | 8001 | 2478 | 26196 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.310s (pick 23.2s, cpu 369.9s, busy cores 15.9); 1,327,650 solver facts; 590 gap refutations (7.403s); 634,786 claims (446,126 capacity, 188,660 expansion, 0 failures, 9,521,809 bytes); independent check verified optimal in 67.678s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `b943122` | pc01 | 1000 | 1 | optimal | 2.604s | 3124 | 1049 | 818 | — | unroll Zobrist hashing for small evaluation bucket counts in solver min_guess_val; pick 2.6s; cpu 41.1s; busy cores 15.8; states 818 vs 822 [-4 states]; guesses 15,131; bounds pruned 49,908; equiv pruned 5,043,164; cache hits 165,757; validation OK |
+| 2026-11-10 | `b943122` | pc01 | 1600 | 1 | optimal | 8.184s | 5256 | 1681 | 3962 | — | unroll Zobrist hashing for small evaluation bucket counts in solver min_guess_val; pick 8.1s; cpu 128.3s; busy cores 15.7; states 3,962; guesses 66,360; bounds pruned 317,817; equiv pruned 29,544,247; cache hits 354,610; validation OK |
+| 2026-11-10 | `b943122` | pc01 | 2000 | 1 | optimal | 13.769s | 6723 | 2119 | 7771 | — | unroll Zobrist hashing for small evaluation bucket counts in solver min_guess_val; pick 13.7s; cpu 216.9s; busy cores 15.8; states 7,771 vs 7,805 [-34 states]; guesses 185,450 vs 185,881 [-431 guesses]; bounds pruned 502,301; equiv pruned 59,708,209; cache hits 837,346; validation OK |
+| 2026-11-10 | `b943122` | pc01 | 2200 | 1 | optimal | 20.084s | 7477 | 2331 | 23665 | ~543MB | unroll Zobrist hashing for small evaluation bucket counts in solver min_guess_val; pick 20.0s; cpu 318.7s; busy cores 15.9; states 23,665; guesses 590,411 vs 600,470 [-10,059 guesses]; bounds pruned 1,947,159; equiv pruned 188,933,189; cache hits 2,426,996; validation OK |
+| 2026-11-10 | `b943122` | pc01 | 2340 | — | optimal | 23.542s (0.01h) | 8001 | 2478 | 25920 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-b943122); unroll Zobrist hashing for small evaluation bucket counts in solver min_guess_val; build 23.542s (down from 23.555s); pick 23.3s; cpu 374.0s; busy cores 15.9 (root_guesses @ 15s: 7217); states 25,920 vs 26,020 [-100 states]; guesses 750,301 vs 750,849 [-548 guesses]; bounds pruned 2,075,717; equiv pruned 206,971,074; cache hits 3,479,235; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `b943122` | pc01 | 2340 | — | optimal --certify | 23.414s (0.01h) | 8001 | 2478 | 26208 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.414s (pick 23.3s, cpu 371.7s, busy cores 15.9); 1,329,302 solver facts; 589 gap refutations (7.310s); 635,634 claims (446,434 capacity, 189,200 expansion, 0 failures, 9,534,529 bytes); independent check verified optimal in 60.776s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `b943122` rows evaluate unrolling Zobrist hashing for small evaluation bucket counts in solver `min_guess_val`:
+  - In `src/solver.rs` (`_eval_hash_cleanup`):
+    - Extended explicit register accumulation of Zobrist hashes (`h0, h1, h2, h3`) to `num_eval == 3` and `num_eval == 4` branches for both contiguous root and general candidate set paths.
+    - Stored computed bucket hashes directly to `hashes_ptr` upon completion of candidate iteration, eliminating memory scatter writes and redundant `counts_ptr` lookups across thousands of guess evaluations.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.604s** (cpu 41.1s, pick 2.6s, states 818 vs 822 [-4 states], guesses 15,131, bounds pruned 49,908, cost 3124).
+    - `N=1600, seed=1`: **8.184s** (cpu 128.3s, pick 8.1s, states 3,962, guesses 66,360, bounds pruned 317,817, cost 5256).
+    - `N=2000, seed=1`: **13.769s** (cpu 216.9s, pick 13.7s, states 7,771 vs 7,805 [-34 states], guesses 185,450 vs 185,881 [-431 guesses], bounds pruned 502,301, cost 6723).
+    - `N=2200, seed=1`: **20.084s** (cpu 318.7s, pick 20.0s, states 23,665, guesses 590,411 vs 600,470 [-10,059 guesses], bounds pruned 1,947,159, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-b943122`): **23.542s** (cpu 374.0s, pick 23.3s, states 25,920 vs 26,020 [-100 states], guesses 750,301 vs 750,849 [-548 guesses], bounds pruned 2,075,717, equiv pruned 206,971,074, cache hits 3,479,235, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 125.07s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.66s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 300.90s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 45.12s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 635,634 claims with 0 failures in 23.414s (cpu 371.7s), and independent `check` verified `3.93e11` response reads in 60.776s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `20210f0` rows evaluate vectorizing the dummy projection accumulation loop in `get_or_compute_active_guesses` with AVX2:
   - In `src/solver.rs` (`get_or_compute_active_guesses`):
