@@ -2481,20 +2481,52 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     }
                     continue;
                 }
-                for i in 0..cand_idx {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                let mut i = 0;
+                while i + 3 < cand_idx {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
                     unsafe {
-                        let cnt_ptr = counts_ptr.add(r);
-                        let cnt = *cnt_ptr;
-                        if cnt == 0 {
-                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        let cnt_ptr0 = counts_ptr.add(r0);
+                        let cnt0 = *cnt_ptr0;
+                        if cnt0 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
                             num_non_empty += 1;
                         }
-                        *cnt_ptr = cnt + 1;
+                        *cnt_ptr0 = cnt0 + 1;
+
+                        let cnt_ptr1 = counts_ptr.add(r1);
+                        let cnt1 = *cnt_ptr1;
+                        if cnt1 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr1 = cnt1 + 1;
+
+                        let cnt_ptr2 = counts_ptr.add(r2);
+                        let cnt2 = *cnt_ptr2;
+                        if cnt2 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr2 = cnt2 + 1;
+
+                        let cnt_ptr3 = counts_ptr.add(r3);
+                        let cnt3 = *cnt_ptr3;
+                        if cnt3 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr3 = cnt3 + 1;
                     }
+                    i += 4;
                 }
-                for i in (cand_idx + 1)..c_len {
+                while i < cand_idx {
                     let c = unsafe { *set_ptr.add(i) };
                     let r = unsafe { (*g_ptr.add(c)).to_usize() };
                     unsafe {
@@ -2506,6 +2538,66 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         *cnt_ptr = cnt + 1;
                     }
+                    i += 1;
+                }
+                let mut i = cand_idx + 1;
+                while i + 3 < c_len {
+                    let c0 = unsafe { *set_ptr.add(i) };
+                    let c1 = unsafe { *set_ptr.add(i + 1) };
+                    let c2 = unsafe { *set_ptr.add(i + 2) };
+                    let c3 = unsafe { *set_ptr.add(i + 3) };
+                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                    unsafe {
+                        let cnt_ptr0 = counts_ptr.add(r0);
+                        let cnt0 = *cnt_ptr0;
+                        if cnt0 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr0 = cnt0 + 1;
+
+                        let cnt_ptr1 = counts_ptr.add(r1);
+                        let cnt1 = *cnt_ptr1;
+                        if cnt1 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr1 = cnt1 + 1;
+
+                        let cnt_ptr2 = counts_ptr.add(r2);
+                        let cnt2 = *cnt_ptr2;
+                        if cnt2 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr2 = cnt2 + 1;
+
+                        let cnt_ptr3 = counts_ptr.add(r3);
+                        let cnt3 = *cnt_ptr3;
+                        if cnt3 == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr3 = cnt3 + 1;
+                    }
+                    i += 4;
+                }
+                while i < c_len {
+                    let c = unsafe { *set_ptr.add(i) };
+                    let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                    unsafe {
+                        let cnt_ptr = counts_ptr.add(r);
+                        let cnt = *cnt_ptr;
+                        if cnt == 0 {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                            num_non_empty += 1;
+                        }
+                        *cnt_ptr = cnt + 1;
+                    }
+                    i += 1;
                 }
             } else {
                 let mut aborted = false;
@@ -2940,7 +3032,52 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                 }
                                 continue;
                             }
-                            for c_idx in 0..c_len {
+                            let mut c_idx = 0;
+                            while c_idx + 3 < c_len {
+                                let c_base0 = unsafe { *c_ptrs_ptr.add(c_idx) };
+                                let c_base1 = unsafe { *c_ptrs_ptr.add(c_idx + 1) };
+                                let c_base2 = unsafe { *c_ptrs_ptr.add(c_idx + 2) };
+                                let c_base3 = unsafe { *c_ptrs_ptr.add(c_idx + 3) };
+                                let r0 = unsafe { (*c_base0.add(g)).to_usize() };
+                                let r1 = unsafe { (*c_base1.add(g)).to_usize() };
+                                let r2 = unsafe { (*c_base2.add(g)).to_usize() };
+                                let r3 = unsafe { (*c_base3.add(g)).to_usize() };
+                                unsafe {
+                                    let cnt_ptr0 = counts_ptr.add(r0);
+                                    let cnt0 = *cnt_ptr0;
+                                    if cnt0 == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r0 as u16;
+                                        num_non_empty += 1;
+                                    }
+                                    *cnt_ptr0 = cnt0 + 1;
+
+                                    let cnt_ptr1 = counts_ptr.add(r1);
+                                    let cnt1 = *cnt_ptr1;
+                                    if cnt1 == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r1 as u16;
+                                        num_non_empty += 1;
+                                    }
+                                    *cnt_ptr1 = cnt1 + 1;
+
+                                    let cnt_ptr2 = counts_ptr.add(r2);
+                                    let cnt2 = *cnt_ptr2;
+                                    if cnt2 == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r2 as u16;
+                                        num_non_empty += 1;
+                                    }
+                                    *cnt_ptr2 = cnt2 + 1;
+
+                                    let cnt_ptr3 = counts_ptr.add(r3);
+                                    let cnt3 = *cnt_ptr3;
+                                    if cnt3 == 0 {
+                                        *non_empty_indices_ptr.add(num_non_empty) = r3 as u16;
+                                        num_non_empty += 1;
+                                    }
+                                    *cnt_ptr3 = cnt3 + 1;
+                                }
+                                c_idx += 4;
+                            }
+                            while c_idx < c_len {
                                 let c_base = unsafe { *c_ptrs_ptr.add(c_idx) };
                                 let r = unsafe { (*c_base.add(g)).to_usize() };
                                 unsafe {
@@ -2952,6 +3089,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     }
                                     *cnt_ptr = cnt + 1;
                                 }
+                                c_idx += 1;
                             }
                         } else {
                             let mut aborted = false;
@@ -4578,7 +4716,37 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             cand_idx += 1;
                         }
                     } else {
-                        for cand_idx in 0..c_len {
+                        let mut cand_idx = 0;
+                        while cand_idx + 1 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            cand_idx += 2;
+                        }
+                        if cand_idx < c_len {
                             let c = unsafe { *set_ptr.add(cand_idx) };
                             let r = unsafe { (*g_ptr.add(c)).to_usize() };
                             if r == r0 {
@@ -4600,6 +4768,226 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         *hashes_ptr.add(r2) = h2;
                         *hashes_ptr.add(r3) = h3;
                         *hashes_ptr.add(r4) = h4;
+                    }
+                } else if num_eval == 6 {
+                    let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                    let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                    let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                    let r3 = (!unsafe { *eval_entries_ptr.add(3) } & 0xFFFF) as usize;
+                    let r4 = (!unsafe { *eval_entries_ptr.add(4) } & 0xFFFF) as usize;
+                    let r5 = (!unsafe { *eval_entries_ptr.add(5) } & 0xFFFF) as usize;
+                    let mut h0 = 0u64;
+                    let mut h1 = 0u64;
+                    let mut h2 = 0u64;
+                    let mut h3 = 0u64;
+                    let mut h4 = 0u64;
+                    let mut h5 = 0u64;
+                    if is_contiguous_root {
+                        let g_u8_ptr = g_ptr as *const u8;
+                        let mut cand_idx = 0;
+                        while cand_idx + 7 < c_len {
+                            let r_u64 =
+                                unsafe { (g_u8_ptr.add(cand_idx) as *const u64).read_unaligned() };
+                            let b0 = (r_u64 & 0xFF) as usize;
+                            let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                            let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                            let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                            let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                            let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                            let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                            let b7 = (r_u64 >> 56) as usize;
+
+                            if b0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if b0 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+
+                            if b1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            } else if b1 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 1) };
+                            }
+
+                            if b2 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            } else if b2 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 2) };
+                            }
+
+                            if b3 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            } else if b3 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 3) };
+                            }
+
+                            if b4 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            } else if b4 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 4) };
+                            }
+
+                            if b5 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            } else if b5 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 5) };
+                            }
+
+                            if b6 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            } else if b6 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 6) };
+                            }
+
+                            if b7 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            } else if b7 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx + 7) };
+                            }
+
+                            cand_idx += 8;
+                        }
+                        while cand_idx < c_len {
+                            let r = unsafe { *g_u8_ptr.add(cand_idx) as usize };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            } else if r == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(cand_idx) };
+                            }
+                            cand_idx += 1;
+                        }
+                    } else {
+                        let mut cand_idx = 0;
+                        while cand_idx + 1 < c_len {
+                            let c0 = unsafe { *set_ptr.add(cand_idx) };
+                            let c1 = unsafe { *set_ptr.add(cand_idx + 1) };
+                            let r_0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                            let r_1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                            if r_0 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c0) };
+                            } else if r_0 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(c0) };
+                            }
+                            if r_1 == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c1) };
+                            } else if r_1 == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(c1) };
+                            }
+                            cand_idx += 2;
+                        }
+                        if cand_idx < c_len {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            let r = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if r == r0 {
+                                h0 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r1 {
+                                h1 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r2 {
+                                h2 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r3 {
+                                h3 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r4 {
+                                h4 ^= unsafe { *zobrist_ptr.add(c) };
+                            } else if r == r5 {
+                                h5 ^= unsafe { *zobrist_ptr.add(c) };
+                            }
+                        }
+                    }
+                    unsafe {
+                        *hashes_ptr.add(r0) = h0;
+                        *hashes_ptr.add(r1) = h1;
+                        *hashes_ptr.add(r2) = h2;
+                        *hashes_ptr.add(r3) = h3;
+                        *hashes_ptr.add(r4) = h4;
+                        *hashes_ptr.add(r5) = h5;
                     }
                 } else {
                     if is_contiguous_root {
