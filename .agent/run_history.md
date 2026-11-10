@@ -1035,7 +1035,35 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-10 | `90eef64` | pc01 | 2200 | 1 | optimal | 20.111s | 7477 | 2331 | 23652 | ~544MB | vectorize fallback small bucket candidate response collision check with SSE2; pick 20.0s; cpu 319.2s; busy cores 15.9; states 23,652; guesses 598,705; bounds pruned 1,961,252; equiv pruned 188,963,119; cache hits 2,434,815; validation OK |
 | 2026-11-10 | `90eef64` | pc01 | 2340 | — | optimal | 23.622s (0.01h) | 8001 | 2478 | 26044 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-90eef64); vectorize fallback small bucket candidate response collision check with SSE2; build 23.622s; pick 23.4s; cpu 374.4s; busy cores 15.9 (root_guesses @ 15s: 7233); states 26,044; guesses 751,029; bounds pruned 2,091,333; equiv pruned 207,453,578; cache hits 3,492,247; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-10 | `90eef64` | pc01 | 2340 | — | optimal --certify | 23.418s (0.01h) | 8001 | 2478 | 26217 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.418s (pick 23.3s, cpu 371.7s, busy cores 15.9); 1,326,621 solver facts; 589 gap refutations (7.369s); 628,174 claims (441,937 capacity, 186,237 expansion, 0 failures, 9,422,629 bytes); independent check verified optimal in 57.781s (3.91e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
+| 2026-11-10 | `0c2b116` | pc01 | 1000 | 1 | optimal | 2.601s | 3124 | 1049 | 822 | — | vectorize candidate branching factor calculation for small subsets with SSE2; pick 2.6s; cpu 41.1s; busy cores 15.8; states 822; guesses 15,087; bounds pruned 49,635; equiv pruned 5,057,008; cache hits 165,675; validation OK |
+| 2026-11-10 | `0c2b116` | pc01 | 1600 | 1 | optimal | 8.197s | 5256 | 1681 | 3951 | — | vectorize candidate branching factor calculation for small subsets with SSE2; pick 8.1s; cpu 128.5s; busy cores 15.7; states 3,951; guesses 66,266; bounds pruned 315,466; equiv pruned 29,496,981; cache hits 354,173; validation OK |
+| 2026-11-10 | `0c2b116` | pc01 | 2000 | 1 | optimal | 13.755s | 6723 | 2119 | 7742 | — | vectorize candidate branching factor calculation for small subsets with SSE2; new all-time record N=2000 (13.755s vs 13.763s); pick 13.7s; cpu 216.8s; busy cores 15.8; states 7,742 vs 7,788 [-46 states]; guesses 186,045 vs 186,121 [-76 guesses]; bounds pruned 504,007; equiv pruned 59,479,076; cache hits 838,055; validation OK |
+| 2026-11-10 | `0c2b116` | pc01 | 2200 | 1 | optimal | 20.022s | 7477 | 2331 | 23644 | ~543MB | vectorize candidate branching factor calculation for small subsets with SSE2; new all-time record N=2200 (20.022s vs 20.071s, -49ms); pick 19.9s; cpu 317.8s; busy cores 15.9; states 23,644 vs 23,652; guesses 589,658 vs 598,705 [-9,047 guesses]; bounds pruned 1,946,656; equiv pruned 188,986,885; cache hits 2,424,847; validation OK |
+| 2026-11-10 | `0c2b116` | pc01 | 2340 | — | optimal | 23.562s (0.01h) | 8001 | 2478 | 26071 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-10-0c2b116); vectorize candidate branching factor calculation for small subsets with SSE2; build 23.562s; pick 23.3s; cpu 373.8s; busy cores 15.9 (root_guesses @ 15s: 7225); states 26,071; guesses 752,427; bounds pruned 2,088,208; equiv pruned 207,854,767; cache hits 3,486,242; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-10 | `0c2b116` | pc01 | 2340 | — | optimal --certify | 23.425s (0.01h) | 8001 | 2478 | 26178 | ~2.54GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.425s (pick 23.3s, cpu 371.7s, busy cores 15.9); 1,329,020 solver facts; 590 gap refutations (7.390s); 634,575 claims (445,557 capacity, 189,018 expansion, 0 failures, 9,518,644 bytes); independent check verified optimal in 59.661s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal); validation OK |
 ## Notes
+
+- The `0c2b116` rows evaluate vectorizing candidate branching factor calculation for small subsets with SSE2:
+  - In `src/heuristic.rs` (`compute_candidate_branching_factor_with_target`):
+    - When `matrix.num_responses <= 256` and `candidates.len() <= 16`, bypassed zeroing the 128-byte array (`[0u64; 16]`) on every candidate evaluation.
+    - Used a 16-byte SSE2 comparison buffer (`[0u8; 16]`) loaded via `_mm_loadu_si128` with byte-equality matching via `_mm_cmpeq_epi8` and mask extraction via `_mm_movemask_epi8`.
+    - Added inner-loop candidate pruning: if `seen_len + (n - j) <= max_k`, the current candidate cannot possibly exceed `max_k`, immediately breaking out of the inner loop without evaluating remaining candidates.
+    - Added unit test `test_candidate_branching_factor_sse2_exactness` verifying exact equivalence against the reference bitmask algorithm across randomized candidate subsets.
+  - Benchmarks on `pc01`:
+    - `N=1000, seed=1`: **2.601s** (cpu 41.1s, pick 2.6s, states 822, guesses 15,087, bounds pruned 49,635, cost 3124).
+    - `N=1600, seed=1`: **8.197s** (cpu 128.5s, pick 8.1s, states 3,951, guesses 66,266, bounds pruned 315,466, cost 5256).
+    - `N=2000, seed=1`: **13.755s** (new all-time record! cpu 216.8s, pick 13.7s, states 7,742 vs 7,788 [-46 states], guesses 186,045 vs 186,121 [-76 guesses], bounds pruned 504,007, cost 6723).
+    - `N=2200, seed=1`: **20.022s** (new all-time record! cpu 317.8s, pick 19.9s, states 23,644 vs 23,652, guesses 589,658 vs 598,705 [-9,047 guesses], bounds pruned 1,946,656, cost 7477).
+    - Full `N=2340` (`run_full.sh` `2026-11-10-0c2b116`): **23.562s** (cpu 373.8s, pick 23.3s, states 26,071, guesses 752,427, bounds pruned 2,088,208, equiv pruned 207,854,767, cache hits 3,486,242, cost 8001, nodes 2478, golden tree sha256 `34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Correctness and Audits on `pc01`:
+    - All 69 unit tests and 22 integration tests passed.
+    - All 4 ignored test suites passed on `pc01`:
+      - `full_scale`: 124.70s (`test full_scale_current_solver_audit ... ok`)
+      - `parallel_consistency`: 101.78s (`test multi_threaded_solves_match_single_threaded_optimum ... ok`)
+      - `published_optima`: 300.98s (`test published_optima ... ok`, `test published_optimum_3158 ... ok`)
+      - `tt_audit` (`--features tt-audit`): 51.82s (`test every_table_entry_holds_for_its_set ... ok`)
+    - Full `N=2340` optimality certificate audit on `pc01`: `solve --certify` assembled 634,575 claims with 0 failures, and independent `check` verified `3.93e11` response reads in 59.661s (`CERTIFICATE VALID: the tree is optimal`).
+  - Validation: OK across all subsets and full run; tree byte-for-byte identical to golden.
 
 - The `90eef64` rows evaluate vectorizing the fallback small bucket candidate response collision check with SSE2 in the solver:
   - In `src/solver.rs`:
