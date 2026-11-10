@@ -3142,7 +3142,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             struct LocalCount {
                 r: u16,
                 count: u16,
-                hash: u64,
             }
 
             let set_ptr = set.as_ptr();
@@ -3175,11 +3174,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         if R <= 256 {
                             *r_to_idx_ptr.add(r as usize) = num_non_empty as u8;
                         }
-                        *local_counts_ptr.add(num_non_empty) = LocalCount {
-                            r,
-                            count: 1,
-                            hash: c as u64,
-                        };
+                        *local_counts_ptr.add(num_non_empty) = LocalCount { r, count: 1 };
                     }
                     num_non_empty += 1;
                 } else {
@@ -3198,19 +3193,8 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         }
                         target_idx
                     };
-                    let entry = unsafe { &mut *local_counts_ptr.add(target_idx) };
-                    let cnt = entry.count;
-                    entry.count = cnt + 1;
-                    if cnt == 1 {
-                        entry.hash |= (c as u64) << 32;
-                    } else if cnt == 2 {
-                        let c0 = (entry.hash & 0xFFFF_FFFF) as usize;
-                        let c1 = (entry.hash >> 32) as usize;
-                        entry.hash = unsafe {
-                            *zobrist_ptr.add(c0) ^ *zobrist_ptr.add(c1) ^ *zobrist_ptr.add(c)
-                        };
-                    } else {
-                        entry.hash ^= unsafe { *zobrist_ptr.add(c) };
+                    unsafe {
+                        (*local_counts_ptr.add(target_idx)).count += 1;
                     }
                 }
             }
@@ -3244,9 +3228,16 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         self.local_metrics.pruned_by_bounds += 1;
                         return cost;
                     }
+                    let mut hash = 0u64;
+                    for cand_idx in 0..c_len {
+                        if unsafe { *r_buf_ptr.add(cand_idx) } == entry.r {
+                            let c = unsafe { *set_ptr.add(cand_idx) };
+                            hash ^= unsafe { *zobrist_ptr.add(c) };
+                        }
+                    }
                     unsafe {
                         *eval_entries_ptr.add(num_eval) = EvalEntry {
-                            hash: entry.hash,
+                            hash,
                             used_val: 0,
                             r: entry.r,
                             count: entry.count,
