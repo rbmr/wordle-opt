@@ -2523,6 +2523,11 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
         }
     }
 
+    #[inline(always)]
+    fn mask_low_bits(n: usize) -> u64 {
+        if n >= 64 { !0u64 } else { (1u64 << n) - 1 }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn min_state_val_with_hash(
         &mut self,
@@ -5730,48 +5735,91 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 self.cache.prefetch(unsafe { *hashes_ptr.add(r1) });
             }
 
-            for i in 0..num_eval {
-                if i + 2 < num_eval {
-                    let next_e = unsafe { *eval_entries_ptr.add(i + 2) };
-                    let next_r = (!next_e & 0xFFFF) as usize;
-                    self.cache.prefetch(unsafe { *hashes_ptr.add(next_r) });
-                }
-                let entry = unsafe { *eval_entries_ptr.add(i) };
-                let p_len = (entry >> 16) as usize;
-                let r_idx = (!entry & 0xFFFF) as usize;
-                let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-                if let Some((cached_val, is_exact)) = self.cache.get(hash) {
-                    self.local_metrics.cache_hits += 1;
-                    let used_val = cached_val.max(cap_lb);
-                    unsafe {
-                        *p_lbs_ptr.add(i) = used_val;
+            if num_eval <= 64 {
+                for i in 0..num_eval {
+                    if i + 2 < num_eval {
+                        let next_e = unsafe { *eval_entries_ptr.add(i + 2) };
+                        let next_r = (!next_e & 0xFFFF) as usize;
+                        self.cache.prefetch(unsafe { *hashes_ptr.add(next_r) });
                     }
-                    let word_idx = i >> 6;
-                    let bit = 1u64 << (i & 63);
-                    if is_exact {
+                    let entry = unsafe { *eval_entries_ptr.add(i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+                    if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                        self.local_metrics.cache_hits += 1;
+                        let used_val = cached_val.max(cap_lb);
                         unsafe {
-                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                            *p_lbs_ptr.add(i) = used_val;
                         }
-                        num_exact += 1;
-                    }
-                    unsafe {
-                        *cached_mask.get_unchecked_mut(word_idx) |= bit;
-                    }
+                        let bit = 1u64 << i;
+                        if is_exact {
+                            exact_mask[0] |= bit;
+                            num_exact += 1;
+                        }
+                        cached_mask[0] |= bit;
 
-                    if used_val > cap_lb {
-                        cost += used_val - cap_lb;
-                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                        let cutoff =
-                            beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                        if cost >= cutoff {
-                            self.local_metrics.pruned_by_bounds += 1;
-                            return cost;
+                        if used_val > cap_lb {
+                            cost += used_val - cap_lb;
+                            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                            let cutoff = beta
+                                .min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                            if cost >= cutoff {
+                                self.local_metrics.pruned_by_bounds += 1;
+                                return cost;
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            *p_lbs_ptr.add(i) = cap_lb;
                         }
                     }
-                } else {
-                    unsafe {
-                        *p_lbs_ptr.add(i) = cap_lb;
+                }
+            } else {
+                for i in 0..num_eval {
+                    if i + 2 < num_eval {
+                        let next_e = unsafe { *eval_entries_ptr.add(i + 2) };
+                        let next_r = (!next_e & 0xFFFF) as usize;
+                        self.cache.prefetch(unsafe { *hashes_ptr.add(next_r) });
+                    }
+                    let entry = unsafe { *eval_entries_ptr.add(i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let cap_lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+                    if let Some((cached_val, is_exact)) = self.cache.get(hash) {
+                        self.local_metrics.cache_hits += 1;
+                        let used_val = cached_val.max(cap_lb);
+                        unsafe {
+                            *p_lbs_ptr.add(i) = used_val;
+                        }
+                        let word_idx = i >> 6;
+                        let bit = 1u64 << (i & 63);
+                        if is_exact {
+                            unsafe {
+                                *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                            }
+                            num_exact += 1;
+                        }
+                        unsafe {
+                            *cached_mask.get_unchecked_mut(word_idx) |= bit;
+                        }
+
+                        if used_val > cap_lb {
+                            cost += used_val - cap_lb;
+                            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                            let cutoff = beta
+                                .min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                            if cost >= cutoff {
+                                self.local_metrics.pruned_by_bounds += 1;
+                                return cost;
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            *p_lbs_ptr.add(i) = cap_lb;
+                        }
                     }
                 }
             }
@@ -5993,36 +6041,52 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
 
                 let mut can_prune_fast = false;
-                for i in 0..split_idx {
-                    let word_idx = i >> 6;
-                    let bit = 1u64 << (i & 63);
-                    if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                        continue;
-                    }
-                    let entry = unsafe { *eval_entries_ptr.add(i) };
-                    let p_len = (entry >> 16) as usize;
-                    let r_idx = (!entry & 0xFFFF) as usize;
-                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
-                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                macro_rules! eval_approx_tight_lb {
+                    ($i:expr) => {
+                        let entry = unsafe { *eval_entries_ptr.add($i) };
+                        let p_len = (entry >> 16) as usize;
+                        let r_idx = (!entry & 0xFFFF) as usize;
+                        let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                        let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                        let p =
+                            unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
 
-                    let k_upper =
-                        crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p);
-                    unsafe {
-                        *child_max_ks_ptr.add(i) = k_upper as u16;
-                    }
-                    let approx_tight_lb =
-                        crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k)
-                            .max(lb);
-                    unsafe {
-                        *p_lbs_ptr.add(i) = approx_tight_lb;
-                    }
-                    if approx_tight_lb > lb {
-                        fast_cost += approx_tight_lb - lb;
-                        if fast_cost >= cutoff {
-                            can_prune_fast = true;
-                            break;
+                        let k_upper =
+                            crate::heuristic::compute_branching_factor_upper_bound(self.matrix, p);
+                        unsafe {
+                            *child_max_ks_ptr.add($i) = k_upper as u16;
                         }
+                        let approx_tight_lb =
+                            crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k)
+                                .max(lb);
+                        unsafe {
+                            *p_lbs_ptr.add($i) = approx_tight_lb;
+                        }
+                        if approx_tight_lb > lb {
+                            fast_cost += approx_tight_lb - lb;
+                            if fast_cost >= cutoff {
+                                can_prune_fast = true;
+                                break;
+                            }
+                        }
+                    };
+                }
+
+                if num_eval <= 64 {
+                    let mut to_eval = (!cached_mask[0]) & Self::mask_low_bits(split_idx);
+                    while to_eval != 0 {
+                        let i = to_eval.trailing_zeros() as usize;
+                        to_eval &= to_eval - 1;
+                        eval_approx_tight_lb!(i);
+                    }
+                } else {
+                    for i in 0..split_idx {
+                        let word_idx = i >> 6;
+                        let bit = 1u64 << (i & 63);
+                        if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                            continue;
+                        }
+                        eval_approx_tight_lb!(i);
                     }
                 }
                 if can_prune_fast {
@@ -6032,47 +6096,65 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 }
             }
 
-            for i in split_idx..num_eval {
-                let word_idx = i >> 6;
-                let bit = 1u64 << (i & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let entry = unsafe { *eval_entries_ptr.add(i) };
-                let p_len = (entry >> 16) as usize;
-                let r_idx = (!entry & 0xFFFF) as usize;
-                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
-                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
+            macro_rules! eval_quick_bucket {
+                ($i:expr) => {
+                    let entry = unsafe { *eval_entries_ptr.add($i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
 
-                let (quick_val, is_exact) =
-                    quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, p);
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let used_val = quick_val.max(lb);
-                unsafe {
-                    *p_lbs_ptr.add(i) = used_val;
-                }
-                if is_exact {
+                    let (quick_val, is_exact) =
+                        quick_bucket_eval_elem::<Elem>(self.matrix, self.dict, p);
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let used_val = quick_val.max(lb);
                     unsafe {
-                        *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                        *p_lbs_ptr.add($i) = used_val;
                     }
-                    num_exact += 1;
-                }
-                self.cache.insert_set(hash, p, used_val, is_exact);
-                cert_record!(5, p, used_val, is_exact);
+                    if is_exact {
+                        let word_idx = $i >> 6;
+                        let bit = 1u64 << ($i & 63);
+                        unsafe {
+                            *exact_mask.get_unchecked_mut(word_idx) |= bit;
+                        }
+                        num_exact += 1;
+                    }
+                    self.cache.insert_set(hash, p, used_val, is_exact);
+                    cert_record!(5, p, used_val, is_exact);
 
-                if used_val > lb {
-                    let delta = used_val - lb;
-                    cost += delta;
-                    fast_cost += delta;
-                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                    let cutoff =
-                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                    if fast_cost >= cutoff {
-                        self.local_metrics.pruned_by_bounds += 1;
-                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                        return fast_cost;
+                    if used_val > lb {
+                        let delta = used_val - lb;
+                        cost += delta;
+                        fast_cost += delta;
+                        let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                        let cutoff =
+                            beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                        if fast_cost >= cutoff {
+                            self.local_metrics.pruned_by_bounds += 1;
+                            self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                            return fast_cost;
+                        }
                     }
+                };
+            }
+
+            if num_eval <= 64 {
+                let range_mask = Self::mask_low_bits(num_eval) & !Self::mask_low_bits(split_idx);
+                let mut to_eval = (!cached_mask[0]) & range_mask;
+                while to_eval != 0 {
+                    let i = to_eval.trailing_zeros() as usize;
+                    to_eval &= to_eval - 1;
+                    eval_quick_bucket!(i);
+                }
+            } else {
+                for i in split_idx..num_eval {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    eval_quick_bucket!(i);
                 }
             }
 
@@ -6081,98 +6163,57 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 return cost;
             }
 
-            for i in 0..split_idx {
-                let word_idx = i >> 6;
-                let bit = 1u64 << (i & 63);
-                if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                if fast_cost >= cutoff {
-                    self.local_metrics.pruned_by_bounds += 1;
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return fast_cost;
-                }
-
-                let entry = unsafe { *eval_entries_ptr.add(i) };
-                let p_len = (entry >> 16) as usize;
-                let r_idx = (!entry & 0xFFFF) as usize;
-                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
-                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-
-                let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
-                let approx_tight_lb = unsafe { *p_lbs_ptr.add(i) };
-                let approx_inc = approx_tight_lb - lb;
-
-                let target_k = crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
-                if target_k == 2 {
-                    unsafe {
-                        *p_lbs_ptr.add(i) = lb;
+            macro_rules! eval_candidate_k_bound {
+                ($i:expr) => {
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if fast_cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return fast_cost;
                     }
-                    self.cache.insert_set(hash, p, lb, false);
-                    cert_record!(6, p, lb, false);
-                } else {
-                    let k_upper = unsafe { *child_max_ks_ptr.add(i) as usize };
-                    let k_cand = crate::heuristic::compute_candidate_branching_factor_with_target(
-                        self.matrix,
-                        p,
-                        target_k.min(k_upper),
-                    );
-                    if k_cand >= target_k {
+
+                    let entry = unsafe { *eval_entries_ptr.add($i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+
+                    let lb = unsafe { *parent_cap_bounds_ptr.add(p_len) };
+                    let approx_tight_lb = unsafe { *p_lbs_ptr.add($i) };
+                    let approx_inc = approx_tight_lb - lb;
+
+                    let target_k =
+                        crate::heuristic::min_k_for_target_bound(p_len, parent_max_k, lb);
+                    if target_k == 2 {
                         unsafe {
-                            *p_lbs_ptr.add(i) = lb;
+                            *p_lbs_ptr.add($i) = lb;
                         }
                         self.cache.insert_set(hash, p, lb, false);
-                        cert_record!(7, p, lb, false);
-                    } else if k_cand >= k_upper {
-                        let k = k_upper;
-                        let tight_lb =
-                            crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
-                        let used_val = tight_lb.max(lb);
-                        unsafe {
-                            *p_lbs_ptr.add(i) = used_val;
-                        }
-                        self.cache.insert_set(hash, p, used_val, false);
-                        cert_record!(9, p, used_val, false);
-
-                        if used_val > lb {
-                            let actual_inc = used_val - lb;
-                            cost += actual_inc;
-                            fast_cost += actual_inc - approx_inc;
-                            let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                            let cutoff = beta
-                                .min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                            if fast_cost >= cutoff {
-                                self.local_metrics.pruned_by_bounds += 1;
-                                self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
-                                    sorted_set;
-                                return fast_cost;
-                            }
-                        }
+                        cert_record!(6, p, lb, false);
                     } else {
-                        let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
-                            self.matrix,
-                            p,
-                            k_cand,
-                            target_k.min(k_upper),
-                        );
-                        if k >= target_k {
+                        let k_upper = unsafe { *child_max_ks_ptr.add($i) as usize };
+                        let k_cand =
+                            crate::heuristic::compute_candidate_branching_factor_with_target(
+                                self.matrix,
+                                p,
+                                target_k.min(k_upper),
+                            );
+                        if k_cand >= target_k {
                             unsafe {
-                                *p_lbs_ptr.add(i) = lb;
+                                *p_lbs_ptr.add($i) = lb;
                             }
                             self.cache.insert_set(hash, p, lb, false);
-                            cert_record!(8, p, lb, false);
-                        } else {
-                            unsafe {
-                                *child_max_ks_ptr.add(i) = k as u16;
-                            }
+                            cert_record!(7, p, lb, false);
+                        } else if k_cand >= k_upper {
+                            let k = k_upper;
                             let tight_lb =
                                 crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
                             let used_val = tight_lb.max(lb);
                             unsafe {
-                                *p_lbs_ptr.add(i) = used_val;
+                                *p_lbs_ptr.add($i) = used_val;
                             }
                             self.cache.insert_set(hash, p, used_val, false);
                             cert_record!(9, p, used_val, false);
@@ -6192,8 +6233,70 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     return fast_cost;
                                 }
                             }
+                        } else {
+                            let k = crate::heuristic::compute_max_branching_factor_seq_with_target(
+                                self.matrix,
+                                p,
+                                k_cand,
+                                target_k.min(k_upper),
+                            );
+                            if k >= target_k {
+                                unsafe {
+                                    *p_lbs_ptr.add($i) = lb;
+                                }
+                                self.cache.insert_set(hash, p, lb, false);
+                                cert_record!(8, p, lb, false);
+                            } else {
+                                unsafe {
+                                    *child_max_ks_ptr.add($i) = k as u16;
+                                }
+                                let tight_lb =
+                                    crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                                let used_val = tight_lb.max(lb);
+                                unsafe {
+                                    *p_lbs_ptr.add($i) = used_val;
+                                }
+                                self.cache.insert_set(hash, p, used_val, false);
+                                cert_record!(9, p, used_val, false);
+
+                                if used_val > lb {
+                                    let actual_inc = used_val - lb;
+                                    cost += actual_inc;
+                                    fast_cost += actual_inc - approx_inc;
+                                    let current_global_beta =
+                                        self.global_beta.load(Ordering::Relaxed);
+                                    let cutoff = beta.min(
+                                        current_global_beta
+                                            .saturating_sub(self.current_cost_so_far),
+                                    );
+                                    if fast_cost >= cutoff {
+                                        self.local_metrics.pruned_by_bounds += 1;
+                                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] =
+                                            sorted_set;
+                                        return fast_cost;
+                                    }
+                                }
+                            }
                         }
                     }
+                };
+            }
+
+            if num_eval <= 64 {
+                let mut to_eval = (!cached_mask[0]) & Self::mask_low_bits(split_idx);
+                while to_eval != 0 {
+                    let i = to_eval.trailing_zeros() as usize;
+                    to_eval &= to_eval - 1;
+                    eval_candidate_k_bound!(i);
+                }
+            } else {
+                for i in 0..split_idx {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *cached_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    eval_candidate_k_bound!(i);
                 }
             }
 
@@ -6206,81 +6309,98 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             }
             let mut active_guesses_ptr: Option<*const [u64]> = None;
 
-            for i in 0..num_eval {
-                let word_idx = i >> 6;
-                let bit = 1u64 << (i & 63);
-                if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
-                    continue;
-                }
-                let entry = unsafe { *eval_entries_ptr.add(i) };
-                let p_len = (entry >> 16) as usize;
-                let r_idx = (!entry & 0xFFFF) as usize;
+            macro_rules! solve_child_bucket {
+                ($i:expr) => {
+                    let entry = unsafe { *eval_entries_ptr.add($i) };
+                    let p_len = (entry >> 16) as usize;
+                    let r_idx = (!entry & 0xFFFF) as usize;
 
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                if cost >= cutoff {
-                    self.local_metrics.pruned_by_bounds += 1;
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
-                }
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if cost >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return cost;
+                    }
 
-                let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
-                let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
+                    let start = (unsafe { *current_offsets_ptr.add(r_idx) as usize }) - p_len;
+                    let p = unsafe { std::slice::from_raw_parts(sorted_set_ptr.add(start), p_len) };
 
-                let actual_lb = unsafe { *p_lbs_ptr.add(i) };
-                let b = cost - actual_lb;
-                let new_beta = beta - b;
+                    let actual_lb = unsafe { *p_lbs_ptr.add($i) };
+                    let b = cost - actual_lb;
+                    let new_beta = beta - b;
 
-                let effective_beta =
-                    new_beta.min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
+                    let effective_beta = new_beta
+                        .min(current_global_beta.saturating_sub(self.current_cost_so_far + b));
 
-                if effective_beta <= actual_lb {
-                    self.local_metrics.pruned_by_bounds += 1;
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return cost;
-                }
+                    if effective_beta <= actual_lb {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return cost;
+                    }
 
-                let child_k = if i < split_idx {
-                    let stored_k = unsafe { *child_max_ks_ptr.add(i) as usize };
-                    if stored_k != 0 {
-                        stored_k.min(p_len).min(parent_max_k).max(2)
+                    let child_k = if $i < split_idx {
+                        let stored_k = unsafe { *child_max_ks_ptr.add($i) as usize };
+                        if stored_k != 0 {
+                            stored_k.min(p_len).min(parent_max_k).max(2)
+                        } else {
+                            p_len.min(parent_max_k).max(2)
+                        }
                     } else {
                         p_len.min(parent_max_k).max(2)
-                    }
-                } else {
-                    p_len.min(parent_max_k).max(2)
-                };
+                    };
 
-                let hash = unsafe { *hashes_ptr.add(r_idx) };
-                let known_quick = if i >= split_idx { actual_lb } else { 0 };
-                let active_ptr = match active_guesses_ptr {
-                    Some(p) => p,
-                    None => {
-                        let p = self.get_or_compute_active_guesses(set, depth, equiv_state);
-                        active_guesses_ptr = Some(p);
-                        p
+                    let hash = unsafe { *hashes_ptr.add(r_idx) };
+                    let known_quick = if $i >= split_idx { actual_lb } else { 0 };
+                    let active_ptr = match active_guesses_ptr {
+                        Some(p) => p,
+                        None => {
+                            let p = self.get_or_compute_active_guesses(set, depth, equiv_state);
+                            active_guesses_ptr = Some(p);
+                            p
+                        }
+                    };
+                    let active_guesses_slice = unsafe { &*active_ptr };
+                    self.current_cost_so_far += b;
+                    let val = self.min_state_val_with_hash(
+                        p,
+                        hash,
+                        active_guesses_slice,
+                        effective_beta,
+                        depth + 1,
+                        child_k,
+                        known_quick,
+                    );
+                    self.current_cost_so_far -= b;
+                    let current_global_beta = self.global_beta.load(Ordering::Relaxed);
+                    let cutoff =
+                        beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
+                    if b + val >= cutoff {
+                        self.local_metrics.pruned_by_bounds += 1;
+                        self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
+                        return b + val;
                     }
+                    cost = b + val;
                 };
-                let active_guesses_slice = unsafe { &*active_ptr };
-                self.current_cost_so_far += b;
-                let val = self.min_state_val_with_hash(
-                    p,
-                    hash,
-                    active_guesses_slice,
-                    effective_beta,
-                    depth + 1,
-                    child_k,
-                    known_quick,
-                );
-                self.current_cost_so_far -= b;
-                let current_global_beta = self.global_beta.load(Ordering::Relaxed);
-                let cutoff = beta.min(current_global_beta.saturating_sub(self.current_cost_so_far));
-                if b + val >= cutoff {
-                    self.local_metrics.pruned_by_bounds += 1;
-                    self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
-                    return b + val;
+            }
+
+            if num_eval <= 64 {
+                let mut to_solve = (!exact_mask[0]) & Self::mask_low_bits(num_eval);
+                while to_solve != 0 {
+                    let i = to_solve.trailing_zeros() as usize;
+                    to_solve &= to_solve - 1;
+                    solve_child_bucket!(i);
                 }
-                cost = b + val;
+            } else {
+                for i in 0..num_eval {
+                    let word_idx = i >> 6;
+                    let bit = 1u64 << (i & 63);
+                    if (unsafe { *exact_mask.get_unchecked(word_idx) } & bit) != 0 {
+                        continue;
+                    }
+                    solve_child_bucket!(i);
+                }
             }
 
             self.scratch.as_mut().unwrap().scratch_sorted_sets[depth] = sorted_set;
