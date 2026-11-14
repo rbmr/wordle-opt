@@ -4756,7 +4756,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut seen = [0u64; M];
             let mut seen_ge_3 = [0u64; M];
-            let mut has_size_ge_3 = false;
 
             struct GuessCleanup<const M: usize> {
                 counts_ptr: *mut u16,
@@ -4796,17 +4795,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut r_buf = std::mem::MaybeUninit::<[u16; 256]>::uninit();
             let r_buf_ptr = r_buf.as_mut_ptr() as *mut u16;
             let can_buffer = c_len <= 256 && !is_contiguous_root;
-            let mut total_buckets = 0u32;
             macro_rules! count_resp {
                 ($r:expr) => {
                     let r = $r;
                     let cnt = *counts_ptr.add(r) + 1;
                     *counts_ptr.add(r) = cnt;
                     if cnt == 1 {
-                        total_buckets += 1;
                         *seen.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                     } else if cnt == 3 {
-                        has_size_ge_3 = true;
                         *seen_ge_3.get_unchecked_mut(r >> 6) |= 1u64 << (r & 63);
                     }
                 };
@@ -4947,6 +4943,13 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                     i += 1;
                 }
             }
+            let total_buckets = {
+                let mut tb = 0u32;
+                for m in 0..M {
+                    tb += unsafe { *seen.get_unchecked(m) }.count_ones();
+                }
+                tb
+            };
             if total_buckets <= 1 {
                 return beta;
             }
@@ -4959,6 +4962,14 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             if cost >= cutoff {
                 self.local_metrics.pruned_by_bounds += 1;
                 return cost;
+            }
+
+            let mut has_size_ge_3 = false;
+            for m in 0..M {
+                if unsafe { *seen_ge_3.get_unchecked(m) } != 0 {
+                    has_size_ge_3 = true;
+                    break;
+                }
             }
             if !has_size_ge_3 {
                 return cost;

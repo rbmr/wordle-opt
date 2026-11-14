@@ -3,8 +3,10 @@
 // Generates small, self-contained readable policy trees for word lengths other
 // than 5, to exercise the viewer's length-agnostic rendering.
 //
-// The Rust engine solves 5-letter Wordle (`core::Word` is `[u8; 5]`), so these
-// are produced here with a simple greedy "min remaining" policy instead. Each
+// The Rust engine supports arbitrary word lengths from 1 to 10 directly
+// via `wordle-opt solve --guesses <file> --candidates <file>`. This script
+// provides a lightweight, standalone JavaScript alternative producing greedy
+// "min remaining" policy trees for sample synthetic lists. Each
 // output is a valid readable tree: every node's edges are exactly the responses
 // possible for its remaining candidates, leaves are wins, and the dictionary
 // hash is computed with the same FNV-1a encoding the Rust side uses.
