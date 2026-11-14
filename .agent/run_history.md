@@ -1223,7 +1223,30 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-14 | `30315f3` | pc01 | 2200 | 1 | optimal | 19.903s | 7477 | 2331 | 23601 | ~543MB | word length generalization; pick 19.8s; cpu 315.6s; busy cores 15.9 (root_guesses @ 15s: 9589); states 23601; guesses 590445; bounds pruned 1943562; equiv pruned 188596777; cache hits 2430071; validation OK |
 | 2026-11-14 | `30315f3` | pc01 | 2340 | — | optimal | 23.284s (0.01h) | 8001 | 2478 | 26000 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-14-30315f3); word length generalization; pick 23.0s; cpu 370.0s; busy cores 15.9 (root_guesses @ 15s: 7417); states 26000; guesses 751308; bounds pruned 2093936; equiv pruned 207652939; cache hits 3479443; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-14 | `30315f3` | pc01 | 2340 | — | optimal --certify | 23.363s (0.01h) | 8001 | 2478 | 26019 | ~2.60GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.363s (pick 23.1s, cpu 370.9s, busy cores 15.9); 1,302,824 solver facts; 589 gap refutations (7.487s); 634,663 claims (445,855 capacity, 188,808 expansion, 0 failures, 10,154,626 bytes, certificate v2 format); independent check in 61.585s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal) |
+| 2026-11-14 | `5244fac` | pc01 | 500 | 1 | optimal | 0.338s | 1453 | 517 | 100 | — | eliminate global accumulators in count_resp macro; cpu 5.0s; busy cores 14.9; states 100; guesses 8427; bounds pruned 8897; equiv pruned 281288; cache hits 57901; validation OK |
+| 2026-11-14 | `5244fac` | pc01 | 1000 | 1 | optimal | 2.597s | 3124 | 1049 | 826 | — | eliminate global accumulators in count_resp macro; pick 2.6s; cpu 40.9s; busy cores 15.8; states 826; guesses 15139; bounds pruned 49911; equiv pruned 5094182; cache hits 165688; validation OK |
+| 2026-11-14 | `5244fac` | pc01 | 1600 | 1 | optimal | 8.170s | 5256 | 1681 | 3969 | — | eliminate global accumulators in count_resp macro; pick 8.1s; cpu 128.0s; busy cores 15.7; states 3969; guesses 66232; bounds pruned 314488; equiv pruned 29601140; cache hits 354312; validation OK |
+| 2026-11-14 | `5244fac` | pc01 | 2000 | 1 | optimal | 13.709s | 6723 | 2119 | 7762 | — | eliminate global accumulators in count_resp macro; pick 13.6s; cpu 216.0s; busy cores 15.8; states 7762; guesses 185618; bounds pruned 502112; equiv pruned 59711200; cache hits 839110; validation OK |
+| 2026-11-14 | `5244fac` | pc01 | 2200 | 1 | optimal | 19.913s | 7477 | 2331 | 23568 | ~543MB | eliminate global accumulators in count_resp macro; pick 19.8s; cpu 315.9s; busy cores 15.9 (root_guesses @ 15s: 9569); states 23568; guesses 589345; bounds pruned 1944960; equiv pruned 188142691; cache hits 2428750; validation OK |
+| 2026-11-14 | `5244fac` | pc01 | 2340 | — | optimal | 23.374s (0.01h) | 8001 | 2478 | 25993 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-14-5244fac); eliminate global accumulators in count_resp macro; pick 23.1s; cpu 371.0s; busy cores 15.9 (root_guesses @ 15s: 7361); states 25993; guesses 750661; bounds pruned 2082527; equiv pruned 207415558; cache hits 3477722; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-14 | `5244fac` | pc01 | 2340 | — | optimal --certify | 23.344s (0.01h) | 8001 | 2478 | 26135 | ~2.60GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.344s (pick 23.2s, cpu 370.6s, busy cores 15.9); 1,327,429 solver facts; 590 gap refutations (7.223s); 631,274 claims (443,837 capacity, 187,437 expansion, 0 failures, 10,100,402 bytes, certificate v2 format); independent check in 62.805s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal) |
 ## Notes
+
+- The `5244fac` rows evaluate eliminating global accumulator dependencies in the candidate counting loop (`count_resp!` macro) and documentation updates for arbitrary word lengths:
+  - In `src/solver.rs`:
+    - Removed `total_buckets += 1` and `has_size_ge_3 = true` updates from inside the inner loop of `count_resp!`. In 16-way and 8-way unrolled loops, updating a single scalar created a read-after-write (RAW) dependency stall on every unrolled element.
+    - Replaced with post-loop computation: `total_buckets` is computed directly via hardware popcount (`count_ones()`) across the bitmask `seen: [u64; M]` (~4 cycles), and `has_size_ge_3` is evaluated only after bounds checks via bitwise OR over `seen_ge_3`.
+  - In `site/examples/README.md` and `site/examples/generate_letter_examples.js`:
+    - Updated documentation to reflect that the Rust solver natively supports arbitrary word lengths (1..10) directly via `wordle-opt solve`.
+  - Performance and exactness on Wordle ($L=5$):
+    - Consistent high throughput across all benchmark sizes: N=500 at 0.338s, N=1000 at 2.597s (first sub-2.600s run), N=1600 at 8.170s, N=2000 at 13.709s, N=2200 at 19.913s, and full N=2340 at 23.374s.
+    - Golden tree sha256 checksum byte-identical (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Full audit suite passed on pc01:
+    - `full_scale` passed (129.70s)
+    - `parallel_consistency` passed (101.53s)
+    - `published_optima` passed (297.18s)
+    - `tt_audit` passed under `--features tt-audit` (47.86s)
+    - Independent certificate check verified optimal in 62.805s (`CERTIFICATE VALID: the tree is optimal`).
 
 - The `30315f3` rows evaluate generalisation of heuristics, policy tree generation, and certificate verification to support arbitrary word lengths up to 10 (responses up to $3^{10} = 59,049$):
   - In `src/profile.rs`: generalized `SetProfile` from hardcoded 5 positions to `MAX_POS = 15`.
