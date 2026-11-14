@@ -4258,7 +4258,67 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut hash0 = 0u64;
                 let mut hash1 = 0u64;
                 let mut hash2 = 0u64;
-                for cand_idx in 0..c_len {
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r_1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r_0 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_1 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_2 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_3 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
+                }
+                while cand_idx < c_len {
                     let r = unsafe { *r_buf_ptr.add(cand_idx) };
                     if r == r0 {
                         count0 += 1;
@@ -4273,6 +4333,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         hash2 ^= unsafe { *zobrist_ptr.add(c) };
                     }
+                    cand_idx += 1;
                 }
                 let p_len0 = count0 as usize;
                 let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
@@ -4335,7 +4396,83 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                 let mut hash1 = 0u64;
                 let mut hash2 = 0u64;
                 let mut hash3 = 0u64;
-                for cand_idx in 0..c_len {
+                let mut cand_idx = 0;
+                while cand_idx + 3 < c_len {
+                    let r_0 = unsafe { *r_buf_ptr.add(cand_idx) };
+                    let r_1 = unsafe { *r_buf_ptr.add(cand_idx + 1) };
+                    let r_2 = unsafe { *r_buf_ptr.add(cand_idx + 2) };
+                    let r_3 = unsafe { *r_buf_ptr.add(cand_idx + 3) };
+                    if r_0 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_0 == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_1 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_1 == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 1) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_2 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_2 == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 2) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    if r_3 == r0 {
+                        count0 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash0 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r1 {
+                        count1 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash1 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r2 {
+                        count2 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash2 ^= unsafe { *zobrist_ptr.add(c) };
+                    } else if r_3 == r3 {
+                        count3 += 1;
+                        let c = unsafe { *set_ptr.add(cand_idx + 3) };
+                        hash3 ^= unsafe { *zobrist_ptr.add(c) };
+                    }
+                    cand_idx += 4;
+                }
+                while cand_idx < c_len {
                     let r = unsafe { *r_buf_ptr.add(cand_idx) };
                     if r == r0 {
                         count0 += 1;
@@ -4354,6 +4491,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         let c = unsafe { *set_ptr.add(cand_idx) };
                         hash3 ^= unsafe { *zobrist_ptr.add(c) };
                     }
+                    cand_idx += 1;
                 }
                 let p_len0 = count0 as usize;
                 let lb0 = unsafe { *parent_cap_bounds_ptr.add(p_len0) };
@@ -4961,17 +5099,6 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
             let mut cost = (3 * c_len - total_buckets as usize - (has_win as usize)) as u32;
             if cost >= cutoff {
                 self.local_metrics.pruned_by_bounds += 1;
-                return cost;
-            }
-
-            let mut has_size_ge_3 = false;
-            for m in 0..M {
-                if unsafe { *seen_ge_3.get_unchecked(m) } != 0 {
-                    has_size_ge_3 = true;
-                    break;
-                }
-            }
-            if !has_size_ge_3 {
                 return cost;
             }
 
@@ -7337,6 +7464,360 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             }
                             i += 1;
                             if found0 == p_len0 && found1 == target1 {
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else if num_eval == 3 {
+                let r0 = (!unsafe { *eval_entries_ptr } & 0xFFFF) as usize;
+                let r1 = (!unsafe { *eval_entries_ptr.add(1) } & 0xFFFF) as usize;
+                let r2 = (!unsafe { *eval_entries_ptr.add(2) } & 0xFFFF) as usize;
+                let p_len0 = (unsafe { *eval_entries_ptr } >> 16) as usize;
+                let p_len1 = (unsafe { *eval_entries_ptr.add(1) } >> 16) as usize;
+                let p_len2 = (unsafe { *eval_entries_ptr.add(2) } >> 16) as usize;
+                let target1 = p_len0 + p_len1;
+                let target2 = target1 + p_len2;
+                unsafe {
+                    *current_offsets_ptr.add(r0) = p_len0 as u16;
+                    *current_offsets_ptr.add(r1) = target1 as u16;
+                    *current_offsets_ptr.add(r2) = target2 as u16;
+                }
+                let mut found0 = 0;
+                let mut found1 = p_len0;
+                let mut found2 = target1;
+
+                if is_contiguous_root {
+                    let g_u8_ptr = g_ptr as *const u8;
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let b0 = (r_u64 & 0xFF) as usize;
+                        let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let b7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            if b0 == r0 {
+                                *sorted_set_ptr.add(found0) = i;
+                                found0 += 1;
+                            } else if b0 == r1 {
+                                *sorted_set_ptr.add(found1) = i;
+                                found1 += 1;
+                            } else if b0 == r2 {
+                                *sorted_set_ptr.add(found2) = i;
+                                found2 += 1;
+                            }
+                            if b1 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 1;
+                                found0 += 1;
+                            } else if b1 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 1;
+                                found1 += 1;
+                            } else if b1 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 1;
+                                found2 += 1;
+                            }
+                            if b2 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 2;
+                                found0 += 1;
+                            } else if b2 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 2;
+                                found1 += 1;
+                            } else if b2 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 2;
+                                found2 += 1;
+                            }
+                            if b3 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 3;
+                                found0 += 1;
+                            } else if b3 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 3;
+                                found1 += 1;
+                            } else if b3 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 3;
+                                found2 += 1;
+                            }
+                            if b4 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 4;
+                                found0 += 1;
+                            } else if b4 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 4;
+                                found1 += 1;
+                            } else if b4 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 4;
+                                found2 += 1;
+                            }
+                            if b5 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 5;
+                                found0 += 1;
+                            } else if b5 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 5;
+                                found1 += 1;
+                            } else if b5 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 5;
+                                found2 += 1;
+                            }
+                            if b6 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 6;
+                                found0 += 1;
+                            } else if b6 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 6;
+                                found1 += 1;
+                            } else if b6 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 6;
+                                found2 += 1;
+                            }
+                            if b7 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 7;
+                                found0 += 1;
+                            } else if b7 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 7;
+                                found1 += 1;
+                            } else if b7 == r2 {
+                                *sorted_set_ptr.add(found2) = i + 7;
+                                found2 += 1;
+                            }
+                        }
+                        i += 8;
+                        if found0 == p_len0 && found1 == target1 && found2 == target2 {
+                            break;
+                        }
+                    }
+                    if found0 < p_len0 || found1 < target1 || found2 < target2 {
+                        while i < c_len {
+                            let b = unsafe { *g_u8_ptr.add(i) as usize };
+                            if b == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = i;
+                                }
+                                found0 += 1;
+                            } else if b == r1 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found1) = i;
+                                }
+                                found1 += 1;
+                            } else if b == r2 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found2) = i;
+                                }
+                                found2 += 1;
+                            }
+                            i += 1;
+                            if found0 == p_len0 && found1 == target1 && found2 == target2 {
+                                break;
+                            }
+                        }
+                    }
+                } else if can_buffer {
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
+                        let b0 = (r_u64_0 & 0xFFFF) as usize;
+                        let b1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
+                        let b2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
+                        let b3 = (r_u64_0 >> 48) as usize;
+                        let b4 = (r_u64_1 & 0xFFFF) as usize;
+                        let b5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
+                        let b6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
+                        let b7 = (r_u64_1 >> 48) as usize;
+                        unsafe {
+                            if b0 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i);
+                                found0 += 1;
+                            } else if b0 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i);
+                                found1 += 1;
+                            } else if b0 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i);
+                                found2 += 1;
+                            }
+                            if b1 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 1);
+                                found0 += 1;
+                            } else if b1 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 1);
+                                found1 += 1;
+                            } else if b1 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 1);
+                                found2 += 1;
+                            }
+                            if b2 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 2);
+                                found0 += 1;
+                            } else if b2 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 2);
+                                found1 += 1;
+                            } else if b2 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 2);
+                                found2 += 1;
+                            }
+                            if b3 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 3);
+                                found0 += 1;
+                            } else if b3 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 3);
+                                found1 += 1;
+                            } else if b3 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 3);
+                                found2 += 1;
+                            }
+                            if b4 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 4);
+                                found0 += 1;
+                            } else if b4 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 4);
+                                found1 += 1;
+                            } else if b4 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 4);
+                                found2 += 1;
+                            }
+                            if b5 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 5);
+                                found0 += 1;
+                            } else if b5 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 5);
+                                found1 += 1;
+                            } else if b5 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 5);
+                                found2 += 1;
+                            }
+                            if b6 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 6);
+                                found0 += 1;
+                            } else if b6 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 6);
+                                found1 += 1;
+                            } else if b6 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 6);
+                                found2 += 1;
+                            }
+                            if b7 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 7);
+                                found0 += 1;
+                            } else if b7 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 7);
+                                found1 += 1;
+                            } else if b7 == r2 {
+                                *sorted_set_ptr.add(found2) = *set_ptr.add(i + 7);
+                                found2 += 1;
+                            }
+                        }
+                        i += 8;
+                        if found0 == p_len0 && found1 == target1 && found2 == target2 {
+                            break;
+                        }
+                    }
+                    if found0 < p_len0 || found1 < target1 || found2 < target2 {
+                        while i < c_len {
+                            let b = unsafe { *r_buf_ptr.add(i) as usize };
+                            if b == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = *set_ptr.add(i);
+                                }
+                                found0 += 1;
+                            } else if b == r1 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found1) = *set_ptr.add(i);
+                                }
+                                found1 += 1;
+                            } else if b == r2 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found2) = *set_ptr.add(i);
+                                }
+                                found2 += 1;
+                            }
+                            i += 1;
+                            if found0 == p_len0 && found1 == target1 && found2 == target2 {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        unsafe {
+                            let r_0 = (*g_ptr.add(c0)).to_usize();
+                            let r_1 = (*g_ptr.add(c1)).to_usize();
+                            let r_2 = (*g_ptr.add(c2)).to_usize();
+                            let r_3 = (*g_ptr.add(c3)).to_usize();
+                            if r_0 == r0 {
+                                *sorted_set_ptr.add(found0) = c0;
+                                found0 += 1;
+                            } else if r_0 == r1 {
+                                *sorted_set_ptr.add(found1) = c0;
+                                found1 += 1;
+                            } else if r_0 == r2 {
+                                *sorted_set_ptr.add(found2) = c0;
+                                found2 += 1;
+                            }
+                            if r_1 == r0 {
+                                *sorted_set_ptr.add(found0) = c1;
+                                found0 += 1;
+                            } else if r_1 == r1 {
+                                *sorted_set_ptr.add(found1) = c1;
+                                found1 += 1;
+                            } else if r_1 == r2 {
+                                *sorted_set_ptr.add(found2) = c1;
+                                found2 += 1;
+                            }
+                            if r_2 == r0 {
+                                *sorted_set_ptr.add(found0) = c2;
+                                found0 += 1;
+                            } else if r_2 == r1 {
+                                *sorted_set_ptr.add(found1) = c2;
+                                found1 += 1;
+                            } else if r_2 == r2 {
+                                *sorted_set_ptr.add(found2) = c2;
+                                found2 += 1;
+                            }
+                            if r_3 == r0 {
+                                *sorted_set_ptr.add(found0) = c3;
+                                found0 += 1;
+                            } else if r_3 == r1 {
+                                *sorted_set_ptr.add(found1) = c3;
+                                found1 += 1;
+                            } else if r_3 == r2 {
+                                *sorted_set_ptr.add(found2) = c3;
+                                found2 += 1;
+                            }
+                        }
+                        i += 4;
+                        if found0 == p_len0 && found1 == target1 && found2 == target2 {
+                            break;
+                        }
+                    }
+                    if found0 < p_len0 || found1 < target1 || found2 < target2 {
+                        while i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let b = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if b == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = c;
+                                }
+                                found0 += 1;
+                            } else if b == r1 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found1) = c;
+                                }
+                                found1 += 1;
+                            } else if b == r2 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found2) = c;
+                                }
+                                found2 += 1;
+                            }
+                            i += 1;
+                            if found0 == p_len0 && found1 == target1 && found2 == target2 {
                                 break;
                             }
                         }
