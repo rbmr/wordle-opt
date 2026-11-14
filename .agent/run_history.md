@@ -1254,7 +1254,30 @@ subcommand, whose summary printed `Wall time:` where `solve` prints
 | 2026-11-14 | `b5a58e8` | pc01 | 2200 | 1 | optimal | 19.937s | 7477 | 2331 | 23654 | ~543MB | fast-path 5-bucket candidate partitioning in pass 3; pick 19.8s; cpu 316.2s; busy cores 15.9 (root_guesses @ 15s: 9568); states 23654; guesses 591022; bounds pruned 1944246; equiv pruned 188876277; cache hits 2430034; validation OK |
 | 2026-11-14 | `b5a58e8` | pc01 | 2340 | — | optimal | 23.457s (0.01h) | 8001 | 2478 | 26047 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-14-b5a58e8); fast-path 5-bucket candidate partitioning in pass 3; pick 23.2s; cpu 372.6s; busy cores 15.9 (root_guesses @ 15s: 7345); states 26047; guesses 753315; bounds pruned 2090877; equiv pruned 207673135; cache hits 3494442; tree byte-identical to golden (sha256 34f095c2…); validation OK |
 | 2026-11-14 | `b5a58e8` | pc01 | 2340 | — | optimal --certify | 23.294s (0.01h) | 8001 | 2478 | 26177 | ~2.60GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.294s (pick 23.2s, cpu 369.3s, busy cores 15.9); 1,327,511 solver facts; 590 gap refutations (7.251s); 632,315 claims (444,142 capacity, 188,173 expansion, 0 failures, 10,117,046 bytes, certificate v2 format); independent check in 75.669s (3.93e11 response reads, CERTIFICATE VALID: the tree is optimal) |
+| 2026-11-14 | `d26152f` | pc01 | 1000 | 1 | optimal | 2.604s | 3124 | 1049 | 816 | — | fast-path 6-bucket candidate partitioning in pass 3; pick 2.6s; cpu 41.0s; busy cores 15.8; states 816; guesses 15079; bounds pruned 49520; equiv pruned 5005500; cache hits 165639; validation OK |
+| 2026-11-14 | `d26152f` | pc01 | 1600 | 1 | optimal | 8.162s | 5256 | 1681 | 3949 | — | fast-path 6-bucket candidate partitioning in pass 3; pick 8.1s; cpu 127.9s; busy cores 15.7; states 3949; guesses 66209; bounds pruned 313462; equiv pruned 29480316; cache hits 353884; validation OK |
+| 2026-11-14 | `d26152f` | pc01 | 2000 | 1 | optimal | 13.759s | 6723 | 2119 | 7783 | — | fast-path 6-bucket candidate partitioning in pass 3; pick 13.7s; cpu 216.8s; busy cores 15.8; states 7783; guesses 186471; bounds pruned 503452; equiv pruned 59881081; cache hits 839344; validation OK |
+| 2026-11-14 | `d26152f` | pc01 | 2200 | 1 | optimal | 19.932s | 7477 | 2331 | 23553 | ~543MB | fast-path 6-bucket candidate partitioning in pass 3; pick 19.8s; cpu 316.4s; busy cores 15.9 (root_guesses @ 15s: 9568); states 23553; guesses 588557; bounds pruned 1938893; equiv pruned 188308024; cache hits 2425256; validation OK |
+| 2026-11-14 | `d26152f` | pc01 | 2340 | — | optimal | 23.356s (0.01h) | 8001 | 2478 | 25987 | ~2.54GB | full N=2340 run via run_full.sh (2026-11-14-d26152f); fast-path 6-bucket candidate partitioning in pass 3; pick 23.1s; cpu 371.2s; busy cores 15.9 (root_guesses @ 15s: 7368); states 25987; guesses 752044; bounds pruned 2087832; equiv pruned 207393757; cache hits 3490378; tree byte-identical to golden (sha256 34f095c2…); validation OK |
+| 2026-11-14 | `d26152f` | pc01 | 2340 | — | optimal --certify | 23.276s (0.01h) | 8001 | 2478 | 26058 | ~2.60GB | full N=2340 certificate generation + check via deploy_and_bench.sh; solve 23.276s (pick 23.2s, cpu 369.4s, busy cores 15.9); 1,328,045 solver facts; 590 gap refutations (7.149s); 631,715 claims (444,126 capacity, 187,589 expansion, 0 failures, 10,107,446 bytes, certificate v2 format); independent check in 60.725s (3.92e11 response reads, CERTIFICATE VALID: the tree is optimal) |
 ## Notes
+
+- The `d26152f` rows evaluate specialized fast-path candidate bucket partitioning for 6-bucket evaluation sets (`num_eval == 6`) in `min_guess_val_inner`:
+  - In `src/solver.rs`:
+    - Extended fast-path candidate partitioning to `num_eval == 6` in Pass 3.
+    - Directly initialized `current_offsets` for the 6 target buckets without prefix-sum scans over all 243 response codes in `seen`.
+    - Gathers candidates only for the 6 buckets across `is_contiguous_root`, `can_buffer`, and general candidate scanning paths, skipping all singletons and pairs.
+    - Early exits candidate scanning as soon as all 6 target buckets are completely populated (`found0 == p_len0 && found1 == target1 && found2 == target2 && found3 == target3 && found4 == target4 && found5 == target5`).
+  - Performance and exactness on Wordle ($L=5$):
+    - Full N=2340 solve build time dropped to 23.356s (pick 23.1s, states evaluated reduced from 26,047 to 25,987, evaluated guesses down from 753,315 to 752,044).
+    - Consistent high throughput across all benchmark sizes: N=1000 at 2.604s, N=1600 at 8.162s, N=2000 at 13.759s, N=2200 at 19.932s.
+    - Golden tree sha256 checksum byte-identical (`34f095c21679c253c38d8ea70f04202bcdc95b3e8ad82edf9b34ad260288f893`).
+  - Full audit suite passed on pc01:
+    - `full_scale` passed (128.83s)
+    - `parallel_consistency` passed (101.64s)
+    - `published_optima` passed (298.06s)
+    - `tt_audit` passed under `--features tt-audit` (46.79s)
+    - Independent certificate check verified optimal in 60.725s (`CERTIFICATE VALID: the tree is optimal`).
 
 - The `b5a58e8` rows evaluate specialized fast-path candidate bucket partitioning for 5-bucket evaluation sets (`num_eval == 5`) in `min_guess_val_inner`:
   - In `src/solver.rs`:
