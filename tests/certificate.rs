@@ -101,7 +101,7 @@ impl GuessOracle {
 #[derive(Clone)]
 struct Claim {
     /// None = root, else (parent, guess, response)
-    def: Option<(u32, u32, u8)>,
+    def: Option<(u32, u32, u16)>,
     bound: u32,
     rule: u8,
 }
@@ -144,7 +144,7 @@ fn oracle_certificate(oracle: &mut GuessOracle, n: usize) -> Vec<Claim> {
                     continue;
                 }
                 if oracle.value(m) as u64 > l3(bs, k) && !index.contains_key(&m) {
-                    queue.insert(0, (m, Some((id as u32, g as u32, r as u8))));
+                    queue.insert(0, (m, Some((id as u32, g as u32, r))));
                 }
             }
         }
@@ -165,7 +165,7 @@ fn encode(inst: &Instance, claims: &[Claim]) -> Vec<u8> {
                 out.push(1);
                 out.extend_from_slice(&p.to_le_bytes());
                 out.extend_from_slice(&g.to_le_bytes());
-                out.push(r);
+                out.extend_from_slice(&r.to_le_bytes());
             }
         }
         out.extend_from_slice(&c.bound.to_le_bytes());
@@ -396,7 +396,7 @@ fn accepted_mutants_only_make_true_claims() {
                         if i > 0 {
                             let parent = rng.below(i) as u32;
                             let guess = rng.below(inst.guesses.len()) as u32;
-                            let response = rng.below(243) as u8;
+                            let response = rng.below(243) as u16;
                             bad[i].def = Some((parent, guess, response));
                         }
                     }
@@ -420,7 +420,7 @@ fn accepted_mutants_only_make_true_claims() {
                     Some((p, g, r)) => oracle
                         .buckets(g as usize, sets[p as usize])
                         .into_iter()
-                        .find(|&(rr, _)| rr == r as u16)
+                        .find(|&(rr, _)| rr == r)
                         .map_or(0, |(_, m)| m),
                 };
                 assert_ne!(set, 0, "{label}: accepted an empty set in claim {i}");

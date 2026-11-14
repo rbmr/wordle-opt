@@ -122,7 +122,7 @@ fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
                 if parent >= i
                     || g >= lists.guesses()
                     || response as usize >= lists.matrix.num_responses
-                    || response as u16 == lists.matrix.win_response.0
+                    || response == lists.matrix.win_response.0
                 {
                     return Err(format!("claim {i}: bad set definition"));
                 }
@@ -130,7 +130,7 @@ fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
                     .set
                     .iter()
                     .copied()
-                    .filter(|&c| lists.get(g, c as usize).0 == response as u16)
+                    .filter(|&c| lists.get(g, c as usize).0 == response)
                     .collect();
                 if set.is_empty() {
                     return Err(format!("claim {i}: empty set"));
@@ -158,21 +158,59 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
     let risky: Vec<usize> = (0..lists.guesses())
         .filter(|&g| profile.max_responses(&lists.dict.guesses[g]) > limit)
         .collect();
-    let mut seen = [[0u64; 36]; 64];
-    for chunk in risky.chunks(64) {
-        let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 36]);
-        for &c in set {
-            for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = lists.get_cg(c as usize, g).0;
-                s[(r >> 6) as usize] |= 1 << (r & 63);
+    let mask_words = lists.matrix.num_responses.div_ceil(64);
+    if mask_words <= 4 {
+        let mut seen = [[0u64; 4]; 64];
+        for chunk in risky.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 4]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            if seen
+                .iter()
+                .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
+            {
+                return false;
             }
         }
-        if seen
-            .iter()
-            .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
-        {
-            return false;
+    } else if mask_words <= 36 {
+        let mut seen = [[0u64; 36]; 64];
+        for chunk in risky.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 36]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            if seen
+                .iter()
+                .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
+            {
+                return false;
+            }
+        }
+    } else {
+        let mut seen = vec![0u64; 64 * mask_words];
+        for chunk in risky.chunks(64) {
+            let seen_chunk = &mut seen[..chunk.len() * mask_words];
+            seen_chunk.fill(0);
+            for &c in set {
+                for (j, &g) in chunk.iter().enumerate() {
+                    let r = lists.get_cg(c as usize, g).0;
+                    seen_chunk[j * mask_words + (r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen_chunk.chunks_exact(mask_words) {
+                if s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit {
+                    return false;
+                }
+            }
         }
     }
     true
@@ -181,18 +219,51 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
 /// The most distinct responses any of `guesses` gives on `set`.
 fn max_branching(set: &[u16], lists: &Lists, guesses: &[usize]) -> usize {
     let mut k = 0;
-    let mut seen = [[0u64; 36]; 64];
-    for chunk in guesses.chunks(64) {
-        let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 36]);
-        for &c in set {
-            for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = lists.get_cg(c as usize, g).0;
-                s[(r >> 6) as usize] |= 1 << (r & 63);
+    let mask_words = lists.matrix.num_responses.div_ceil(64);
+    if mask_words <= 4 {
+        let mut seen = [[0u64; 4]; 64];
+        for chunk in guesses.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 4]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen.iter() {
+                k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
             }
         }
-        for s in seen.iter() {
-            k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+    } else if mask_words <= 36 {
+        let mut seen = [[0u64; 36]; 64];
+        for chunk in guesses.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 36]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen.iter() {
+                k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+            }
+        }
+    } else {
+        let mut seen = vec![0u64; 64 * mask_words];
+        for chunk in guesses.chunks(64) {
+            let seen_chunk = &mut seen[..chunk.len() * mask_words];
+            seen_chunk.fill(0);
+            for &c in set {
+                for (j, &g) in chunk.iter().enumerate() {
+                    let r = lists.get_cg(c as usize, g).0;
+                    seen_chunk[j * mask_words + (r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen_chunk.chunks_exact(mask_words) {
+                k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+            }
         }
     }
     k

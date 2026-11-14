@@ -86,6 +86,18 @@ fn solve_and_validate_non_5_letter_words() {
         (3, vec!["cat", "car", "bat", "bar", "rat", "tar"]),
         (4, vec!["game", "gate", "gave", "tame", "late", "bake"]),
         (6, vec!["flight", "bright", "slight", "knight", "plight"]),
+        (
+            7,
+            vec!["morning", "warning", "turning", "burning", "running"],
+        ),
+        (
+            8,
+            vec!["mountain", "fountain", "plantain", "captaina", "certaina"],
+        ),
+        (
+            10,
+            vec!["basketball", "volleyball", "racquetbal", "pickleball"],
+        ),
     ] {
         let file_path = dir.path().join(format!("words_{len}.txt"));
         fs::write(&file_path, words.join("\n")).expect("write words");

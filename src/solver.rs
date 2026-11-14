@@ -96,8 +96,8 @@ pub fn set_equiv_cache_cap(entries_per_shard: usize) {
     EQUIV_CACHE_CAP.store(entries_per_shard.max(1024), Ordering::Relaxed);
 }
 
-/// Maximum number of ternary responses supported (3^7 = 2187).
-pub const MAX_RESPONSES: usize = 2187;
+/// Maximum number of ternary responses supported (3^10 = 59049).
+pub const MAX_RESPONSES: usize = 59049;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GuessTuple {

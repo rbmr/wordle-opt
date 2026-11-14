@@ -384,13 +384,70 @@ pub(crate) fn active_guesses_with_bound(
                     chunk_out
                 })
                 .collect()
-        } else {
+        } else if matrix.num_responses <= 2187 {
             surviving_guesses
                 .par_chunks(256)
                 .flat_map_iter(|chunk| {
                     let mut counts = [0u16; 2187];
                     let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
                     let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+                    let cap_bounds_ptr = cap_bounds.as_ptr();
+                    let matrix_data_ptr = matrix.data.as_ptr();
+                    let mut chunk_out = Vec::with_capacity(chunk.len());
+
+                    for &g in chunk {
+                        let g_ptr = unsafe { matrix_data_ptr.add(g * matrix.num_candidates) };
+                        let mut num_non_empty = 0;
+                        for &c in candidates {
+                            let r = unsafe { (*g_ptr.add(c)).0 as usize };
+                            let cnt = unsafe { *counts.get_unchecked(r) };
+                            if cnt == 0 {
+                                unsafe {
+                                    *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                                }
+                                num_non_empty += 1;
+                            }
+                            unsafe {
+                                *counts.get_unchecked_mut(r) = cnt + 1;
+                            }
+                        }
+                        if num_non_empty <= 1 {
+                            for i in 0..num_non_empty {
+                                let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                                unsafe {
+                                    *counts.get_unchecked_mut(r) = 0;
+                                }
+                            }
+                            continue;
+                        }
+                        let mut expected_rem = 0u32;
+                        let mut base_lb = candidates.len() as u32;
+                        for i in 0..num_non_empty {
+                            let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                            let v = unsafe { *counts.get_unchecked(r) as usize };
+                            expected_rem += (v as u32) * (v as u32);
+                            if r != matrix.win_response.0 as usize {
+                                base_lb += unsafe { *cap_bounds_ptr.add(v) };
+                            }
+                            unsafe {
+                                *counts.get_unchecked_mut(r) = 0;
+                            }
+                        }
+                        if base_lb <= max_base_lb {
+                            chunk_out.push((g, expected_rem, base_lb));
+                        }
+                    }
+                    chunk_out
+                })
+                .collect()
+        } else {
+            let nr = matrix.num_responses;
+            surviving_guesses
+                .par_chunks(256)
+                .flat_map_iter(|chunk| {
+                    let mut counts = vec![0u16; nr];
+                    let mut non_empty_indices = vec![0u16; nr];
+                    let non_empty_indices_ptr = non_empty_indices.as_mut_ptr();
                     let cap_bounds_ptr = cap_bounds.as_ptr();
                     let matrix_data_ptr = matrix.data.as_ptr();
                     let mut chunk_out = Vec::with_capacity(chunk.len());
@@ -614,7 +671,7 @@ pub(crate) fn active_guesses_with_bound(
                     out.push((g, expected_rem, base_lb));
                 }
             }
-        } else {
+        } else if matrix.num_responses <= 2187 {
             let data_c_g_ptr = matrix.data_c_g.as_ptr();
             let mut stack_c_ptrs =
                 std::mem::MaybeUninit::<[*const crate::core::Response; 48]>::uninit();
@@ -629,6 +686,94 @@ pub(crate) fn active_guesses_with_bound(
             let mut counts = [0u16; 2187];
             let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
             let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+
+            let guess_chars_ptr = dict.guess_chars.as_ptr();
+            let word_len = dict.word_len;
+            let c_mask_u64 = c_mask as u64;
+
+            for g in 0..num_guesses {
+                if !skip_projections {
+                    if (unsafe { *guess_masks_ptr.add(g) } & c_mask) == 0 {
+                        continue;
+                    }
+                    let proj = guess_projection(guess_chars_ptr, word_len, c_mask_u64, g);
+                    let mut idx = (proj.wrapping_mul(0x9E3779B97F4A7C15) >> shift) as usize;
+                    let is_new = loop {
+                        let slot = unsafe { *table_ptr.add(idx) };
+                        if slot == 0 {
+                            unsafe {
+                                *table_ptr.add(idx) = proj;
+                                *added_ptr.add(added_len) = idx;
+                            }
+                            added_len += 1;
+                            break true;
+                        }
+                        if slot == proj {
+                            break false;
+                        }
+                        idx = (idx + 1) & mask;
+                    };
+                    if !is_new {
+                        continue;
+                    }
+                }
+
+                let mut num_non_empty = 0;
+                for &c_base in c_ptrs {
+                    let r = unsafe { (*c_base.add(g)).0 as usize };
+                    let cnt = unsafe { *counts.get_unchecked(r) };
+                    if cnt == 0 {
+                        unsafe {
+                            *non_empty_indices_ptr.add(num_non_empty) = r as u16;
+                        }
+                        num_non_empty += 1;
+                    }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = cnt + 1;
+                    }
+                }
+                if num_non_empty <= 1 {
+                    for i in 0..num_non_empty {
+                        let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                        unsafe {
+                            *counts.get_unchecked_mut(r) = 0;
+                        }
+                    }
+                    continue;
+                }
+                let mut expected_rem = 0u32;
+                let mut base_lb = candidates.len() as u32;
+                for i in 0..num_non_empty {
+                    let r = unsafe { *non_empty_indices_ptr.add(i) as usize };
+                    let v = unsafe { *counts.get_unchecked(r) as usize };
+                    expected_rem += (v as u32) * (v as u32);
+                    if r != matrix.win_response.0 as usize {
+                        base_lb += unsafe { *cap_bounds_ptr.add(v) };
+                    }
+                    unsafe {
+                        *counts.get_unchecked_mut(r) = 0;
+                    }
+                }
+                if base_lb <= max_base_lb {
+                    out.push((g, expected_rem, base_lb));
+                }
+            }
+        } else {
+            let data_c_g_ptr = matrix.data_c_g.as_ptr();
+            let mut stack_c_ptrs =
+                std::mem::MaybeUninit::<[*const crate::core::Response; 48]>::uninit();
+            let stack_c_ptrs_ptr = stack_c_ptrs.as_mut_ptr() as *mut *const crate::core::Response;
+            for (i, &c) in candidates.iter().enumerate() {
+                unsafe {
+                    *stack_c_ptrs_ptr.add(i) = data_c_g_ptr.add(c * num_guesses);
+                }
+            }
+            let c_ptrs = unsafe { std::slice::from_raw_parts(stack_c_ptrs_ptr, candidates.len()) };
+
+            let nr = matrix.num_responses;
+            let mut counts = vec![0u16; nr];
+            let mut non_empty_indices = vec![0u16; nr];
+            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr();
 
             let guess_chars_ptr = dict.guess_chars.as_ptr();
             let word_len = dict.word_len;
@@ -805,8 +950,40 @@ impl CandidatesPolicy for MinRemainingPolicy<'_> {
                     best_guess = g;
                 }
             }
-        } else {
+        } else if self.matrix.num_responses <= 2187 {
             let mut counts = [0u16; 2187];
+            for g in 0..self.matrix.num_guesses {
+                let mut distinct = 0;
+                for &c in candidates {
+                    let r = self.matrix.get(g, c).0 as usize;
+                    if counts[r] == 0 {
+                        distinct += 1;
+                    }
+                    counts[r] += 1;
+                }
+                if distinct <= 1 {
+                    for &c in candidates {
+                        let r = self.matrix.get(g, c).0 as usize;
+                        counts[r] = 0;
+                    }
+                    continue; // useless
+                }
+                let mut score = 0u64;
+                for &c in candidates {
+                    let r = self.matrix.get(g, c).0 as usize;
+                    let v = counts[r];
+                    if v > 0 {
+                        score += (v as u64) * (v as u64);
+                        counts[r] = 0;
+                    }
+                }
+                if score < best_score {
+                    best_score = score;
+                    best_guess = g;
+                }
+            }
+        } else {
+            let mut counts = vec![0u16; self.matrix.num_responses];
             for g in 0..self.matrix.num_guesses {
                 let mut distinct = 0;
                 for &c in candidates {
@@ -1155,10 +1332,49 @@ impl<'a> OptimalPolicy<'a> {
             let cap_bounds = &self.capacity_bounds_2d[self.max_k];
             let first_g = active[0].0;
 
-            let mut counts = [0u16; 2187];
-            let mut bucket_hashes = [0u64; 2187];
-            let mut non_empty_indices = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
-            let non_empty_indices_ptr = non_empty_indices.as_mut_ptr() as *mut u16;
+            let mut counts_static = [0u16; 2187];
+            let mut hashes_static = [0u64; 2187];
+            let mut non_empty_static = std::mem::MaybeUninit::<[u16; 2187]>::uninit();
+            let mut offsets_static = std::mem::MaybeUninit::<[usize; 2187]>::uninit();
+            let mut cur_offsets_static = std::mem::MaybeUninit::<[usize; 2187]>::uninit();
+
+            let (
+                mut counts_buf,
+                mut hashes_buf,
+                mut non_empty_buf,
+                mut offsets_buf,
+                mut cur_offsets_buf,
+            );
+
+            let (
+                counts_ptr,
+                bucket_hashes_ptr,
+                non_empty_indices_ptr,
+                offsets_ptr,
+                current_offsets_ptr,
+            ) = if self.matrix.num_responses <= 2187 {
+                (
+                    counts_static.as_mut_ptr(),
+                    hashes_static.as_mut_ptr(),
+                    non_empty_static.as_mut_ptr() as *mut u16,
+                    offsets_static.as_mut_ptr() as *mut usize,
+                    cur_offsets_static.as_mut_ptr() as *mut usize,
+                )
+            } else {
+                let nr = self.matrix.num_responses;
+                counts_buf = vec![0u16; nr];
+                hashes_buf = vec![0u64; nr];
+                non_empty_buf = vec![0u16; nr];
+                offsets_buf = vec![0usize; nr];
+                cur_offsets_buf = vec![0usize; nr];
+                (
+                    counts_buf.as_mut_ptr(),
+                    hashes_buf.as_mut_ptr(),
+                    non_empty_buf.as_mut_ptr(),
+                    offsets_buf.as_mut_ptr(),
+                    cur_offsets_buf.as_mut_ptr(),
+                )
+            };
             let mut num_non_empty = 0;
 
             let zobrist_ptr = self.matrix.zobrist.as_ptr();
@@ -1190,24 +1406,20 @@ impl<'a> OptimalPolicy<'a> {
                     unsafe { (*first_g_u16_ptr.add(c)).0 as usize }
                 };
                 unsafe {
-                    let cnt = *counts.get_unchecked(r_idx);
+                    let cnt = *counts_ptr.add(r_idx);
                     if cnt == 0 {
                         *non_empty_indices_ptr.add(num_non_empty) = r_idx as u16;
                         num_non_empty += 1;
                     }
-                    *counts.get_unchecked_mut(r_idx) = cnt + 1;
-                    *bucket_hashes.get_unchecked_mut(r_idx) ^= *zobrist_ptr.add(c);
+                    *counts_ptr.add(r_idx) = cnt + 1;
+                    *bucket_hashes_ptr.add(r_idx) ^= *zobrist_ptr.add(c);
                 }
             }
 
-            let mut offsets = std::mem::MaybeUninit::<[usize; 2187]>::uninit();
-            let offsets_ptr = offsets.as_mut_ptr() as *mut usize;
-            let mut current_offsets = std::mem::MaybeUninit::<[usize; 2187]>::uninit();
-            let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut usize;
             let mut acc = 0usize;
             for i in 0..num_non_empty {
                 let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 unsafe {
                     *offsets_ptr.add(r_idx) = acc;
                     *current_offsets_ptr.add(r_idx) = acc;
@@ -1233,7 +1445,7 @@ impl<'a> OptimalPolicy<'a> {
             let mut lb_cost = base_cost;
             for i in 0..num_non_empty {
                 let r_idx = unsafe { *non_empty_indices_ptr.add(i) as usize };
-                let p_len = unsafe { *counts.get_unchecked(r_idx) as usize };
+                let p_len = unsafe { *counts_ptr.add(r_idx) as usize };
                 if r_idx == self.matrix.win_response.0 as usize {
                     continue;
                 }
@@ -1243,7 +1455,7 @@ impl<'a> OptimalPolicy<'a> {
                     lb_cost += cap_lb;
                     continue;
                 }
-                let hash = unsafe { *bucket_hashes.get_unchecked(r_idx) };
+                let hash = unsafe { *bucket_hashes_ptr.add(r_idx) };
                 match self.cache.get(hash) {
                     Some((cached_val, true)) => {
                         base_cost += cached_val;
