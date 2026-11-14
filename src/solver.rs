@@ -6879,179 +6879,646 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
 
             let mut current_offsets = std::mem::MaybeUninit::<[u16; R]>::uninit();
             let current_offsets_ptr = current_offsets.as_mut_ptr() as *mut u16;
-            let mut curr = 0;
-            for m in 0..M {
-                let mut word = unsafe { *seen.get_unchecked(m) };
-                while word != 0 {
-                    let bit_idx = word.trailing_zeros() as usize;
-                    let r = (m << 6) | bit_idx;
-                    word &= word - 1;
-                    unsafe {
-                        *current_offsets_ptr.add(r) = curr;
-                        curr += *counts_ptr.add(r);
-                    }
-                }
-            }
 
-            macro_rules! sort_cand {
-                ($r:expr, $c:expr) => {
-                    let r = $r;
-                    let pos_ptr = current_offsets_ptr.add(r);
-                    let pos = *pos_ptr as usize;
-                    *sorted_set_ptr.add(pos) = $c;
-                    *pos_ptr += 1;
-                };
-            }
-
-            let mut i = 0;
-            if is_contiguous_root {
-                let g_u8_ptr = g_ptr as *const u8;
-                while i + 15 < c_len {
-                    let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
-                    let r_u64_1 = unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
-                    unsafe {
-                        sort_cand!((r_u64_0 & 0xFF) as usize, i);
-                        sort_cand!(((r_u64_0 >> 8) & 0xFF) as usize, i + 1);
-                        sort_cand!(((r_u64_0 >> 16) & 0xFF) as usize, i + 2);
-                        sort_cand!(((r_u64_0 >> 24) & 0xFF) as usize, i + 3);
-                        sort_cand!(((r_u64_0 >> 32) & 0xFF) as usize, i + 4);
-                        sort_cand!(((r_u64_0 >> 40) & 0xFF) as usize, i + 5);
-                        sort_cand!(((r_u64_0 >> 48) & 0xFF) as usize, i + 6);
-                        sort_cand!((r_u64_0 >> 56) as usize, i + 7);
-                        sort_cand!((r_u64_1 & 0xFF) as usize, i + 8);
-                        sort_cand!(((r_u64_1 >> 8) & 0xFF) as usize, i + 9);
-                        sort_cand!(((r_u64_1 >> 16) & 0xFF) as usize, i + 10);
-                        sort_cand!(((r_u64_1 >> 24) & 0xFF) as usize, i + 11);
-                        sort_cand!(((r_u64_1 >> 32) & 0xFF) as usize, i + 12);
-                        sort_cand!(((r_u64_1 >> 40) & 0xFF) as usize, i + 13);
-                        sort_cand!(((r_u64_1 >> 48) & 0xFF) as usize, i + 14);
-                        sort_cand!((r_u64_1 >> 56) as usize, i + 15);
-                    }
-                    i += 16;
+            if num_eval == 1 {
+                let entry0 = unsafe { *eval_entries_ptr };
+                let p_len0 = (entry0 >> 16) as usize;
+                let r0 = (!entry0 & 0xFFFF) as usize;
+                unsafe {
+                    *current_offsets_ptr.add(r0) = p_len0 as u16;
                 }
-                while i + 7 < c_len {
-                    let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
-                    unsafe {
-                        sort_cand!((r_u64 & 0xFF) as usize, i);
-                        sort_cand!(((r_u64 >> 8) & 0xFF) as usize, i + 1);
-                        sort_cand!(((r_u64 >> 16) & 0xFF) as usize, i + 2);
-                        sort_cand!(((r_u64 >> 24) & 0xFF) as usize, i + 3);
-                        sort_cand!(((r_u64 >> 32) & 0xFF) as usize, i + 4);
-                        sort_cand!(((r_u64 >> 40) & 0xFF) as usize, i + 5);
-                        sort_cand!(((r_u64 >> 48) & 0xFF) as usize, i + 6);
-                        sort_cand!((r_u64 >> 56) as usize, i + 7);
+                let mut found0 = 0;
+                if is_contiguous_root {
+                    let g_u8_ptr = g_ptr as *const u8;
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let b0 = (r_u64 & 0xFF) as usize;
+                        let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let b7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            if b0 == r0 {
+                                *sorted_set_ptr.add(found0) = i;
+                                found0 += 1;
+                            }
+                            if b1 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 1;
+                                found0 += 1;
+                            }
+                            if b2 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 2;
+                                found0 += 1;
+                            }
+                            if b3 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 3;
+                                found0 += 1;
+                            }
+                            if b4 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 4;
+                                found0 += 1;
+                            }
+                            if b5 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 5;
+                                found0 += 1;
+                            }
+                            if b6 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 6;
+                                found0 += 1;
+                            }
+                            if b7 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 7;
+                                found0 += 1;
+                            }
+                        }
+                        i += 8;
+                        if found0 == p_len0 {
+                            break;
+                        }
                     }
-                    i += 8;
+                    if found0 < p_len0 {
+                        while i < c_len {
+                            if unsafe { *g_u8_ptr.add(i) as usize } == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = i;
+                                }
+                                found0 += 1;
+                                if found0 == p_len0 {
+                                    break;
+                                }
+                            }
+                            i += 1;
+                        }
+                    }
+                } else if can_buffer {
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
+                        let b0 = (r_u64_0 & 0xFFFF) as usize;
+                        let b1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
+                        let b2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
+                        let b3 = (r_u64_0 >> 48) as usize;
+                        let b4 = (r_u64_1 & 0xFFFF) as usize;
+                        let b5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
+                        let b6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
+                        let b7 = (r_u64_1 >> 48) as usize;
+                        unsafe {
+                            if b0 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i);
+                                found0 += 1;
+                            }
+                            if b1 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 1);
+                                found0 += 1;
+                            }
+                            if b2 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 2);
+                                found0 += 1;
+                            }
+                            if b3 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 3);
+                                found0 += 1;
+                            }
+                            if b4 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 4);
+                                found0 += 1;
+                            }
+                            if b5 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 5);
+                                found0 += 1;
+                            }
+                            if b6 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 6);
+                                found0 += 1;
+                            }
+                            if b7 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 7);
+                                found0 += 1;
+                            }
+                        }
+                        i += 8;
+                        if found0 == p_len0 {
+                            break;
+                        }
+                    }
+                    if found0 < p_len0 {
+                        while i < c_len {
+                            if unsafe { *r_buf_ptr.add(i) as usize } == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = *set_ptr.add(i);
+                                }
+                                found0 += 1;
+                                if found0 == p_len0 {
+                                    break;
+                                }
+                            }
+                            i += 1;
+                        }
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        unsafe {
+                            if (*g_ptr.add(c0)).to_usize() == r0 {
+                                *sorted_set_ptr.add(found0) = c0;
+                                found0 += 1;
+                            }
+                            if (*g_ptr.add(c1)).to_usize() == r0 {
+                                *sorted_set_ptr.add(found0) = c1;
+                                found0 += 1;
+                            }
+                            if (*g_ptr.add(c2)).to_usize() == r0 {
+                                *sorted_set_ptr.add(found0) = c2;
+                                found0 += 1;
+                            }
+                            if (*g_ptr.add(c3)).to_usize() == r0 {
+                                *sorted_set_ptr.add(found0) = c3;
+                                found0 += 1;
+                            }
+                        }
+                        i += 4;
+                        if found0 == p_len0 {
+                            break;
+                        }
+                    }
+                    if found0 < p_len0 {
+                        while i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            if unsafe { (*g_ptr.add(c)).to_usize() } == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = c;
+                                }
+                                found0 += 1;
+                                if found0 == p_len0 {
+                                    break;
+                                }
+                            }
+                            i += 1;
+                        }
+                    }
                 }
-                while i < c_len {
-                    unsafe {
-                        sort_cand!(*g_u8_ptr.add(i) as usize, i);
-                    }
-                    i += 1;
+            } else if num_eval == 2 {
+                let entry0 = unsafe { *eval_entries_ptr };
+                let p_len0 = (entry0 >> 16) as usize;
+                let r0 = (!entry0 & 0xFFFF) as usize;
+                let entry1 = unsafe { *eval_entries_ptr.add(1) };
+                let p_len1 = (entry1 >> 16) as usize;
+                let r1 = (!entry1 & 0xFFFF) as usize;
+                let target1 = p_len0 + p_len1;
+                unsafe {
+                    *current_offsets_ptr.add(r0) = p_len0 as u16;
+                    *current_offsets_ptr.add(r1) = target1 as u16;
                 }
-            } else if can_buffer {
-                while i + 7 < c_len {
-                    let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
-                    let r_u64_1 = unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-                    let c4 = unsafe { *set_ptr.add(i + 4) };
-                    let c5 = unsafe { *set_ptr.add(i + 5) };
-                    let c6 = unsafe { *set_ptr.add(i + 6) };
-                    let c7 = unsafe { *set_ptr.add(i + 7) };
-
-                    unsafe {
-                        sort_cand!((r_u64_0 & 0xFFFF) as usize, c0);
-                        sort_cand!(((r_u64_0 >> 16) & 0xFFFF) as usize, c1);
-                        sort_cand!(((r_u64_0 >> 32) & 0xFFFF) as usize, c2);
-                        sort_cand!((r_u64_0 >> 48) as usize, c3);
-                        sort_cand!((r_u64_1 & 0xFFFF) as usize, c4);
-                        sort_cand!(((r_u64_1 >> 16) & 0xFFFF) as usize, c5);
-                        sort_cand!(((r_u64_1 >> 32) & 0xFFFF) as usize, c6);
-                        sort_cand!((r_u64_1 >> 48) as usize, c7);
+                let mut found0 = 0;
+                let mut found1 = p_len0;
+                if is_contiguous_root {
+                    let g_u8_ptr = g_ptr as *const u8;
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let b0 = (r_u64 & 0xFF) as usize;
+                        let b1 = ((r_u64 >> 8) & 0xFF) as usize;
+                        let b2 = ((r_u64 >> 16) & 0xFF) as usize;
+                        let b3 = ((r_u64 >> 24) & 0xFF) as usize;
+                        let b4 = ((r_u64 >> 32) & 0xFF) as usize;
+                        let b5 = ((r_u64 >> 40) & 0xFF) as usize;
+                        let b6 = ((r_u64 >> 48) & 0xFF) as usize;
+                        let b7 = (r_u64 >> 56) as usize;
+                        unsafe {
+                            if b0 == r0 {
+                                *sorted_set_ptr.add(found0) = i;
+                                found0 += 1;
+                            } else if b0 == r1 {
+                                *sorted_set_ptr.add(found1) = i;
+                                found1 += 1;
+                            }
+                            if b1 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 1;
+                                found0 += 1;
+                            } else if b1 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 1;
+                                found1 += 1;
+                            }
+                            if b2 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 2;
+                                found0 += 1;
+                            } else if b2 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 2;
+                                found1 += 1;
+                            }
+                            if b3 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 3;
+                                found0 += 1;
+                            } else if b3 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 3;
+                                found1 += 1;
+                            }
+                            if b4 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 4;
+                                found0 += 1;
+                            } else if b4 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 4;
+                                found1 += 1;
+                            }
+                            if b5 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 5;
+                                found0 += 1;
+                            } else if b5 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 5;
+                                found1 += 1;
+                            }
+                            if b6 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 6;
+                                found0 += 1;
+                            } else if b6 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 6;
+                                found1 += 1;
+                            }
+                            if b7 == r0 {
+                                *sorted_set_ptr.add(found0) = i + 7;
+                                found0 += 1;
+                            } else if b7 == r1 {
+                                *sorted_set_ptr.add(found1) = i + 7;
+                                found1 += 1;
+                            }
+                        }
+                        i += 8;
+                        if found0 == p_len0 && found1 == target1 {
+                            break;
+                        }
                     }
-                    i += 8;
-                }
-                while i + 3 < c_len {
-                    let r_u64 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-
-                    unsafe {
-                        sort_cand!((r_u64 & 0xFFFF) as usize, c0);
-                        sort_cand!(((r_u64 >> 16) & 0xFFFF) as usize, c1);
-                        sort_cand!(((r_u64 >> 32) & 0xFFFF) as usize, c2);
-                        sort_cand!((r_u64 >> 48) as usize, c3);
+                    if found0 < p_len0 || found1 < target1 {
+                        while i < c_len {
+                            let b = unsafe { *g_u8_ptr.add(i) as usize };
+                            if b == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = i;
+                                }
+                                found0 += 1;
+                            } else if b == r1 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found1) = i;
+                                }
+                                found1 += 1;
+                            }
+                            i += 1;
+                            if found0 == p_len0 && found1 == target1 {
+                                break;
+                            }
+                        }
                     }
-                    i += 4;
-                }
-                while i < c_len {
-                    let r_idx = unsafe { *r_buf_ptr.add(i) as usize };
-                    let c = unsafe { *set_ptr.add(i) };
-                    unsafe {
-                        sort_cand!(r_idx, c);
+                } else if can_buffer {
+                    let mut i = 0;
+                    while i + 7 < c_len {
+                        let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
+                        let b0 = (r_u64_0 & 0xFFFF) as usize;
+                        let b1 = ((r_u64_0 >> 16) & 0xFFFF) as usize;
+                        let b2 = ((r_u64_0 >> 32) & 0xFFFF) as usize;
+                        let b3 = (r_u64_0 >> 48) as usize;
+                        let b4 = (r_u64_1 & 0xFFFF) as usize;
+                        let b5 = ((r_u64_1 >> 16) & 0xFFFF) as usize;
+                        let b6 = ((r_u64_1 >> 32) & 0xFFFF) as usize;
+                        let b7 = (r_u64_1 >> 48) as usize;
+                        unsafe {
+                            if b0 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i);
+                                found0 += 1;
+                            } else if b0 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i);
+                                found1 += 1;
+                            }
+                            if b1 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 1);
+                                found0 += 1;
+                            } else if b1 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 1);
+                                found1 += 1;
+                            }
+                            if b2 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 2);
+                                found0 += 1;
+                            } else if b2 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 2);
+                                found1 += 1;
+                            }
+                            if b3 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 3);
+                                found0 += 1;
+                            } else if b3 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 3);
+                                found1 += 1;
+                            }
+                            if b4 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 4);
+                                found0 += 1;
+                            } else if b4 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 4);
+                                found1 += 1;
+                            }
+                            if b5 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 5);
+                                found0 += 1;
+                            } else if b5 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 5);
+                                found1 += 1;
+                            }
+                            if b6 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 6);
+                                found0 += 1;
+                            } else if b6 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 6);
+                                found1 += 1;
+                            }
+                            if b7 == r0 {
+                                *sorted_set_ptr.add(found0) = *set_ptr.add(i + 7);
+                                found0 += 1;
+                            } else if b7 == r1 {
+                                *sorted_set_ptr.add(found1) = *set_ptr.add(i + 7);
+                                found1 += 1;
+                            }
+                        }
+                        i += 8;
+                        if found0 == p_len0 && found1 == target1 {
+                            break;
+                        }
                     }
-                    i += 1;
+                    if found0 < p_len0 || found1 < target1 {
+                        while i < c_len {
+                            let b = unsafe { *r_buf_ptr.add(i) as usize };
+                            if b == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = *set_ptr.add(i);
+                                }
+                                found0 += 1;
+                            } else if b == r1 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found1) = *set_ptr.add(i);
+                                }
+                                found1 += 1;
+                            }
+                            i += 1;
+                            if found0 == p_len0 && found1 == target1 {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    let mut i = 0;
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        unsafe {
+                            let r_0 = (*g_ptr.add(c0)).to_usize();
+                            let r_1 = (*g_ptr.add(c1)).to_usize();
+                            let r_2 = (*g_ptr.add(c2)).to_usize();
+                            let r_3 = (*g_ptr.add(c3)).to_usize();
+                            if r_0 == r0 {
+                                *sorted_set_ptr.add(found0) = c0;
+                                found0 += 1;
+                            } else if r_0 == r1 {
+                                *sorted_set_ptr.add(found1) = c0;
+                                found1 += 1;
+                            }
+                            if r_1 == r0 {
+                                *sorted_set_ptr.add(found0) = c1;
+                                found0 += 1;
+                            } else if r_1 == r1 {
+                                *sorted_set_ptr.add(found1) = c1;
+                                found1 += 1;
+                            }
+                            if r_2 == r0 {
+                                *sorted_set_ptr.add(found0) = c2;
+                                found0 += 1;
+                            } else if r_2 == r1 {
+                                *sorted_set_ptr.add(found1) = c2;
+                                found1 += 1;
+                            }
+                            if r_3 == r0 {
+                                *sorted_set_ptr.add(found0) = c3;
+                                found0 += 1;
+                            } else if r_3 == r1 {
+                                *sorted_set_ptr.add(found1) = c3;
+                                found1 += 1;
+                            }
+                        }
+                        i += 4;
+                        if found0 == p_len0 && found1 == target1 {
+                            break;
+                        }
+                    }
+                    if found0 < p_len0 || found1 < target1 {
+                        while i < c_len {
+                            let c = unsafe { *set_ptr.add(i) };
+                            let b = unsafe { (*g_ptr.add(c)).to_usize() };
+                            if b == r0 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found0) = c;
+                                }
+                                found0 += 1;
+                            } else if b == r1 {
+                                unsafe {
+                                    *sorted_set_ptr.add(found1) = c;
+                                }
+                                found1 += 1;
+                            }
+                            i += 1;
+                            if found0 == p_len0 && found1 == target1 {
+                                break;
+                            }
+                        }
+                    }
                 }
             } else {
-                while i + 7 < c_len {
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-                    let c4 = unsafe { *set_ptr.add(i + 4) };
-                    let c5 = unsafe { *set_ptr.add(i + 5) };
-                    let c6 = unsafe { *set_ptr.add(i + 6) };
-                    let c7 = unsafe { *set_ptr.add(i + 7) };
-                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
-                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
-                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
-                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
-                    let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
-                    let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
-                    let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
-                    let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+                let mut curr = 0;
+                for m in 0..M {
+                    let mut word = unsafe { *seen.get_unchecked(m) };
+                    while word != 0 {
+                        let bit_idx = word.trailing_zeros() as usize;
+                        let r = (m << 6) | bit_idx;
+                        word &= word - 1;
+                        unsafe {
+                            *current_offsets_ptr.add(r) = curr;
+                            curr += *counts_ptr.add(r);
+                        }
+                    }
+                }
 
-                    unsafe {
-                        sort_cand!(r0, c0);
-                        sort_cand!(r1, c1);
-                        sort_cand!(r2, c2);
-                        sort_cand!(r3, c3);
-                        sort_cand!(r4, c4);
-                        sort_cand!(r5, c5);
-                        sort_cand!(r6, c6);
-                        sort_cand!(r7, c7);
-                    }
-                    i += 8;
+                macro_rules! sort_cand {
+                    ($r:expr, $c:expr) => {
+                        let r = $r;
+                        let pos_ptr = current_offsets_ptr.add(r);
+                        let pos = *pos_ptr as usize;
+                        *sorted_set_ptr.add(pos) = $c;
+                        *pos_ptr += 1;
+                    };
                 }
-                while i + 3 < c_len {
-                    let c0 = unsafe { *set_ptr.add(i) };
-                    let c1 = unsafe { *set_ptr.add(i + 1) };
-                    let c2 = unsafe { *set_ptr.add(i + 2) };
-                    let c3 = unsafe { *set_ptr.add(i + 3) };
-                    let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
-                    let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
-                    let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
-                    let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
-                    unsafe {
-                        sort_cand!(r0, c0);
-                        sort_cand!(r1, c1);
-                        sort_cand!(r2, c2);
-                        sort_cand!(r3, c3);
+
+                let mut i = 0;
+                if is_contiguous_root {
+                    let g_u8_ptr = g_ptr as *const u8;
+                    while i + 15 < c_len {
+                        let r_u64_0 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (g_u8_ptr.add(i + 8) as *const u64).read_unaligned() };
+                        unsafe {
+                            sort_cand!((r_u64_0 & 0xFF) as usize, i);
+                            sort_cand!(((r_u64_0 >> 8) & 0xFF) as usize, i + 1);
+                            sort_cand!(((r_u64_0 >> 16) & 0xFF) as usize, i + 2);
+                            sort_cand!(((r_u64_0 >> 24) & 0xFF) as usize, i + 3);
+                            sort_cand!(((r_u64_0 >> 32) & 0xFF) as usize, i + 4);
+                            sort_cand!(((r_u64_0 >> 40) & 0xFF) as usize, i + 5);
+                            sort_cand!(((r_u64_0 >> 48) & 0xFF) as usize, i + 6);
+                            sort_cand!((r_u64_0 >> 56) as usize, i + 7);
+                            sort_cand!((r_u64_1 & 0xFF) as usize, i + 8);
+                            sort_cand!(((r_u64_1 >> 8) & 0xFF) as usize, i + 9);
+                            sort_cand!(((r_u64_1 >> 16) & 0xFF) as usize, i + 10);
+                            sort_cand!(((r_u64_1 >> 24) & 0xFF) as usize, i + 11);
+                            sort_cand!(((r_u64_1 >> 32) & 0xFF) as usize, i + 12);
+                            sort_cand!(((r_u64_1 >> 40) & 0xFF) as usize, i + 13);
+                            sort_cand!(((r_u64_1 >> 48) & 0xFF) as usize, i + 14);
+                            sort_cand!((r_u64_1 >> 56) as usize, i + 15);
+                        }
+                        i += 16;
                     }
-                    i += 4;
-                }
-                while i < c_len {
-                    let c = unsafe { *set_ptr.add(i) };
-                    let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
-                    unsafe {
-                        sort_cand!(r_idx, c);
+                    while i + 7 < c_len {
+                        let r_u64 = unsafe { (g_u8_ptr.add(i) as *const u64).read_unaligned() };
+                        unsafe {
+                            sort_cand!((r_u64 & 0xFF) as usize, i);
+                            sort_cand!(((r_u64 >> 8) & 0xFF) as usize, i + 1);
+                            sort_cand!(((r_u64 >> 16) & 0xFF) as usize, i + 2);
+                            sort_cand!(((r_u64 >> 24) & 0xFF) as usize, i + 3);
+                            sort_cand!(((r_u64 >> 32) & 0xFF) as usize, i + 4);
+                            sort_cand!(((r_u64 >> 40) & 0xFF) as usize, i + 5);
+                            sort_cand!(((r_u64 >> 48) & 0xFF) as usize, i + 6);
+                            sort_cand!((r_u64 >> 56) as usize, i + 7);
+                        }
+                        i += 8;
                     }
-                    i += 1;
+                    while i < c_len {
+                        unsafe {
+                            sort_cand!(*g_u8_ptr.add(i) as usize, i);
+                        }
+                        i += 1;
+                    }
+                } else if can_buffer {
+                    while i + 7 < c_len {
+                        let r_u64_0 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                        let r_u64_1 =
+                            unsafe { (r_buf_ptr.add(i + 4) as *const u64).read_unaligned() };
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let c4 = unsafe { *set_ptr.add(i + 4) };
+                        let c5 = unsafe { *set_ptr.add(i + 5) };
+                        let c6 = unsafe { *set_ptr.add(i + 6) };
+                        let c7 = unsafe { *set_ptr.add(i + 7) };
+
+                        unsafe {
+                            sort_cand!((r_u64_0 & 0xFFFF) as usize, c0);
+                            sort_cand!(((r_u64_0 >> 16) & 0xFFFF) as usize, c1);
+                            sort_cand!(((r_u64_0 >> 32) & 0xFFFF) as usize, c2);
+                            sort_cand!((r_u64_0 >> 48) as usize, c3);
+                            sort_cand!((r_u64_1 & 0xFFFF) as usize, c4);
+                            sort_cand!(((r_u64_1 >> 16) & 0xFFFF) as usize, c5);
+                            sort_cand!(((r_u64_1 >> 32) & 0xFFFF) as usize, c6);
+                            sort_cand!((r_u64_1 >> 48) as usize, c7);
+                        }
+                        i += 8;
+                    }
+                    while i + 3 < c_len {
+                        let r_u64 = unsafe { (r_buf_ptr.add(i) as *const u64).read_unaligned() };
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+
+                        unsafe {
+                            sort_cand!((r_u64 & 0xFFFF) as usize, c0);
+                            sort_cand!(((r_u64 >> 16) & 0xFFFF) as usize, c1);
+                            sort_cand!(((r_u64 >> 32) & 0xFFFF) as usize, c2);
+                            sort_cand!((r_u64 >> 48) as usize, c3);
+                        }
+                        i += 4;
+                    }
+                    while i < c_len {
+                        let r_idx = unsafe { *r_buf_ptr.add(i) as usize };
+                        let c = unsafe { *set_ptr.add(i) };
+                        unsafe {
+                            sort_cand!(r_idx, c);
+                        }
+                        i += 1;
+                    }
+                } else {
+                    while i + 7 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let c4 = unsafe { *set_ptr.add(i + 4) };
+                        let c5 = unsafe { *set_ptr.add(i + 5) };
+                        let c6 = unsafe { *set_ptr.add(i + 6) };
+                        let c7 = unsafe { *set_ptr.add(i + 7) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        let r4 = unsafe { (*g_ptr.add(c4)).to_usize() };
+                        let r5 = unsafe { (*g_ptr.add(c5)).to_usize() };
+                        let r6 = unsafe { (*g_ptr.add(c6)).to_usize() };
+                        let r7 = unsafe { (*g_ptr.add(c7)).to_usize() };
+
+                        unsafe {
+                            sort_cand!(r0, c0);
+                            sort_cand!(r1, c1);
+                            sort_cand!(r2, c2);
+                            sort_cand!(r3, c3);
+                            sort_cand!(r4, c4);
+                            sort_cand!(r5, c5);
+                            sort_cand!(r6, c6);
+                            sort_cand!(r7, c7);
+                        }
+                        i += 8;
+                    }
+                    while i + 3 < c_len {
+                        let c0 = unsafe { *set_ptr.add(i) };
+                        let c1 = unsafe { *set_ptr.add(i + 1) };
+                        let c2 = unsafe { *set_ptr.add(i + 2) };
+                        let c3 = unsafe { *set_ptr.add(i + 3) };
+                        let r0 = unsafe { (*g_ptr.add(c0)).to_usize() };
+                        let r1 = unsafe { (*g_ptr.add(c1)).to_usize() };
+                        let r2 = unsafe { (*g_ptr.add(c2)).to_usize() };
+                        let r3 = unsafe { (*g_ptr.add(c3)).to_usize() };
+                        unsafe {
+                            sort_cand!(r0, c0);
+                            sort_cand!(r1, c1);
+                            sort_cand!(r2, c2);
+                            sort_cand!(r3, c3);
+                        }
+                        i += 4;
+                    }
+                    while i < c_len {
+                        let c = unsafe { *set_ptr.add(i) };
+                        let r_idx = unsafe { (*g_ptr.add(c)).to_usize() };
+                        unsafe {
+                            sort_cand!(r_idx, c);
+                        }
+                        i += 1;
+                    }
                 }
             }
 
