@@ -9,12 +9,16 @@ The result is exact, not a heuristic. The solver considers every allowed guess
 at every step. It skips a guess only when a bound proves that the guess cannot
 beat the best strategy found so far.
 
+> **This project has ended.** As of 15 November 2026 it is no longer being
+> developed or maintained, and no further changes are planned. The code, the
+> prebuilt binaries and the viewer remain available as they are.
+
 ## Results
 
 For the bundled word lists (2,340 answers, 14,855 allowed guesses), the optimal
 strategy needs 8,001 guesses in total, or 3.419 guesses per game on average.
 It opens with `tarse` and needs at most 6 guesses for any answer. Building that
-tree takes about 37 seconds on a 16-core machine.
+tree takes about half a minute on a 16-core machine.
 
 The solver also reproduces every optimum that [Alex Selby](https://github.com/alex1770/wordle) published for the
 official Wordle lists, which were computed with his own independent program:
@@ -112,18 +116,25 @@ displayed. The file is read locally and is not uploaded anywhere.
 
 Both files contain one word per line.
 
-- Every word must have exactly 5 characters.
-- Any characters are allowed, not just `a` to `z`. Letters are converted to
-  lowercase, so `Crane` and `crane` are the same word.
+- Words can be any length from 1 to 10 characters (Wordle defaults to 5), but
+  all words across both files must have the same length.
+- Any ASCII characters other than spaces are allowed, not just `a` to `z`.
+  Letters are converted to lowercase, so `Crane` and `crane` are the same
+  word. Characters outside ASCII (such as `é` or Cyrillic letters) are
+  refused, because the solver compares words byte by byte.
+- If you give only `--candidates`, the guesses default to the bundled
+  five-letter list, so for other word lengths pass `--guesses` too.
 - Blank lines and duplicate words are ignored.
 - Every answer is added to the guess list automatically, so the guess file does
   not need to repeat them.
 - The guess list can hold at most 65,535 words.
 
-Solve time grows quickly with the number of answers. A few hundred answers take
-seconds. About 2,300 answers take 30 to 50 seconds on 16 cores, and 3,158
-answers took about 5.5 minutes. To try out a large list, solve a subset first
-with `--max-candidates`.
+Solve time grows quickly with the number of answers, and memory grows with
+the number of possible responses, which is `3^L` for words of length `L`:
+ten-letter lists of a few thousand words need several GB. A few hundred
+answers take seconds, about 2,300 answers take under a minute on 16 cores, and
+3,158 answers took about 5.5 minutes. To try out a large list, solve a subset
+first with `--max-candidates`.
 
 ## Commands
 
@@ -199,14 +210,15 @@ wordle-opt solve --output tree.json --certify tree.cert
 wordle-opt check tree.json tree.cert
 ```
 
-On the bundled lists the certificate is about 9.5 MB, writing it adds about
-75 seconds to the solve on a 16-core machine, and checking it takes about
-45 seconds. On smaller lists both are fast.
+On the bundled lists the certificate is about 10 MB, writing it adds about
+a minute or two to the solve on a 16-core machine, and checking it takes about
+a minute. On smaller lists both are fast.
 
 ## Tree format
 
 A policy tree has a guess at every node. Each edge is a response to that guess,
-written as five letters: `g` for green, `y` for yellow, `b` for gray. The
+written with one letter per position: `g` for green, `y` for yellow, `b` for
+gray. The
 all-green response has no edge: it always ends the game, so it follows from
 the tree and is not a choice the policy makes, and storing it would be redundant.
 
@@ -251,9 +263,9 @@ it with the same rules as `validate` before showing it. It has two modes:
 - **Explore** shows statistics for the tree, a chart of how many games take 1,
   2, 3 or more guesses, and the full tree, which you can expand and search.
 
-The viewer reads the word length from the tree, so it also works with trees
-for words of other lengths. `site/examples/` has 3, 4 and 6 letter examples.
-The solver itself only handles 5-letter words.
+The viewer reads the word length from the tree, so it works with trees
+for words of any length from 1 to 10 characters. `site/examples/` has 3, 4 and
+6 letter examples.
 
 Bundled examples:
 
@@ -322,6 +334,7 @@ run the real solver on real word lists. The main checks are:
 | `shared_components.rs` | The response table, `Response::compute` and the tree format, which the solver and the checker share, against independent code: every pair of words over small alphabets, random words, and trees round-tripped through JSON. |
 | `certificate.rs` | The certificate checker accepts certificates built from brute force and rejects false or malformed ones, and certificates the solver writes must check. |
 | `cli.rs` | The binary reads word lists from files and writes and validates a tree. |
+| `other_lengths.rs` | Word lengths 1 to 10, with its own response rules and brute force: `solve` finds the optimum and its certificate checks, deep trees of long words solve, forged certificates are rejected, and input the solver cannot handle is refused. |
 
 `published_optima.rs` and `full_scale.rs` are skipped by default because each
 test solves full-size lists, which takes from seconds to minutes. Run them with:

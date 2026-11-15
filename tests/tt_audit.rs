@@ -60,8 +60,16 @@ fn lists(seed: u64, size: usize) -> Lists {
     if !n.is_multiple_of(64) {
         *all_guesses.last_mut().unwrap() = (1 << (n % 64)) - 1;
     }
-    let guess_words = dict.guesses.iter().map(|w| w.0).collect();
-    let candidate_words = dict.candidates.iter().map(|w| w.0).collect();
+    let guess_words = dict
+        .guesses
+        .iter()
+        .map(|w| w.as_bytes().try_into().unwrap())
+        .collect();
+    let candidate_words = dict
+        .candidates
+        .iter()
+        .map(|w| w.as_bytes().try_into().unwrap())
+        .collect();
     Lists {
         dict,
         matrix,

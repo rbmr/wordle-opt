@@ -168,23 +168,41 @@ fn load_dict_from_flags(flags: &Flags, max_candidates: usize) -> (Dictionary, St
     let has_custom_candidates = flags.get("candidates").is_some();
 
     let full = if has_custom_guesses || has_custom_candidates {
-        let guesses = if let Some(p) = flags.get("guesses") {
-            Dictionary::read_words(p)
+        let (guesses, guesses_source) = if let Some(p) = flags.get("guesses") {
+            (Dictionary::read_words(p), p.to_string())
         } else if std::path::Path::new("words/guesses.txt").exists() {
-            Dictionary::read_words("words/guesses.txt")
+            (
+                Dictionary::read_words("words/guesses.txt"),
+                "words/guesses.txt".to_string(),
+            )
         } else {
-            Ok(Dictionary::load_default().guesses)
+            (
+                Ok(Dictionary::load_default().guesses),
+                "the bundled list".to_string(),
+            )
         };
-        let candidates = if let Some(p) = flags.get("candidates") {
-            Dictionary::read_words(p)
+        let (candidates, candidates_source) = if let Some(p) = flags.get("candidates") {
+            (Dictionary::read_words(p), p.to_string())
         } else if std::path::Path::new("words/candidates.txt").exists() {
-            Dictionary::read_words("words/candidates.txt")
+            (
+                Dictionary::read_words("words/candidates.txt"),
+                "words/candidates.txt".to_string(),
+            )
         } else {
-            Ok(Dictionary::load_default().candidates)
+            (
+                Ok(Dictionary::load_default().candidates),
+                "the bundled list".to_string(),
+            )
         };
-        match (guesses, candidates) {
-            (Ok(g), Ok(c)) => Dictionary::from_words(g, c),
-            (Err(e), _) | (_, Err(e)) => {
+        let checked = guesses
+            .and_then(|g| candidates.map(|c| (g, c)))
+            .and_then(|(g, c)| {
+                Dictionary::check_same_length(&g, &guesses_source, &c, &candidates_source)
+                    .map(|()| (g, c))
+            });
+        match checked {
+            Ok((g, c)) => Dictionary::from_words(g, c),
+            Err(e) => {
                 eprintln!("solve: {e}");
                 std::process::exit(2);
             }
@@ -614,8 +632,28 @@ candidate terminates. The dictionary is embedded in the tree file."
     );
 }
 
+/// Stack size for the CLI thread and every rayon worker. Each search level
+/// keeps arrays with one entry per response on the stack, and there are `3^L`
+/// responses for words of length `L`: about 1.5 MB per level for 10 letters,
+/// far past the 2 MB default for a deep tree. Unused stack is never touched,
+/// so this costs address space, not memory.
+const SOLVER_STACK_BYTES: usize = 64 << 20;
+
 /// Command line interface entrypoint: solve, validate, certify and check.
 pub fn run_cli() {
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(SOLVER_STACK_BYTES)
+        .build_global()
+        .expect("the global thread pool is configured once, before any use");
+    std::thread::Builder::new()
+        .stack_size(SOLVER_STACK_BYTES)
+        .spawn(run_cli_on_this_thread)
+        .expect("failed to start the main thread")
+        .join()
+        .unwrap_or_else(|_| std::process::exit(101));
+}
+
+fn run_cli_on_this_thread() {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("solve") => run_solve_cli(&args[2..]),

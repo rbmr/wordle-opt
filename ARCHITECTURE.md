@@ -11,8 +11,11 @@ A subset of candidates can be reached via multiple distinct guess
 sequences; the transposition table memoizes results so an already-solved
 subtree isn't re-searched. This is **not** a `DashMap` or any lock-based
 structure - it's a fixed-size `Vec<AtomicU64>`, each slot packing a 45-bit
-Zobrist hash, an 18-bit cost value, and a 1-bit exact/lower-bound flag, read
-and written with relaxed atomics and no locking.
+key, an 18-bit cost value, and a 1-bit exact/lower-bound flag, read and
+written with relaxed atomics and no locking. The key's top bit is always set,
+so an empty (all-zero) slot never matches; the other 44 bits come from the
+set's 64-bit Zobrist hash. Two sets whose hashes agree in those bits and in
+the slot index would share an entry, a risk that is small but not zero.
 
 To combat severe cache thrashing (the "depth cliff") at large scales where 
 frequent deep-node evaluation overwrites valuable shallow-node results, 
@@ -44,6 +47,12 @@ it gives up one candidate at depth 1 for a whole extra subtree at depth 2.
 The bound accounts for both kinds of guess, and equals the simpler
 all-candidates count wherever that count is still a valid bound. The tests
 in `src/heuristic.rs` check it against exact minima computed by brute force.
+
+The bound on a child bucket must hold whichever guess the bucket's own
+search starts with, so it takes the smaller of the two: a bucket of five
+candidates where no guess gives more than two responses costs 15 if its first
+guess is one of them, but 14 if it is a guess that splits it 2 + 3
+(`heuristic::bucket_capacity_bound`).
 
 A guess whose lower bound already exceeds the current best cannot possibly
 improve on it and is discarded before its subtree is ever expanded.
@@ -117,10 +126,8 @@ evaluated exactly. `tests/tt_audit.rs` (behind the `tt-audit` feature)
 checks every table write made during repeated multi-threaded solves
 against a solve of that set alone.
 
-Bucket
-histogramming in the hot loop uses fixed-size stack arrays (`counts[243]`,
-etc., since there are at most 243 distinct Wordle responses) rather than
-heap allocation.
+Bucket histogramming in the hot loop uses fixed-size stack arrays with one
+entry per response (see "Word lengths" below) rather than heap allocation.
 
 ## 7. Fail-Hard Transposition Cache Lookups
 
@@ -168,8 +175,32 @@ many responses a guess can give on a set from which letters occur where, so
 guesses that cannot exceed a capacity limit are not read, and an expansion
 skips guesses whose smallest possible default sum already reaches the claim,
 while still reading every guess that could raise `k`. On the bundled lists the
-certificate has about 630,000 claims (9.5 MB); assembling it takes about a
-minute and checking it about 45 seconds on 16 cores.
+certificate has about 630,000 claims (10 MB); assembling it takes one to two
+minutes and checking it about a minute on 16 cores.
+
+## Word lengths
+
+Words can have 1 to 10 letters. A response is a base-3 number with one digit
+per position (0 gray, 1 green, 2 yellow, position 0 least significant), so
+there are `3^L` responses and the all-green one is `(3^L - 1) / 2`; nothing
+may assume the five-letter values 243 and 121. The response table stores
+responses as `u8` up to five letters and `u16` beyond.
+
+The search is compiled once per length (`SpecializedSolver<R, M, WIN, Elem>`
+in `src/solver.rs`, chosen in `new_solver_variant!`), so every per-response
+array has a size known at compile time. Those arrays live on the stack, about
+1.5 MB per search level for ten letters, so the CLI runs the search on
+threads with 64 MB stacks (`SOLVER_STACK_BYTES` in `src/lib.rs`). Per-depth
+scratch is sized for 32 levels, and a search that goes deeper stops with a
+panic. Such inputs (long chains of words that differ in one letter) are
+exponentially slow well before that depth.
+
+Letters are numbered densely in the order they occur (`dict::letter_index`).
+Up to 31 distinct letters, letter masks and guess projections speed up
+equivalence pruning; with more, or for words longer than eight letters (the
+projections hold eight positions), those shortcuts are switched off rather
+than risk merging guesses that differ. Words are compared byte by byte, so
+input is limited to ASCII.
 
 ## Known Scaling Behavior: depth transitions, not a smooth curve
 

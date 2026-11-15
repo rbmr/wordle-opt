@@ -9,13 +9,18 @@
 //! Layout, little-endian:
 //!
 //! ```text
-//! magic "WOCERT01" | digest u64 | guesses u32 | candidates u32 | claims u32
-//! per claim: tag u8 (0 root, 1 bucket) [parent u32, guess u32, response u8]
+//! magic "WOCERT02" | digest u64 | guesses u32 | candidates u32 | claims u32
+//! per claim: tag u8 (0 root, 1 bucket) [parent u32, guess u32, response u16]
 //!            bound u32 | rule u8
 //! ```
+//!
+//! Version 1 (`"WOCERT01"`) stored the response in one byte, which only holds
+//! the responses of words up to five letters. It is still read.
 
-/// First eight bytes of every certificate.
-pub const MAGIC: &[u8; 8] = b"WOCERT01";
+/// First eight bytes of every certificate written now.
+pub const MAGIC: &[u8; 8] = b"WOCERT02";
+/// First eight bytes of a version 1 certificate (one-byte responses).
+pub const MAGIC_V1: &[u8; 8] = b"WOCERT01";
 
 /// `|S| = 1` costs 1 and `|S| = 2` costs 3.
 pub const RULE_BASE: u8 = 0;
@@ -35,7 +40,7 @@ pub enum SetDef {
     Child {
         parent: u32,
         guess: u32,
-        response: u8,
+        response: u16,
     },
 }
 
@@ -78,9 +83,9 @@ pub fn l3(n: usize, k: usize) -> u64 {
 }
 
 /// FNV-1a over both word lists, binding a certificate to the exact lists.
-pub fn digest<'a>(
-    guesses: impl IntoIterator<Item = &'a [u8; 5]>,
-    candidates: impl IntoIterator<Item = &'a [u8; 5]>,
+pub fn digest<'a, T: AsRef<[u8]> + 'a>(
+    guesses: impl IntoIterator<Item = &'a T>,
+    candidates: impl IntoIterator<Item = &'a T>,
 ) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     let mut eat = |b: u8| {
@@ -89,18 +94,18 @@ pub fn digest<'a>(
     };
     eat(b'G');
     for w in guesses {
-        w.iter().for_each(|&b| eat(b));
+        w.as_ref().iter().for_each(|&b| eat(b));
     }
     eat(b'C');
     for w in candidates {
-        w.iter().for_each(|&b| eat(b));
+        w.as_ref().iter().for_each(|&b| eat(b));
     }
     h
 }
 
 /// Serializes a certificate.
 pub fn encode(header: &Header, claims: &[Claim]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(28 + 14 * claims.len());
+    let mut out = Vec::with_capacity(28 + 15 * claims.len());
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&header.digest.to_le_bytes());
     out.extend_from_slice(&header.guesses.to_le_bytes());
@@ -117,7 +122,7 @@ pub fn encode(header: &Header, claims: &[Claim]) -> Vec<u8> {
                 out.push(1);
                 out.extend_from_slice(&parent.to_le_bytes());
                 out.extend_from_slice(&guess.to_le_bytes());
-                out.push(response);
+                out.extend_from_slice(&response.to_le_bytes());
             }
         }
         out.extend_from_slice(&c.bound.to_le_bytes());
@@ -140,6 +145,9 @@ impl Reader<'_> {
     fn u8(&mut self) -> Result<u8, String> {
         Ok(self.take(1)?[0])
     }
+    fn u16(&mut self) -> Result<u16, String> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+    }
     fn u32(&mut self) -> Result<u32, String> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
@@ -152,9 +160,11 @@ impl Reader<'_> {
 /// the lists, and what the claims mean, is up to the reader.
 pub fn decode(bytes: &[u8]) -> Result<(Header, Vec<Claim>), String> {
     let mut r = Reader(bytes);
-    if r.take(8)? != MAGIC {
-        return Err("not a certificate (bad magic)".into());
-    }
+    let wide = match r.take(8)? {
+        m if m == MAGIC => true,
+        m if m == MAGIC_V1 => false,
+        _ => return Err("not a certificate (bad magic)".into()),
+    };
     let header = Header {
         digest: r.u64()?,
         guesses: r.u32()?,
@@ -168,7 +178,7 @@ pub fn decode(bytes: &[u8]) -> Result<(Header, Vec<Claim>), String> {
             1 => SetDef::Child {
                 parent: r.u32()?,
                 guess: r.u32()?,
-                response: r.u8()?,
+                response: if wide { r.u16()? } else { r.u8()? as u16 },
             },
             t => return Err(format!("claim {i}: unknown set tag {t}")),
         };
@@ -219,8 +229,55 @@ mod tests {
                 bound: 1,
                 rule: RULE_BASE,
             },
+            // A seven-letter response code, too large for one byte.
+            Claim {
+                def: SetDef::Child {
+                    parent: 0,
+                    guess: 3,
+                    response: 2185,
+                },
+                bound: 3,
+                rule: RULE_CAPACITY,
+            },
         ];
         (header, claims)
+    }
+
+    /// Version 1 files, with one-byte responses, still decode.
+    #[test]
+    fn decode_reads_version_1() {
+        let mut v1 = MAGIC_V1.to_vec();
+        v1.extend_from_slice(&7u64.to_le_bytes());
+        v1.extend_from_slice(&10u32.to_le_bytes());
+        v1.extend_from_slice(&4u32.to_le_bytes());
+        v1.extend_from_slice(&2u32.to_le_bytes());
+        v1.push(0);
+        v1.extend_from_slice(&9u32.to_le_bytes());
+        v1.push(RULE_EXPANSION);
+        v1.push(1);
+        v1.extend_from_slice(&0u32.to_le_bytes());
+        v1.extend_from_slice(&5u32.to_le_bytes());
+        v1.push(200);
+        v1.extend_from_slice(&3u32.to_le_bytes());
+        v1.push(RULE_CAPACITY);
+        let (header, claims) = decode(&v1).unwrap();
+        assert_eq!(
+            header,
+            Header {
+                digest: 7,
+                guesses: 10,
+                candidates: 4
+            }
+        );
+        assert_eq!(
+            claims[1].def,
+            SetDef::Child {
+                parent: 0,
+                guess: 5,
+                response: 200
+            }
+        );
+        assert!(decode(&v1[..v1.len() - 1]).is_err());
     }
 
     #[test]

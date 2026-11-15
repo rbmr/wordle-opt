@@ -14,7 +14,9 @@ set -e
 # feature; WORDLE_OPT_REPEAT=N runs the command N times in a row, so one
 # invocation yields N timings of the same build; WORDLE_OPT_RUSTFLAGS replaces
 # the default compiler flags (-C target-cpu=native), for example to time a
-# portable build.
+# portable build; WORDLE_OPT_IGNORED_TESTS="published_optima full_scale" also
+# runs those integration tests with --ignored after the normal suite (and, when
+# no command is given, stops there).
 #
 # The remote copy lives in ~/wordle-opt and is an exact mirror of this working
 # tree without .git, so the commit is determined here and passed to the run in
@@ -43,6 +45,17 @@ echo "Running the test suite on $HOST..."
 ssh "$HOST" "cd wordle-opt && timeout 1800 env RUSTFLAGS=\"$RUSTFLAGS_REMOTE\" ~/.cargo/bin/cargo test --release $FEATURES"
 
 CMD_ARGS="$*"
+if [ -n "${WORDLE_OPT_IGNORED_TESTS:-}" ]; then
+	TEST_ARGS=""
+	for t in $WORDLE_OPT_IGNORED_TESTS; do
+		TEST_ARGS="$TEST_ARGS --test $t"
+	done
+	echo "Running ignored tests on $HOST (time limit 2 h):$TEST_ARGS"
+	ssh "$HOST" "cd wordle-opt && timeout 7200 env RUSTFLAGS=\"$RUSTFLAGS_REMOTE\" ~/.cargo/bin/cargo test --release $FEATURES $TEST_ARGS -- --ignored"
+	if [ -z "$CMD_ARGS" ]; then
+		exit 0
+	fi
+fi
 if [ -z "$CMD_ARGS" ]; then
 	CMD_ARGS="solve --strategy optimal --max-candidates 250 --sample-seed 1 --output /tmp/iter-tree-250.json"
 fi

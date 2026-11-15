@@ -29,15 +29,18 @@ fn all_words(letters: &[u8]) -> Vec<W> {
 /// with the independent feedback function on every pair of `words`.
 fn check_table(guesses: Vec<W>, candidates: Vec<W>) {
     let dict = Dictionary::from_words(
-        guesses.into_iter().map(Word).collect(),
-        candidates.into_iter().map(Word).collect(),
+        guesses.into_iter().map(Word::from).collect(),
+        candidates.into_iter().map(Word::from).collect(),
     );
     let m = ResponseMatrix::new(&dict);
     assert_eq!(m.num_guesses, dict.guesses.len());
     assert_eq!(m.num_candidates, dict.candidates.len());
     for (g, guess) in dict.guesses.iter().enumerate() {
         for (c, cand) in dict.candidates.iter().enumerate() {
-            let want = feedback(&guess.0, &cand.0);
+            let want = feedback(
+                guess.as_bytes().try_into().unwrap(),
+                cand.as_bytes().try_into().unwrap(),
+            );
             let row = m.data[g * m.num_candidates + c].0;
             let col = m.data_c_g[c * m.num_guesses + g].0;
             let direct = Response::compute(cand, guess).0;
@@ -89,8 +92,8 @@ fn trees_survive_the_readable_format_unchanged() {
         let candidates = rng.sample(&guesses, 25);
         let inst = Instance::new(guesses, candidates);
         let dict = Dictionary::from_words(
-            inst.guesses.iter().map(|&w| Word(w)).collect(),
-            inst.candidates.iter().map(|&w| Word(w)).collect(),
+            inst.guesses.iter().map(|&w| Word::from(w)).collect(),
+            inst.candidates.iter().map(|&w| Word::from(w)).collect(),
         );
         let matrix = ResponseMatrix::new(&dict);
         let root: Vec<usize> = (0..dict.candidates.len()).collect();

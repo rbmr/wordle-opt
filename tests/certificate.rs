@@ -24,7 +24,7 @@ fn tree_json(inst: &Instance) -> String {
 /// unlike `common::Oracle` it can leave guesses out.
 struct GuessOracle {
     /// rows[g][c] = feedback of guess g on candidate c
-    rows: Vec<Vec<u8>>,
+    rows: Vec<Vec<u16>>,
     allowed: Vec<bool>,
     memo: HashMap<u64, u32>,
 }
@@ -44,8 +44,8 @@ impl GuessOracle {
         }
     }
 
-    fn buckets(&self, g: usize, mask: u64) -> Vec<(u8, u64)> {
-        let mut by: Vec<(u8, u64)> = Vec::new();
+    fn buckets(&self, g: usize, mask: u64) -> Vec<(u16, u64)> {
+        let mut by: Vec<(u16, u64)> = Vec::new();
         for c in 0..64 {
             if mask >> c & 1 == 1 {
                 let r = self.rows[g][c];
@@ -101,7 +101,7 @@ impl GuessOracle {
 #[derive(Clone)]
 struct Claim {
     /// None = root, else (parent, guess, response)
-    def: Option<(u32, u32, u8)>,
+    def: Option<(u32, u32, u16)>,
     bound: u32,
     rule: u8,
 }
@@ -165,7 +165,7 @@ fn encode(inst: &Instance, claims: &[Claim]) -> Vec<u8> {
                 out.push(1);
                 out.extend_from_slice(&p.to_le_bytes());
                 out.extend_from_slice(&g.to_le_bytes());
-                out.push(r);
+                out.extend_from_slice(&r.to_le_bytes());
             }
         }
         out.extend_from_slice(&c.bound.to_le_bytes());
@@ -396,7 +396,7 @@ fn accepted_mutants_only_make_true_claims() {
                         if i > 0 {
                             let parent = rng.below(i) as u32;
                             let guess = rng.below(inst.guesses.len()) as u32;
-                            let response = rng.below(243) as u8;
+                            let response = rng.below(243) as u16;
                             bad[i].def = Some((parent, guess, response));
                         }
                     }

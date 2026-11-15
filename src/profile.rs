@@ -12,65 +12,73 @@ fn add(set: &mut ByteSet, b: u8) {
     set[(b >> 6) as usize] |= 1 << (b & 63);
 }
 
+/// The most positions a profile tracks: the capacity of a [`crate::core::Word`].
+const MAX_POS: usize = 15;
+
 /// For one set of words, which letters occur where.
 ///
 /// Position `i` of a guess with letter `l` can only be green if some word has
 /// `l` at `i`, only yellow if some word has `l` elsewhere and not at `i`, and
 /// only black if some word lacks `l` (or, when the guess repeats `l`, does not
-/// have `l` at `i`). The response is the five marks together, so at most the
-/// product of the per-position counts of possible marks can occur.
+/// have `l` at `i`). The response is the marks at every position together, so
+/// at most the product of the per-position counts of possible marks can occur.
+/// This holds for words of any length; every position is counted.
 pub struct SetProfile {
     words: usize,
     /// Letters some word has at position `i`.
-    at: [ByteSet; 5],
+    at: [ByteSet; MAX_POS],
     /// Letters some word lacks at position `i`.
-    not_at: [ByteSet; 5],
+    not_at: [ByteSet; MAX_POS],
     /// Letters some word has, but not at position `i`.
-    elsewhere: [ByteSet; 5],
+    elsewhere: [ByteSet; MAX_POS],
     /// Letters some word lacks entirely.
     missing: ByteSet,
 }
 
 impl SetProfile {
-    pub fn new<'a>(words: impl IntoIterator<Item = &'a [u8; 5]>) -> Self {
+    pub fn new<'a, T: AsRef<[u8]> + 'a>(words: impl IntoIterator<Item = &'a T>) -> Self {
         let mut p = SetProfile {
             words: 0,
-            at: [[0; 4]; 5],
-            not_at: [[0; 4]; 5],
-            elsewhere: [[0; 4]; 5],
+            at: [[0; 4]; MAX_POS],
+            not_at: [[0; 4]; MAX_POS],
+            elsewhere: [[0; 4]; MAX_POS],
             missing: [0; 4],
         };
-        // Per letter, how many words have it, and how many have it at each
-        // position; `missing` and `not_at` follow from the counts.
-        let mut with = [0usize; 256];
-        let mut with_at = [[0usize; 256]; 5];
+        // Letters every word has, and letters every word has at each
+        // position; `missing` and `not_at` are their complements.
+        let mut in_all: ByteSet = [u64::MAX; 4];
+        let mut at_in_all: [ByteSet; MAX_POS] = [[u64::MAX; 4]; MAX_POS];
         for w in words {
+            let slice = w.as_ref();
+            assert!(slice.len() <= MAX_POS, "word longer than {MAX_POS} bytes");
             p.words += 1;
             let mut seen: ByteSet = [0; 4];
-            for (i, &b) in w.iter().enumerate() {
+            for (i, &b) in slice.iter().enumerate() {
                 add(&mut p.at[i], b);
-                with_at[i][b as usize] += 1;
-                if !has(&seen, b) {
-                    add(&mut seen, b);
-                    with[b as usize] += 1;
+                add(&mut seen, b);
+                let mut only: ByteSet = [0; 4];
+                add(&mut only, b);
+                for (x, o) in at_in_all[i].iter_mut().zip(only) {
+                    *x &= o;
                 }
             }
-            for (i, &own) in w.iter().enumerate() {
-                for &b in w {
+            for (x, s) in in_all.iter_mut().zip(seen) {
+                *x &= s;
+            }
+            for (i, &own) in slice.iter().enumerate() {
+                for &b in slice {
                     if b != own {
                         add(&mut p.elsewhere[i], b);
                     }
                 }
             }
         }
-        for b in 0..=255u8 {
-            if with[b as usize] < p.words {
-                add(&mut p.missing, b);
-            }
-            for (not_at, counts) in p.not_at.iter_mut().zip(&with_at) {
-                if counts[b as usize] < p.words {
-                    add(not_at, b);
-                }
+        for (m, x) in p.missing.iter_mut().zip(in_all) {
+            *m = !x;
+        }
+        for (not_at, all) in p.not_at.iter_mut().zip(&at_in_all) {
+            for (n, x) in not_at.iter_mut().zip(all) {
+                *n = !x;
             }
         }
         p
@@ -78,7 +86,7 @@ impl SetProfile {
 
     /// Upper bound on the distinct responses `guess` gives on the set,
     /// never more than the number of words.
-    pub fn max_responses(&self, guess: &[u8; 5]) -> usize {
+    pub fn max_responses(&self, guess: &[u8]) -> usize {
         let mut product = 1usize;
         for (i, &l) in guess.iter().enumerate() {
             let repeated = guess.iter().filter(|&&b| b == l).count() > 1;
@@ -89,7 +97,7 @@ impl SetProfile {
             } else {
                 has(&self.missing, l)
             } as usize;
-            product *= green + yellow + black;
+            product = product.saturating_mul(green + yellow + black);
         }
         product.min(self.words)
     }
@@ -162,5 +170,69 @@ mod tests {
         }
         // Not a requirement for soundness, only a sign the bound is useful.
         assert!(tight > 20_000, "bound met with equality only {tight} times");
+    }
+
+    /// The responses for words of any length, as a base-3 number.
+    fn response_any(guess: &[u8], secret: &[u8]) -> u64 {
+        let n = guess.len();
+        let mut marks = vec![0u8; n];
+        let mut unmatched = [0u8; 256];
+        for i in 0..n {
+            if guess[i] == secret[i] {
+                marks[i] = 1;
+            } else {
+                unmatched[secret[i] as usize] += 1;
+            }
+        }
+        for i in 0..n {
+            let l = guess[i] as usize;
+            if marks[i] == 0 && unmatched[l] > 0 {
+                marks[i] = 2;
+                unmatched[l] -= 1;
+            }
+        }
+        marks.iter().rev().fold(0, |acc, &m| acc * 3 + m as u64)
+    }
+
+    /// The bound must hold at every word length the dictionary accepts, not
+    /// only for five letters: positions past the fifth vary the response too.
+    #[test]
+    fn bound_holds_for_every_word_length() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for len in 1..=10usize {
+            for trial in 0..3_000 {
+                let alphabet = 2 + rng.below(6);
+                let word = |rng: &mut Rng| -> Vec<u8> {
+                    (0..len).map(|_| b'a' + rng.below(alphabet) as u8).collect()
+                };
+                let set: Vec<Vec<u8>> = (0..1 + rng.below(30)).map(|_| word(&mut rng)).collect();
+                let profile = SetProfile::new(&set);
+                for _ in 0..6 {
+                    let g = word(&mut rng);
+                    let mut seen = std::collections::HashSet::new();
+                    let actual = set
+                        .iter()
+                        .filter(|s| seen.insert(response_any(&g, s)))
+                        .count();
+                    let bound = profile.max_responses(&g);
+                    assert!(
+                        actual <= bound,
+                        "length {len}, trial {trial}: guess {:?} gives {actual} responses on {:?}, bound {bound}",
+                        String::from_utf8_lossy(&g),
+                        set.iter()
+                            .map(|w| String::from_utf8_lossy(w).into_owned())
+                            .collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Words that differ only after the fifth position.
+    #[test]
+    fn late_positions_count() {
+        let set: Vec<&[u8]> = vec![b"aaaaab", b"aaaaac"];
+        let profile = SetProfile::new(&set);
+        assert_eq!(profile.max_responses(b"aaaaab"), 2);
     }
 }

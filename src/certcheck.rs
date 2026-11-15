@@ -40,9 +40,6 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-/// The all-green response.
-const WIN: u8 = Response::WIN.0;
-
 #[derive(Debug, Default)]
 pub struct Report {
     pub tree_cost: u64,
@@ -80,15 +77,13 @@ impl Lists {
     fn candidates(&self) -> usize {
         self.dict.candidates.len()
     }
-    /// Responses of guess `g` to every candidate.
-    fn row(&self, g: usize) -> &[Response] {
-        let n = self.candidates();
-        &self.matrix.data[g * n..(g + 1) * n]
+    #[inline(always)]
+    fn get(&self, g: usize, c: usize) -> Response {
+        self.matrix.get(g, c)
     }
-    /// Responses of every guess to candidate `c`.
-    fn column(&self, c: usize) -> &[Response] {
-        let n = self.guesses();
-        &self.matrix.data_c_g[c * n..(c + 1) * n]
+    #[inline(always)]
+    fn get_cg(&self, c: usize, g: usize) -> Response {
+        self.matrix.get_cg(c, g)
     }
 }
 
@@ -102,10 +97,7 @@ struct ClaimRec {
 /// claim's set from its definition.
 fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
     let (header, raw) = certfile::decode(cert)?;
-    let digest = certfile::digest(
-        lists.dict.guesses.iter().map(|w| &w.0),
-        lists.dict.candidates.iter().map(|w| &w.0),
-    );
+    let digest = certfile::digest(lists.dict.guesses.iter(), lists.dict.candidates.iter());
     if header.digest != digest {
         return Err("certificate is for different word lists".into());
     }
@@ -124,15 +116,18 @@ fn parse_claims(cert: &[u8], lists: &Lists) -> Result<Vec<ClaimRec>, String> {
                 response,
             } => {
                 let (parent, g) = (parent as usize, guess as usize);
-                if parent >= i || g >= lists.guesses() || response >= 243 || response == WIN {
+                if parent >= i
+                    || g >= lists.guesses()
+                    || response as usize >= lists.matrix.num_responses
+                    || response == lists.matrix.win_response.0
+                {
                     return Err(format!("claim {i}: bad set definition"));
                 }
-                let row = lists.row(g);
                 let set: Vec<u16> = claims[parent]
                     .set
                     .iter()
                     .copied()
-                    .filter(|&c| row[c as usize].0 == response)
+                    .filter(|&c| lists.get(g, c as usize).0 == response)
                     .collect();
                 if set.is_empty() {
                     return Err(format!("claim {i}: empty set"));
@@ -156,26 +151,63 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
     if set.len() <= limit {
         return true;
     }
-    let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize].0));
+    let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize]));
     let risky: Vec<usize> = (0..lists.guesses())
-        .filter(|&g| profile.max_responses(&lists.dict.guesses[g].0) > limit)
+        .filter(|&g| profile.max_responses(&lists.dict.guesses[g]) > limit)
         .collect();
-    let mut seen = [[0u64; 4]; 256];
-    for chunk in risky.chunks(256) {
-        let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 4]);
-        for &c in set {
-            let column = lists.column(c as usize);
-            for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = column[g].0;
-                s[(r >> 6) as usize] |= 1 << (r & 63);
+    let mask_words = lists.matrix.num_responses.div_ceil(64);
+    if mask_words <= 4 {
+        let mut seen = [[0u64; 4]; 64];
+        for chunk in risky.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 4]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            if seen
+                .iter()
+                .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
+            {
+                return false;
             }
         }
-        if seen
-            .iter()
-            .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
-        {
-            return false;
+    } else if mask_words <= 36 {
+        let mut seen = [[0u64; 36]; 64];
+        for chunk in risky.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 36]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            if seen
+                .iter()
+                .any(|s| s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit)
+            {
+                return false;
+            }
+        }
+    } else {
+        let mut seen = vec![0u64; 64 * mask_words];
+        for chunk in risky.chunks(64) {
+            let seen_chunk = &mut seen[..chunk.len() * mask_words];
+            seen_chunk.fill(0);
+            for &c in set {
+                for (j, &g) in chunk.iter().enumerate() {
+                    let r = lists.get_cg(c as usize, g).0;
+                    seen_chunk[j * mask_words + (r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen_chunk.chunks_exact(mask_words) {
+                if s.iter().map(|w| w.count_ones() as usize).sum::<usize>() > limit {
+                    return false;
+                }
+            }
         }
     }
     true
@@ -184,19 +216,51 @@ fn branching_at_most(set: &[u16], lists: &Lists, limit: usize) -> bool {
 /// The most distinct responses any of `guesses` gives on `set`.
 fn max_branching(set: &[u16], lists: &Lists, guesses: &[usize]) -> usize {
     let mut k = 0;
-    let mut seen = [[0u64; 4]; 256];
-    for chunk in guesses.chunks(256) {
-        let seen = &mut seen[..chunk.len()];
-        seen.fill([0; 4]);
-        for &c in set {
-            let column = lists.column(c as usize);
-            for (s, &g) in seen.iter_mut().zip(chunk) {
-                let r = column[g].0;
-                s[(r >> 6) as usize] |= 1 << (r & 63);
+    let mask_words = lists.matrix.num_responses.div_ceil(64);
+    if mask_words <= 4 {
+        let mut seen = [[0u64; 4]; 64];
+        for chunk in guesses.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 4]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen.iter() {
+                k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
             }
         }
-        for s in seen.iter() {
-            k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+    } else if mask_words <= 36 {
+        let mut seen = [[0u64; 36]; 64];
+        for chunk in guesses.chunks(64) {
+            let seen = &mut seen[..chunk.len()];
+            seen.fill([0; 36]);
+            for &c in set {
+                for (s, &g) in seen.iter_mut().zip(chunk) {
+                    let r = lists.get_cg(c as usize, g).0;
+                    s[(r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen.iter() {
+                k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+            }
+        }
+    } else {
+        let mut seen = vec![0u64; 64 * mask_words];
+        for chunk in guesses.chunks(64) {
+            let seen_chunk = &mut seen[..chunk.len() * mask_words];
+            seen_chunk.fill(0);
+            for &c in set {
+                for (j, &g) in chunk.iter().enumerate() {
+                    let r = lists.get_cg(c as usize, g).0;
+                    seen_chunk[j * mask_words + (r >> 6) as usize] |= 1 << (r & 63);
+                }
+            }
+            for s in seen_chunk.chunks_exact(mask_words) {
+                k = k.max(s.iter().map(|w| w.count_ones() as usize).sum());
+            }
         }
     }
     k
@@ -209,6 +273,8 @@ fn check_expansion(
     lists: &Lists,
     best: &HashMap<&[u16], u64>,
 ) -> Result<(), String> {
+    // The all-green response for this word length.
+    let win = lists.matrix.win_response.0;
     let n = set.len();
     let ng = lists.guesses();
     // Which guesses can matter. A bucket of size b >= 1 defaults to
@@ -217,9 +283,9 @@ fn check_expansion(
     // n + 2(n - w) - m + max(0, n - w - m k) >= that with k replaced by any
     // upper bound on k. If even that reaches `bound`, its buckets are never
     // read for the sum.
-    let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize].0));
+    let profile = SetProfile::new(set.iter().map(|&c| &lists.dict.candidates[c as usize]));
     let caps: Vec<usize> = (0..ng)
-        .map(|g| profile.max_responses(&lists.dict.guesses[g].0))
+        .map(|g| profile.max_responses(&lists.dict.guesses[g]))
         .collect();
     let k_up = caps.iter().copied().max().unwrap_or(0) as u64;
     let mut in_set = vec![false; ng];
@@ -239,18 +305,18 @@ fn check_expansion(
     // buckets m of any guess, so only buckets larger than m can contribute the
     // second term: those are kept until `k` is known.
     const CHUNK: usize = 256;
-    let mut counts = vec![0u16; CHUNK * 243];
-    let mut used: Vec<Vec<u8>> = (0..CHUNK).map(|_| Vec::new()).collect();
+    let nr = lists.matrix.num_responses;
+    let mut counts = vec![0u16; CHUNK * nr];
+    let mut used: Vec<Vec<u16>> = (0..CHUNK).map(|_| Vec::new()).collect();
     // Guesses whose base sum n + sum(2b - 1) falls short of the bound: only they
     // can need the max(0, b - k) terms, so only their large buckets are kept.
     let mut pending: Vec<(usize, u64, Vec<u16>)> = Vec::new();
     let mut k = 0;
     for chunk in summed.chunks(CHUNK) {
         for &c in set {
-            let column = lists.column(c as usize);
             for (j, &g) in chunk.iter().enumerate() {
-                let r = column[g].0;
-                let slot = &mut counts[j * 243 + r as usize];
+                let r = lists.get_cg(c as usize, g).0;
+                let slot = &mut counts[j * nr + r as usize];
                 if *slot == 0 {
                     used[j].push(r);
                 }
@@ -260,13 +326,13 @@ fn check_expansion(
         for (j, u) in used[..chunk.len()].iter_mut().enumerate() {
             let m = u.len();
             k = k.max(m);
-            let splits = m > 1 || u[0] == WIN;
+            let splits = m > 1 || u[0] == win;
             let mut sum = n as u64;
             let mut big: Vec<u16> = Vec::new();
             for &r in u.iter() {
-                let slot = &mut counts[j * 243 + r as usize];
+                let slot = &mut counts[j * nr + r as usize];
                 let b = *slot as usize;
-                if r != WIN {
+                if r != win {
                     sum += 2 * b as u64 - 1;
                     if b > m {
                         big.push(b as u16);
@@ -301,18 +367,17 @@ fn check_expansion(
         })
         .map(|(g, _, _)| g)
         .collect();
-    let mut seen_rows: HashSet<Vec<u8>> = HashSet::new();
+    let mut seen_rows: HashSet<Vec<u16>> = HashSet::new();
     for g in short {
-        let row = lists.row(g);
         // Defaults are not enough: use the claims on this guess's buckets.
-        let key: Vec<u8> = set.iter().map(|&c| row[c as usize].0).collect();
+        let key: Vec<u16> = set.iter().map(|&c| lists.get(g, c as usize).0).collect();
         if !seen_rows.insert(key) {
             continue; // identical partition, already checked
         }
-        let mut buckets: HashMap<u8, Vec<u16>> = HashMap::new();
+        let mut buckets: HashMap<u16, Vec<u16>> = HashMap::new();
         for &c in set {
-            let r = row[c as usize].0;
-            if r != WIN {
+            let r = lists.get(g, c as usize).0;
+            if r != win {
                 buckets.entry(r).or_default().push(c);
             }
         }
@@ -523,9 +588,8 @@ mod tests {
     }
 
     fn naive_branching(set: &[u16], lists: &Lists, g: usize) -> usize {
-        let row = lists.row(g);
         set.iter()
-            .map(|&c| row[c as usize].0)
+            .map(|&c| lists.get(g, c as usize).0)
             .collect::<HashSet<_>>()
             .len()
     }

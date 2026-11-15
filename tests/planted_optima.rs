@@ -43,7 +43,7 @@ fn planted_expected(inst: &Instance) -> Option<u64> {
 /// sampler favours `pivot`'s own letters so rare responses (all-yellow, four
 /// greens) still turn up.
 fn one_word_per_response(pivot: &W, alphabet: &[u8], rng: &mut Rng) -> Vec<W> {
-    let mut by_code: HashMap<u8, W> = HashMap::new();
+    let mut by_code: HashMap<u16, W> = HashMap::new();
     for _ in 0..300_000 {
         let mut w = [0u8; 5];
         for (i, slot) in w.iter_mut().enumerate() {
