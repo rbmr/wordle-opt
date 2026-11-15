@@ -9719,7 +9719,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                             *child_max_ks_ptr.add($i) = k_upper as u16;
                         }
                         let approx_tight_lb =
-                            crate::heuristic::tight_capacity_bound(p_len, k_upper, parent_max_k)
+                            crate::heuristic::bucket_capacity_bound(p_len, k_upper, parent_max_k)
                                 .max(lb);
                         unsafe {
                             *p_lbs_ptr.add($i) = approx_tight_lb;
@@ -9872,7 +9872,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                         } else if k_cand >= k_upper {
                             let k = k_upper;
                             let tight_lb =
-                                crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                                crate::heuristic::bucket_capacity_bound(p_len, k, parent_max_k);
                             let used_val = tight_lb.max(lb);
                             unsafe {
                                 *p_lbs_ptr.add($i) = used_val;
@@ -9913,7 +9913,7 @@ impl<'a, const R: usize, const M: usize, const WIN: usize, Elem: ResponseElem>
                                     *child_max_ks_ptr.add($i) = k as u16;
                                 }
                                 let tight_lb =
-                                    crate::heuristic::tight_capacity_bound(p_len, k, parent_max_k);
+                                    crate::heuristic::bucket_capacity_bound(p_len, k, parent_max_k);
                                 let used_val = tight_lb.max(lb);
                                 unsafe {
                                     *p_lbs_ptr.add($i) = used_val;
@@ -10085,7 +10085,7 @@ macro_rules! new_solver_variant {
             8 => Solver::L8(SpecializedSolver::<6561, 103, 3280, Response>::new_with_global_beta($($arg),*)),
             9 => Solver::L9(SpecializedSolver::<19683, 308, 9841, Response>::new_with_global_beta($($arg),*)),
             10 => Solver::L10(SpecializedSolver::<59049, 923, 29524, Response>::new_with_global_beta($($arg),*)),
-            _ => Solver::L5(SpecializedSolver::<243, 4, 121, u8>::new_with_global_beta($($arg),*)),
+            n => panic!("word length {n} is not supported (must be 1 to 10)"),
         }
     };
 }
@@ -10242,7 +10242,9 @@ impl<'a> Solver<'a> {
         let mut best_guess = usize::MAX;
         let mut min_expected_rem = u32::MAX;
 
-        let skip_projections = c_mask.count_ones() >= 26;
+        // Projections only cover the first 8 letters, so longer words would
+        // have guesses that differ only past position 8 merged wrongly.
+        let skip_projections = c_mask.count_ones() >= 26 || dict.word_len > 8;
         let mut seen_projections = if skip_projections {
             rustc_hash::FxHashSet::default()
         } else {
@@ -10304,9 +10306,9 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            if best_guess == usize::MAX {
-                return u32::MAX;
-            }
+            // Every candidate is also a guess and splits any set of two or
+            // more, so some guess always qualifies.
+            assert!(best_guess != usize::MAX, "no guess splits the set");
 
             let best_g_offset = best_guess * matrix.num_candidates;
             let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
@@ -10391,9 +10393,9 @@ impl<'a> Solver<'a> {
                 }
             }
 
-            if best_guess == usize::MAX {
-                return u32::MAX;
-            }
+            // Every candidate is also a guess and splits any set of two or
+            // more, so some guess always qualifies.
+            assert!(best_guess != usize::MAX, "no guess splits the set");
 
             let best_g_offset = best_guess * matrix.num_candidates;
             let best_g_ptr = unsafe { matrix_data_ptr.add(best_g_offset) };
