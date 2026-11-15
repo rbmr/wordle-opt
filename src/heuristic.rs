@@ -1245,6 +1245,17 @@ pub fn tight_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
     saturate(n as u64 + forest_bound(n as u64 - 1, root_k as u64 - 1, max_k as u64))
 }
 
+/// Lower bound on the cost of `n` candidates when no guess has more than
+/// `root_k` responses on them and no later guess more than `max_k`, whether
+/// or not the first guess is one of the candidates.
+///
+/// [`tight_capacity_bound`] alone is not enough: a first guess outside the
+/// set can be cheaper (with `n = 5` and `k = 2`, splitting 2 + 3 costs 14,
+/// while any candidate first costs 15).
+pub fn bucket_capacity_bound(n: usize, root_k: usize, max_k: usize) -> u32 {
+    tight_capacity_bound(n, root_k, max_k).min(phase2_capacity_bound(n, root_k, max_k))
+}
+
 #[cfg(test)]
 mod forest_bound_tests {
     use super::*;
@@ -1322,9 +1333,22 @@ mod forest_bound_tests {
                     // Other root: everything under root_k subtrees.
                     let phase2 = n as u64 + p[root_k][n];
                     assert!(phase2_capacity_bound(n, root_k, k) as u64 <= phase2);
+                    // Either kind of root: what a whole bucket may use.
+                    assert!(bucket_capacity_bound(n, root_k, k) as u64 <= tight.min(phase2));
                 }
             }
         }
+    }
+
+    /// A bucket's first guess need not be one of its candidates, so the
+    /// candidate-root bound alone can exceed the bucket's optimum.
+    #[test]
+    fn candidate_root_bound_is_not_a_bucket_bound() {
+        let (_, p) = exact(5, 2);
+        let best = (5 + p[1][4]).min(5 + p[2][5]);
+        assert_eq!(best, 14);
+        assert_eq!(tight_capacity_bound(5, 2, 2), 15);
+        assert!(bucket_capacity_bound(5, 2, 2) as u64 <= best);
     }
 
     #[test]

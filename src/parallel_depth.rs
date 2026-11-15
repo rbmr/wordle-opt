@@ -134,7 +134,7 @@ pub fn solve_parallel_depth2<'a>(
                             if k >= target_k {
                                 cap_lb
                             } else {
-                                crate::heuristic::tight_capacity_bound(p_len, k, max_k).max(cap_lb)
+                                crate::heuristic::bucket_capacity_bound(p_len, k, max_k).max(cap_lb)
                             }
                         }
                     };
@@ -317,7 +317,7 @@ pub fn solve_parallel_depth2<'a>(
                             if k >= target_k {
                                 cap_lb
                             } else {
-                                crate::heuristic::tight_capacity_bound(p_len, k, max_k).max(cap_lb)
+                                crate::heuristic::bucket_capacity_bound(p_len, k, max_k).max(cap_lb)
                             }
                         }
                     };
