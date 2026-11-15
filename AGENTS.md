@@ -1,5 +1,10 @@
 # Agent Instructions
 
+> **The project ended on 15 November 2026.** No further development is
+> planned, and the autonomous agent and the compute setup described below
+> have been retired. This file is kept as the record of how the work was run.
+> Do not resume that work unless the maintainer restarts the project.
+
 This file is the single, authoritative source of process rules for whoever
 (or whatever) is working on this repo autonomously. If you find guidance
 elsewhere - a comment left in an old issue, a stray note on disk, something

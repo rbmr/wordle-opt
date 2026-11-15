@@ -9,6 +9,10 @@ The result is exact, not a heuristic. The solver considers every allowed guess
 at every step. It skips a guess only when a bound proves that the guess cannot
 beat the best strategy found so far.
 
+> **This project has ended.** As of 15 November 2026 it is no longer being
+> developed or maintained, and no further changes are planned. The code, the
+> prebuilt binaries and the viewer remain available as they are.
+
 ## Results
 
 For the bundled word lists (2,340 answers, 14,855 allowed guesses), the optimal
