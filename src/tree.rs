@@ -379,12 +379,14 @@ impl ReadableTreeFile {
 
     /// Reconstructs a `Dictionary` from the embedded word lists. The lists are
     /// stored sorted, so the resulting indices are the tree's indices.
-    ///
-    /// Reconstructs a `Dictionary` from the embedded word lists. The lists are
-    /// stored sorted, so the resulting indices are the tree's indices.
     pub fn embedded_dictionary(&self) -> Result<Dictionary, PolicyError> {
         let mut expected_len = None;
         for w in self.guesses.iter().chain(self.candidates.iter()) {
+            if !(1..=10).contains(&w.len()) || !w.is_ascii() {
+                return Err(PolicyError::BadHeader(format!(
+                    "invalid word in embedded dictionary: {w:?} (words must be 1 to 10 ASCII characters)"
+                )));
+            }
             match expected_len {
                 None => expected_len = Some(w.len()),
                 Some(exp) => {

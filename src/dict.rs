@@ -62,18 +62,31 @@ impl Dictionary {
     ) -> Result<Self, String> {
         let guesses = Self::read_words(guesses_path.as_ref())?;
         let candidates = Self::read_words(candidates_path.as_ref())?;
-        if let (Some(g), Some(c)) = (guesses.first(), candidates.first())
-            && g.len() != c.len()
-        {
-            return Err(format!(
-                "mismatched word lengths: guesses in {} has {} letters, but candidates in {} has {} letters",
-                guesses_path.as_ref().display(),
-                g.len(),
-                candidates_path.as_ref().display(),
-                c.len()
-            ));
-        }
+        Self::check_same_length(
+            &guesses,
+            &guesses_path.as_ref().display().to_string(),
+            &candidates,
+            &candidates_path.as_ref().display().to_string(),
+        )?;
         Ok(Self::from_words(guesses, candidates))
+    }
+
+    /// Checks that the guesses and candidates have the same word length
+    /// ([`Dictionary::read_words`] already checks each list on its own).
+    pub fn check_same_length(
+        guesses: &[Word],
+        guesses_source: &str,
+        candidates: &[Word],
+        candidates_source: &str,
+    ) -> Result<(), String> {
+        match (guesses.first(), candidates.first()) {
+            (Some(g), Some(c)) if g.len() != c.len() => Err(format!(
+                "mismatched word lengths: the guesses in {guesses_source} have {} letters, but the candidates in {candidates_source} have {}",
+                g.len(),
+                c.len()
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// Loads a wordle dictionary from two text files, falling back to the bundled
@@ -185,9 +198,26 @@ impl Dictionary {
         for (line_no, line) in reader.lines().enumerate() {
             let line = line
                 .map_err(|e| format!("cannot read {}: line {}: {e}", p.display(), line_no + 1))?;
+            // A byte-order mark some editors write at the start of a file.
+            let line = if line_no == 0 {
+                line.trim_start_matches('\u{feff}')
+            } else {
+                &line
+            };
             let word_str = line.trim().to_lowercase();
             if word_str.is_empty() {
                 continue;
+            }
+            // Letters are compared byte by byte, so a character that takes
+            // several bytes would count as several letters and leak shared
+            // bytes as feedback the game does not give.
+            if !word_str.is_ascii() || word_str.bytes().any(|b| b.is_ascii_whitespace()) {
+                return Err(format!(
+                    "invalid word in {}: line {}: {:?} (words must be ASCII characters with no spaces)",
+                    p.display(),
+                    line_no + 1,
+                    word_str
+                ));
             }
             let len = word_str.len();
             match expected_len {
