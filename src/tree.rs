@@ -462,7 +462,10 @@ impl ReadableTreeFile {
             // builder uses so the two round-trip to identical bytes.
             let mut kids: Vec<(u16, &ReadableNode)> = Vec::with_capacity(node.children.len());
             for (k, child) in node.children.iter() {
+                // A key of the wrong length can parse to a real response:
+                // trailing `b`s add nothing to the value.
                 let r = response_from_string(k)
+                    .filter(|_| k.len() == dict.word_len)
                     .ok_or_else(|| PolicyError::Shape(format!("bad response key {k:?}")))?;
                 kids.push((r, child));
             }

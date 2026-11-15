@@ -374,3 +374,38 @@ fn unsupported_input_is_refused() {
     ]);
     assert_eq!(total_cost(&solved), 3);
 }
+
+/// A response key must have one mark per letter. Trailing `b`s add nothing
+/// to a response's value, so a longer key would otherwise read as a real one.
+#[test]
+fn response_keys_of_the_wrong_length_are_rejected() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("words.txt");
+    fs::write(&path, "cat\ncar\nbat\nbar\nrat\n").expect("write list");
+    let tree = dir.path().join("tree.json");
+    run(&[
+        "solve",
+        "--guesses",
+        path.to_str().unwrap(),
+        "--candidates",
+        path.to_str().unwrap(),
+        "--output",
+        tree.to_str().unwrap(),
+        "--no-progress",
+    ]);
+    let json = fs::read_to_string(&tree).expect("read tree");
+    let key = json
+        .split('"')
+        .find(|s| s.len() == 3 && s.bytes().all(|b| b"bgy".contains(&b)) && *s != "ggg")
+        .expect("a response key")
+        .to_string();
+    let bad = dir.path().join("bad.json");
+    fs::write(
+        &bad,
+        json.replacen(&format!("\"{key}\""), &format!("\"{key}bb\""), 1),
+    )
+    .expect("write tree");
+    let (out, text) = wordle_opt(&["validate", bad.to_str().unwrap()]);
+    assert!(!out.status.success(), "accepted key {key}bb:\n{text}");
+    assert!(text.contains("bad response key"), "{text}");
+}
