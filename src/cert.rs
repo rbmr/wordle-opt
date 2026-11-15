@@ -18,7 +18,6 @@
 use crate::certfile::{
     self, Claim, Header, RULE_ASSUMED, RULE_BASE, RULE_CAPACITY, RULE_EXPANSION, SetDef,
 };
-use crate::core::Response;
 use crate::dict::Dictionary;
 use crate::matrix::ResponseMatrix;
 use crate::policy::PolicyTree;
@@ -384,7 +383,7 @@ fn justify(
     if !expand {
         return Ok((RULE_ASSUMED, Vec::new()));
     }
-    let win = Response::WIN.0;
+    let win = matrix.win_response.0;
     let _nc = matrix.num_candidates;
     let ng = matrix.num_guesses;
     // Only guesses whose smallest possible default sum (at most `caps[g]`

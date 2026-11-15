@@ -40,9 +40,6 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-/// The all-green response.
-const WIN: u16 = Response::WIN.0;
-
 #[derive(Debug, Default)]
 pub struct Report {
     pub tree_cost: u64,
@@ -276,6 +273,8 @@ fn check_expansion(
     lists: &Lists,
     best: &HashMap<&[u16], u64>,
 ) -> Result<(), String> {
+    // The all-green response for this word length.
+    let win = lists.matrix.win_response.0;
     let n = set.len();
     let ng = lists.guesses();
     // Which guesses can matter. A bucket of size b >= 1 defaults to
@@ -327,13 +326,13 @@ fn check_expansion(
         for (j, u) in used[..chunk.len()].iter_mut().enumerate() {
             let m = u.len();
             k = k.max(m);
-            let splits = m > 1 || u[0] == WIN;
+            let splits = m > 1 || u[0] == win;
             let mut sum = n as u64;
             let mut big: Vec<u16> = Vec::new();
             for &r in u.iter() {
                 let slot = &mut counts[j * nr + r as usize];
                 let b = *slot as usize;
-                if r != WIN {
+                if r != win {
                     sum += 2 * b as u64 - 1;
                     if b > m {
                         big.push(b as u16);
@@ -378,7 +377,7 @@ fn check_expansion(
         let mut buckets: HashMap<u16, Vec<u16>> = HashMap::new();
         for &c in set {
             let r = lists.get(g, c as usize).0;
-            if r != WIN {
+            if r != win {
                 buckets.entry(r).or_default().push(c);
             }
         }
