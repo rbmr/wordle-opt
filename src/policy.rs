@@ -1671,15 +1671,15 @@ impl<'a> OptimalPolicy<'a> {
                                             core::arch::x86_64::_MM_HINT_T0,
                                         );
                                         core::arch::x86_64::_mm_prefetch(
-                                            next_ptr.add(64),
+                                            next_ptr.wrapping_add(64),
                                             core::arch::x86_64::_MM_HINT_T0,
                                         );
                                         core::arch::x86_64::_mm_prefetch(
-                                            next_ptr.add(128),
+                                            next_ptr.wrapping_add(128),
                                             core::arch::x86_64::_MM_HINT_T0,
                                         );
                                         core::arch::x86_64::_mm_prefetch(
-                                            next_ptr.add(192),
+                                            next_ptr.wrapping_add(192),
                                             core::arch::x86_64::_MM_HINT_T0,
                                         );
                                     }
